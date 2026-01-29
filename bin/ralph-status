@@ -1,0 +1,108 @@
+#!/bin/bash
+
+# ralph-status: Show task completion summary from PRD.md
+
+PRD_DIR="$HOME/.local"
+PRD_FILE="$PRD_DIR/PRD.md"
+PROGRESS_FILE="$PRD_DIR/progress.txt"
+
+echo "Ralph Status"
+echo "============"
+echo ""
+
+if [ ! -f "$PRD_FILE" ]; then
+    echo "No PRD.md found at $PRD_FILE"
+    exit 1
+fi
+
+# Check if file is empty or just contains []
+content=$(cat "$PRD_FILE")
+if [ -z "$content" ] || [ "$content" = "[]" ]; then
+    echo "PRD is empty. Run 'ralph-plan' to create tasks."
+    exit 0
+fi
+
+# Parse JSON and show status
+# Using python for reliable JSON parsing (available on macOS)
+python3 << EOF
+import json
+import sys
+
+try:
+    with open("$PRD_FILE", "r") as f:
+        tasks = json.load(f)
+except json.JSONDecodeError:
+    print("Error: PRD.md is not valid JSON")
+    sys.exit(1)
+except Exception as e:
+    print(f"Error reading PRD: {e}")
+    sys.exit(1)
+
+if not tasks:
+    print("No tasks in PRD.")
+    sys.exit(0)
+
+total = len(tasks)
+passed = sum(1 for t in tasks if t.get("passes", False))
+pending = total - passed
+
+# Group by category
+categories = {}
+for task in tasks:
+    cat = task.get("category", "uncategorized")
+    if cat not in categories:
+        categories[cat] = {"passed": 0, "pending": 0}
+    if task.get("passes", False):
+        categories[cat]["passed"] += 1
+    else:
+        categories[cat]["pending"] += 1
+
+print(f"Total Tasks: {total}")
+print(f"  Completed: {passed}")
+print(f"  Pending:   {pending}")
+print(f"  Progress:  {passed}/{total} ({100*passed//total if total > 0 else 0}%)")
+
+# Show in-progress tasks
+import os
+active_file = os.path.expanduser("~/.local/ralph-active.json")
+try:
+    with open(active_file, "r") as f:
+        active = json.load(f)
+    if active:
+        print(f"\nIn Progress: {len(active)} task(s)")
+        for task in active:
+            desc = task.get('description', 'Unknown')[:50]
+            started = task.get('started', '?')
+            sandbox = task.get('sandbox', '?')
+            pid = task.get('pid', '?')
+            print(f"  • {desc}...")
+            print(f"    Started: {started} | PID: {pid} | Sandbox: {sandbox}")
+    else:
+        print(f"\nIn Progress: 0 task(s)")
+except FileNotFoundError:
+    print(f"\nIn Progress: 0 task(s)")
+except Exception:
+    pass
+
+print("")
+print("By Category:")
+for cat, counts in sorted(categories.items()):
+    cat_total = counts["passed"] + counts["pending"]
+    print(f"  {cat}: {counts['passed']}/{cat_total}")
+
+print("")
+print("Pending Tasks:")
+for i, task in enumerate(tasks, 1):
+    if not task.get("passes", False):
+        desc = task.get("description", "No description")[:60]
+        cat = task.get("category", "?")
+        print(f"  [{cat}] {desc}...")
+EOF
+
+# Show recent progress
+if [ -f "$PROGRESS_FILE" ] && [ -s "$PROGRESS_FILE" ]; then
+    echo ""
+    echo "Recent Progress (last 5 entries):"
+    echo "---"
+    tail -n 20 "$PROGRESS_FILE" | head -n 20
+fi

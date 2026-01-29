@@ -1,0 +1,87 @@
+#!/bin/bash
+
+# ralph-once: Run a single task implementation locally
+# Good for testing the process before going AFK
+
+PRD_DIR="$HOME/.local"
+PRD_FILE="$PRD_DIR/PRD.md"
+PROGRESS_FILE="$PRD_DIR/progress.txt"
+
+# Active task tracking
+ACTIVE_FILE="$HOME/.local/ralph-active.json"
+WORKSPACE="$(pwd)"
+SANDBOX_NAME="local-$(basename "$WORKSPACE")"
+
+# Initialize active file if needed
+if [ ! -f "$ACTIVE_FILE" ]; then
+    echo "[]" > "$ACTIVE_FILE"
+fi
+
+# Function: Add task to active list
+add_active_task() {
+    local description="$1"
+    local entry=$(python3 -c "
+import json, sys
+from datetime import datetime
+entry = {
+    'description': sys.argv[1],
+    'started': datetime.now().isoformat(),
+    'pid': $$,
+    'sandbox': '$SANDBOX_NAME'
+}
+print(json.dumps(entry))
+" "$description")
+
+    python3 -c "
+import json
+with open('$ACTIVE_FILE', 'r') as f:
+    active = json.load(f)
+active.append($entry)
+with open('$ACTIVE_FILE', 'w') as f:
+    json.dump(active, f, indent=2)
+"
+}
+
+# Function: Remove task from active list
+remove_active_task() {
+    python3 -c "
+import json
+with open('$ACTIVE_FILE', 'r') as f:
+    active = json.load(f)
+active = [t for t in active if t.get('pid') != $$]
+with open('$ACTIVE_FILE', 'w') as f:
+    json.dump(active, f, indent=2)
+"
+}
+
+# Function: Get next pending task description
+get_next_task() {
+    python3 -c "
+import json
+with open('$PRD_FILE', 'r') as f:
+    tasks = json.load(f)
+for t in tasks:
+    if not t.get('passes', False):
+        print(t.get('description', 'Unknown task'))
+        break
+"
+}
+
+# Clean up on exit (remove active task)
+trap remove_active_task EXIT
+
+# Track the current task as active
+CURRENT_TASK=$(get_next_task)
+add_active_task "$CURRENT_TASK"
+
+claude --permission-mode acceptEdits "$PRD_FILE $PROGRESS_FILE \
+1. Read the PRD and progress file. \
+2. Load the frontend design skill and vercel react best practises skill. \
+3. Find the next incomplete task and implement it. \
+4. Commit your changes without co-authoring. \
+5. Update progress.txt with what you did. \
+6. Update PRD.md with what the task as passed, if completed successfully. \
+ONLY DO ONE TASK AT A TIME."
+
+# Remove active task after completion
+remove_active_task

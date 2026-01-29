@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# ralph-plan: Interactive planning session with Claude
+# Runs LOCALLY (not in sandbox) for interactive PRD creation
+
+PRD_DIR="$HOME/.local"
+PRD_FILE="$PRD_DIR/PRD.md"
+PROGRESS_FILE="$PRD_DIR/progress.txt"
+
+claude --permission-mode plan "$PRD_FILE $PROGRESS_FILE \
+We are about to plan a set of technical features. \
+I will give you the input of what the tasks are. \
+Ask me as many questions as needed to clarify the approach as you plan.\
+
+Load the frontend design skill and vercel react best practises skill now for planning the implementation. Also write in the plan that the implementation agent must load these skills too. \
+
+You must always append accepted plan as small individual tasks to the PRD.md file. Each task contains steps to complete it. \
+
+Each item must involve steps checking the results (at minimum linting / tsc / npm test). \
+
+If Figma design URLs are included, you will need to add the exact Figma URLs to the PRD so that future agents know which nodes these refer too.
+
+The format for the PRD JSON items is as follows. The text is an example: \
+[                                                                        \
+  {                                                                      \
+    \"category\": \"functional\",                                        \
+    \"description\": \"New chat button creates a fresh conversation\",   \
+    \"steps\": [                                                         \
+      \"Click the 'New Chat' button\",                                   \
+      \"Verify a new conversation is created\",                          \
+      \"Check that chat area shows welcome state\"                       \
+    ],                                                                   \
+    \"passes\": false                                                    \
+  },                                                                     \
+  ...add your next items...                                              \
+]
+
+We are in plan mode so that I can provide you the tasks to plan. Please await my input. \
+After we have finished planning you should write the PRD.md file and exit. We don't want to continue to implement the plan.
+"

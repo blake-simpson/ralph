@@ -1,0 +1,171 @@
+#!/bin/bash
+set -e
+
+# ralph-afk: Run multiple task iterations in Docker sandbox
+# Usage: ralph-afk <iterations>
+
+if [ -z "$1" ]; then
+    echo "Usage: ralph-afk <iterations>"
+    echo ""
+    echo "Runs Claude in Docker sandbox for the specified number of iterations."
+    echo "Each iteration implements one task from the PRD."
+    exit 1
+fi
+
+# Host paths for PRD files
+HOST_PRD_FILE="$HOME/.local/PRD.md"
+HOST_PROGRESS_FILE="$HOME/.local/progress.txt"
+CONFIG_FILE="$HOME/.ralph/config"
+
+# Load config if it exists
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+# Export FIGMA_TOKEN if set (docker sandbox inherits environment)
+if [ -n "$FIGMA_TOKEN" ]; then
+    export FIGMA_TOKEN
+fi
+
+WORKSPACE="$(pwd)"
+SANDBOX_NAME="claude-$(basename "$WORKSPACE")"
+
+# Active task tracking
+ACTIVE_FILE="$HOME/.local/ralph-active.json"
+
+# Initialize active file if needed
+if [ ! -f "$ACTIVE_FILE" ]; then
+    echo "[]" > "$ACTIVE_FILE"
+fi
+
+# Function: Add task to active list
+add_active_task() {
+    local description="$1"
+    local entry=$(python3 -c "
+import json, sys
+from datetime import datetime
+entry = {
+    'description': sys.argv[1],
+    'started': datetime.now().isoformat(),
+    'pid': $$,
+    'sandbox': '$SANDBOX_NAME'
+}
+print(json.dumps(entry))
+" "$description")
+
+    python3 -c "
+import json
+with open('$ACTIVE_FILE', 'r') as f:
+    active = json.load(f)
+active.append($entry)
+with open('$ACTIVE_FILE', 'w') as f:
+    json.dump(active, f, indent=2)
+"
+}
+
+# Function: Remove task from active list
+remove_active_task() {
+    python3 -c "
+import json
+with open('$ACTIVE_FILE', 'r') as f:
+    active = json.load(f)
+active = [t for t in active if t.get('pid') != $$]
+with open('$ACTIVE_FILE', 'w') as f:
+    json.dump(active, f, indent=2)
+"
+}
+
+# Function: Get next pending task description
+get_next_task() {
+    python3 -c "
+import json
+with open('$HOST_PRD_FILE', 'r') as f:
+    tasks = json.load(f)
+for t in tasks:
+    if not t.get('passes', False):
+        print(t.get('description', 'Unknown task'))
+        break
+"
+}
+
+# Clean up on exit (remove active task)
+trap remove_active_task EXIT
+
+# Check sandbox exists
+if ! docker sandbox ls 2>/dev/null | grep -q "^$SANDBOX_NAME "; then
+    echo "Error: Sandbox '$SANDBOX_NAME' not found."
+    echo "Run 'ralph-init' first to set up the Docker sandbox."
+    exit 1
+fi
+
+for ((i=1; i<=$1; i++)); do
+    echo "=== Iteration $i of $1 ==="
+    say --voice Zarvox "Iteration $i of $1" 2>/dev/null || true
+
+    # Track the current task as active
+    CURRENT_TASK=$(get_next_task)
+    add_active_task "$CURRENT_TASK"
+
+    # Read current PRD and progress content
+    PRD_CONTENT=$(cat "$HOST_PRD_FILE")
+    PROGRESS_CONTENT=$(cat "$HOST_PROGRESS_FILE")
+
+    # Run Claude using sandbox name (no workspace path for existing sandbox)
+    result=$(docker sandbox run \
+        "$SANDBOX_NAME" -- --permission-mode acceptEdits -p "
+=== PRD.md ===
+$PRD_CONTENT
+=== END PRD.md ===
+
+=== progress.txt ===
+$PROGRESS_CONTENT
+=== END progress.txt ===
+
+Instructions:
+1. Find the highest-priority incomplete task from the PRD above and implement it.
+2. Load the frontend design skill and vercel react best practises skill.
+3. Run your type checks and validate (npm run lint:fix, tsc, npm run build, etc.).
+4. Commit your changes without co-authoring.
+5. ONLY WORK ON A SINGLE TASK.
+
+After completing the task, output your updates in this EXACT format:
+
+<prd-output>
+[paste the COMPLETE updated PRD JSON here, with the completed task's passes field set to true]
+</prd-output>
+
+<progress-output>
+[your progress entry for this task]
+</progress-output>
+
+If ALL tasks in the PRD are complete (all have passes: true), output:
+<promise>COMPLETE</promise>
+")
+
+    echo "$result"
+
+    # Remove the active task after Claude completes
+    remove_active_task
+
+    # Extract and save PRD update (using sed for multiline)
+    prd_update=$(echo "$result" | sed -n '/<prd-output>/,/<\/prd-output>/p' | sed '1d;$d')
+    if [ -n "$prd_update" ]; then
+        echo "$prd_update" > "$HOST_PRD_FILE"
+    fi
+
+    # Extract and append progress update (using sed for multiline)
+    progress_update=$(echo "$result" | sed -n '/<progress-output>/,/<\/progress-output>/p' | sed '1d;$d')
+    if [ -n "$progress_update" ]; then
+        echo "$progress_update" >> "$HOST_PROGRESS_FILE"
+    fi
+
+    if [[ "$result" == *"<promise>COMPLETE</promise>"* ]]; then
+        echo "PRD complete after $i iterations."
+        say --voice Zarvox "PRD complete" 2>/dev/null || true
+        exit 0
+    fi
+done
+
+echo ""
+echo "Completed $1 iterations."
+say --voice Zarvox "All iterations complete" 2>/dev/null || true

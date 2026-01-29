@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+
+# ralph-init: Initialize Docker sandbox for this project
+# Run once per project before using ralph-afk
+
+WORKSPACE="$(pwd)"
+SANDBOX_NAME="claude-$(basename "$WORKSPACE")"
+
+echo "Initializing Docker sandbox for: $WORKSPACE"
+echo "Sandbox name: $SANDBOX_NAME"
+echo ""
+
+# Check if sandbox already exists
+if docker sandbox ls 2>/dev/null | grep -q "^$SANDBOX_NAME "; then
+    echo "Sandbox '$SANDBOX_NAME' already exists."
+    echo "Run 'docker sandbox rm $SANDBOX_NAME' to recreate it."
+    exit 0
+fi
+
+# Create and start sandbox (will prompt for login)
+echo "Creating sandbox and starting Claude..."
+echo "Please run /login when Claude starts, then exit."
+echo ""
+docker sandbox run claude "$WORKSPACE"
+
+echo ""
+echo "Sandbox initialized! You can now use 'ralph-afk'."

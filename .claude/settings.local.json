@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(ls:*)",
+      "Bash(docker sandbox run -v \"$HOME/.local:/prd\" claude -p \"List the contents of /prd directory using ls -la /prd and show me what files are there. Just run ls and exit.\")",
+      "Bash(docker sandbox:*)",
+      "Bash(./bin/ralph-afk:*)"
+    ]
+  }
+}

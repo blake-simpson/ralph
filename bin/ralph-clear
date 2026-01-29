@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# ralph-clear: Reset PRD.md and progress.txt to start fresh
+
+PRD_DIR="$HOME/.local"
+PRD_FILE="$PRD_DIR/PRD.md"
+PROGRESS_FILE="$PRD_DIR/progress.txt"
+
+echo "Clearing Ralph state files..."
+
+# Clear PRD.md with empty JSON array
+echo "[]" > "$PRD_FILE"
+echo "  Cleared: $PRD_FILE"
+
+# Clear progress.txt
+> "$PROGRESS_FILE"
+echo "  Cleared: $PROGRESS_FILE"
+
+echo ""
+echo "Done! Ready to start a new project cycle."
+echo "Run 'ralph-plan' to create your PRD."
