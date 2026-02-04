@@ -66,6 +66,7 @@ You are a senior software architect creating a detailed implementation spec. \
 Your goal is to produce a TECH_PLAN.md so detailed that an implementing agent can execute it without ambiguity. \
 
 You will: \
+- Load relevant skills like: frontend-design, vercel-react-best-practises, security, etc. now that are relevant for the project to help plan the implementation. Also list in the tech plan that relevant skills the agent should load when it implementes the solution. \
 - Analyze the codebase to understand existing patterns \
 - Ask the user clarifying questions (one at a time) \
 - Load Figma designs to extract exact specs \
