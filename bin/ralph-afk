@@ -33,8 +33,9 @@ if [ -z "$ITERATIONS" ]; then
 fi
 
 # Host paths for PRD files
-HOST_PRD_FILE="$HOME/.local/PRD.md"
-HOST_PROGRESS_FILE="$HOME/.local/PROGRESS.md"
+HOST_PRD_FILE="$HOME/.local/ralph/PRD.md"
+HOST_PROGRESS_FILE="$HOME/.local/ralph/PROGRESS.md"
+HOST_TECH_PLAN_FILE="$HOME/.local/ralph/TECH_PLAN.md"
 CONFIG_FILE="$HOME/.ralph/config"
 
 # Load config if it exists
@@ -51,9 +52,10 @@ WORKSPACE="$(pwd)"
 SANDBOX_NAME="claude-$(basename "$WORKSPACE")"
 
 # Active task tracking
-ACTIVE_FILE="$HOME/.local/ralph-active.json"
+ACTIVE_FILE="$HOME/.local/ralph/ralph-active.json"
 
-# Initialize active file if needed
+# Ensure directory exists and initialize active file if needed
+mkdir -p "$HOME/.local/ralph"
 if [ ! -f "$ACTIVE_FILE" ]; then
     echo "[]" > "$ACTIVE_FILE"
 fi
@@ -155,9 +157,23 @@ for ((i=1; i<=$ITERATIONS; i++)); do
     CURRENT_TASK=$(get_next_task)
     add_active_task "$CURRENT_TASK"
 
-    # Read current PRD and progress content
+    # Read current PRD, progress, and tech plan content
     PRD_CONTENT=$(cat "$HOST_PRD_FILE")
     PROGRESS_CONTENT=$(cat "$HOST_PROGRESS_FILE")
+    TECH_PLAN_CONTENT=""
+    if [ -f "$HOST_TECH_PLAN_FILE" ]; then
+        TECH_PLAN_CONTENT=$(cat "$HOST_TECH_PLAN_FILE")
+    fi
+
+    # Build tech plan section for prompt
+    TECH_PLAN_SECTION=""
+    if [ -n "$TECH_PLAN_CONTENT" ]; then
+        TECH_PLAN_SECTION="
+=== TECH_PLAN.md ===
+$TECH_PLAN_CONTENT
+=== END TECH_PLAN.md ===
+"
+    fi
 
     # Run Claude using sandbox name (no workspace path for existing sandbox)
     result=$(docker sandbox run \
@@ -169,15 +185,18 @@ $PRD_CONTENT
 === PROGRESS.md ===
 $PROGRESS_CONTENT
 === END PROGRESS.md ===
-
+$TECH_PLAN_SECTION
 Instructions:
 1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-1:, ### P1-1:, etc. - P0 is highest priority).
 2. A task is incomplete if it does NOT have ✅ or [DONE] in its header. Skip tasks marked with 🚫 BLOCKED.
-3. Take the current task, read the PRD, load skills, load all Figma, and create a dedicated implementation plan including pixel perfect design.
-4. Implement the task following the implementation plan exactly.
-5. Run your type checks and validate (npm run lint:fix, tsc, etc.) and fix any issues.
-4. Verify task (playwright, npm run test, npm run build, etc.). Fix any problems now.
-5. Commit your changes without co-authoring.
+3. Launch a sub-agent to:
+    - Read the PRD and TECH_PLAN.md (if provided). The tech plan contains architecture decisions, code patterns, and implementation guidelines you MUST follow.
+    - Load skills, load all Figma designs, and create a dedicated implementation plan including pixel perfect design.
+    - Implement the task following the implementation plan and tech plan guidelines exactly.
+    - Run your type checks and validate (npm run lint:fix, tsc, etc.) and fix any issues.
+    - Verify task (playwright, npm run test, npm run build, etc.). Fix any problems now.
+    - At all times the sub-agent MUST consider the escape hatch protocol and report blocked if it is unable to continue.
+4. Commit your changes without co-authoring.
 
 ONLY WORK ON A SINGLE TASK!
 

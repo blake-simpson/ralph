@@ -2,9 +2,13 @@
 
 # ralph-clear: Reset PRD.md and PROGRESS.md to start fresh
 
-PRD_DIR="$HOME/.local"
+PRD_DIR="$HOME/.local/ralph"
 PRD_FILE="$PRD_DIR/PRD.md"
 PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
+
+# Create directory if it doesn't exist
+mkdir -p "$PRD_DIR"
 
 echo "Clearing Ralph state files..."
 
@@ -89,7 +93,7 @@ cat > "$PROGRESS_FILE" << 'EOF'
 ## Status: 🔴 Not Started
 
 ## PRD Reference
-~/.local/PRD.md
+~/.local/ralph/PRD.md
 
 ## Milestones
 
@@ -112,6 +116,12 @@ cat > "$PROGRESS_FILE" << 'EOF'
 [Any blocking issues]
 EOF
 echo "  Cleared: $PROGRESS_FILE"
+
+# Remove TECH_PLAN.md if it exists
+if [ -f "$TECH_PLAN_FILE" ]; then
+    rm "$TECH_PLAN_FILE"
+    echo "  Removed: $TECH_PLAN_FILE"
+fi
 
 echo ""
 echo "Done! Ready to start a new project cycle."

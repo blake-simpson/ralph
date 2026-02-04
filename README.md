@@ -70,6 +70,31 @@ cd ~/your-project
 ralph-plan
 ```
 
+### `ralph-tech-plan`
+Creates a detailed implementation specification. Runs **locally** with interactive Q&A.
+
+- Requires an existing PRD (run `ralph-plan` first)
+- Acts as a senior architect planning the entire implementation
+- Loads Figma designs and extracts exact design tokens (colors, spacing, typography)
+- Produces concrete file structures, component skeletons, and API types
+- Maps PRD tasks to specific code sections
+- The tech plan is automatically loaded by `ralph-afk` and `ralph-once`
+
+```bash
+ralph-tech-plan
+```
+
+**What it produces:**
+- Exact file structure with paths and descriptions
+- Design tokens extracted from Figma (hex colors, px values, font specs)
+- Component specifications with TypeScript interfaces and skeleton code
+- API integration details with types and function signatures
+- List of existing components to reuse
+- State management approach
+- Verification checklist per component
+- Edge cases and error handling
+- Implementation order mapped to PRD tasks
+
 ### `ralph-once`
 Run a single task implementation locally. Good for testing before going AFK.
 
@@ -88,7 +113,7 @@ Run multiple iterations in Docker sandbox. The main AFK mode.
 - Runs in project-specific Docker sandbox (`claude-<project-name>`)
 - Each iteration implements one task from PRD.md
 - Stops early if all tasks complete or a task is blocked
-- Tracks active tasks in `~/.local/ralph-active.json`
+- Tracks active tasks in `~/.local/ralph/ralph-active.json`
 
 ```bash
 ralph-afk 10           # Run up to 10 iterations
@@ -191,8 +216,9 @@ The Figma token is:
 2. **Initialize** sandbox (once per project): `ralph-init`
 3. **Clear** previous state: `ralph-clear`
 4. **Plan** interactively: `ralph-plan`
-5. **Test** locally: `ralph-once`
-6. **Go AFK**: `ralph-afk 20`
+5. **Technical review** (optional but recommended): `ralph-tech-plan`
+6. **Test** locally: `ralph-once`
+7. **Go AFK**: `ralph-afk 20`
 
 ### Typical Session
 
@@ -209,6 +235,10 @@ ralph-clear
 # Interactive planning - Claude asks questions, you provide requirements
 ralph-plan
 # ... describe your features, provide Figma URLs, etc.
+
+# Technical review - Claude challenges and refines the plan
+ralph-tech-plan
+# ... discuss architecture, security, performance, edge cases
 
 # Check what was planned
 ralph-status
@@ -229,10 +259,11 @@ ralph-afk 15
 While AFK mode is running (or after):
 
 ```bash
-ralph-status              # Quick summary with task states
-cat ~/.local/PRD.md       # Full PRD with task details
-cat ~/.local/PROGRESS.md  # Session history and decisions
-git log --oneline -10     # See commits
+ralph-status                    # Quick summary with task states
+cat ~/.local/ralph/PRD.md       # Full PRD with task details
+cat ~/.local/ralph/PROGRESS.md  # Session history and decisions
+cat ~/.local/ralph/TECH_PLAN.md # Technical guidelines (if created)
+git log --oneline -10           # See commits
 ```
 
 ## Directory Structure
@@ -242,6 +273,7 @@ git log --oneline -10     # See commits
 ├── bin/
 │   ├── ralph-init
 │   ├── ralph-plan
+│   ├── ralph-tech-plan
 │   ├── ralph-once
 │   ├── ralph-afk
 │   ├── ralph-clear
@@ -251,13 +283,15 @@ git log --oneline -10     # See commits
 └── README.md
 
 ~/.local/
-├── PRD.md              # Task definitions (markdown)
-├── PROGRESS.md         # Session history and status
-├── ralph-active.json   # Currently running tasks
-└── bin/
-    ├── ralph-plan -> /Users/blake/code/sandbox/ralph/bin/ralph-plan
-    ├── ralph-once -> ...
-    └── ...
+├── bin/
+│   ├── ralph-plan -> /Users/blake/code/sandbox/ralph/bin/ralph-plan
+│   ├── ralph-once -> ...
+│   └── ...
+└── ralph/
+    ├── PRD.md              # Task definitions (markdown)
+    ├── PROGRESS.md         # Session history and status
+    ├── TECH_PLAN.md        # Technical guidelines (optional)
+    └── ralph-active.json   # Currently running tasks
 
 ~/.ralph/
 └── config              # FIGMA_TOKEN and other settings
@@ -360,7 +394,7 @@ WebSocket-based real-time sync with optimistic UI updates.
 ## Status: 🟡 In Progress
 
 ## PRD Reference
-~/.local/PRD.md
+~/.local/ralph/PRD.md
 
 ## Milestones
 
@@ -392,6 +426,243 @@ WebSocket-based real-time sync with optimistic UI updates.
 ## Blockers
 - P1-2: Figma file access revoked, need new link from design team
 ```
+
+## TECH_PLAN.md Format
+
+The technical plan is a detailed implementation spec with exact code:
+
+```markdown
+# Technical Plan: Chat Application Redesign
+
+## Overview
+Real-time chat with WebSocket sync, message history, and file attachments.
+
+## PRD Task Mapping
+| Code Section | Relevant PRD Tasks | Priority |
+|--------------|-------------------|----------|
+| src/lib/socket.ts | P0-1 | CRITICAL |
+| src/components/chat/MessageList.tsx | P1-1, P1-2 | HIGH |
+| src/components/chat/MessageInput.tsx | P1-3 | HIGH |
+| src/hooks/useSocket.ts | P0-1, P1-4 | CRITICAL |
+
+---
+
+## File Structure
+
+\`\`\`
+src/
+├── app/
+│   └── chat/
+│       └── [roomId]/
+│           └── page.tsx          # Chat room page (Tasks: P0-1)
+├── components/
+│   └── chat/
+│       ├── MessageList.tsx       # Virtual scrolling list (Tasks: P1-1, P1-2)
+│       ├── MessageBubble.tsx     # Single message (Tasks: P1-2)
+│       ├── MessageInput.tsx      # Input with attachments (Tasks: P1-3)
+│       ├── TypingIndicator.tsx   # "User is typing..." (Tasks: P2-1)
+│       └── index.ts              # Barrel export
+├── lib/
+│   └── chat/
+│       ├── socket.ts             # Socket.io client (Tasks: P0-1)
+│       ├── types.ts              # TypeScript types
+│       └── api.ts                # REST endpoints (Tasks: P0-2)
+└── hooks/
+    └── useSocket.ts              # WebSocket hook (Tasks: P0-1)
+\`\`\`
+
+---
+
+## Design Tokens (from Figma node 1234:5678)
+
+\`\`\`typescript
+// src/lib/chat/tokens.ts
+export const chatTokens = {
+  colors: {
+    bubbleSent: '#6366F1',
+    bubbleReceived: '#27272A',
+    background: '#09090B',
+    text: '#FAFAFA',
+    textMuted: '#71717A',
+    border: '#27272A',
+  },
+  spacing: {
+    messageGap: '8px',
+    bubblePadding: '12px 16px',
+    inputHeight: '48px',
+  },
+  typography: {
+    message: {
+      fontSize: '14px',
+      lineHeight: '20px',
+      fontWeight: 400,
+    },
+    timestamp: {
+      fontSize: '11px',
+      lineHeight: '16px',
+      fontWeight: 400,
+    },
+  },
+  borderRadius: {
+    bubble: '16px',
+    bubbleTail: '4px',
+    input: '24px',
+  },
+};
+\`\`\`
+
+---
+
+## Component Specifications
+
+### MessageBubble.tsx
+**PRD Tasks**: P1-2
+**Figma Node**: 1234:5680
+**Reuses**: Avatar from src/components/ui
+
+\`\`\`typescript
+// src/components/chat/MessageBubble.tsx
+interface MessageBubbleProps {
+  message: Message;
+  isOwn: boolean;
+  showAvatar: boolean;
+}
+
+export function MessageBubble({ message, isOwn, showAvatar }: MessageBubbleProps) {
+  return (
+    <div className={cn(
+      "flex gap-2 max-w-[70%]",
+      isOwn ? "ml-auto flex-row-reverse" : "mr-auto"
+    )}>
+      {showAvatar && <Avatar src={message.sender.avatar} size="sm" />}
+      <div className={cn(
+        "px-4 py-3 rounded-2xl",
+        isOwn 
+          ? "bg-[#6366F1] text-white rounded-br-sm" 
+          : "bg-[#27272A] text-[#FAFAFA] rounded-bl-sm"
+      )}>
+        <p className="text-sm leading-5">{message.content}</p>
+        <span className="text-[11px] text-white/60 mt-1 block">
+          {formatTime(message.createdAt)}
+        </span>
+      </div>
+    </div>
+  );
+}
+\`\`\`
+
+**States**:
+- Default: As shown above
+- With attachment: Show thumbnail + filename below content
+- Failed to send: Red border + retry icon
+
+---
+
+## API Integration
+
+### Endpoints
+| Endpoint | Method | Purpose | Tasks |
+|----------|--------|---------|-------|
+| /api/chat/rooms/:id/messages | GET | Fetch history | P0-2 |
+| /api/chat/rooms/:id/messages | POST | Send message | P1-3 |
+
+### Types
+
+\`\`\`typescript
+// src/lib/chat/types.ts
+export interface Message {
+  id: string;
+  roomId: string;
+  content: string;
+  sender: {
+    id: string;
+    name: string;
+    avatar: string;
+  };
+  attachments?: Attachment[];
+  createdAt: string;
+  status: 'sending' | 'sent' | 'failed';
+}
+
+export interface Attachment {
+  id: string;
+  type: 'image' | 'file';
+  url: string;
+  name: string;
+  size: number;
+}
+\`\`\`
+
+---
+
+## Existing Components to Reuse
+
+| Component | Location | Usage |
+|-----------|----------|-------|
+| Avatar | src/components/ui/Avatar | User avatars |
+| Skeleton | src/components/ui/Skeleton | Loading state |
+| IconButton | src/components/ui/IconButton | Send, attach buttons |
+| Toast | src/components/ui/Toast | Error notifications |
+
+---
+
+## Verification Checklist
+
+### Per-Component
+- [ ] Matches Figma pixel-perfect (overlay comparison)
+- [ ] Responsive: works 320px to 1440px
+- [ ] Keyboard accessible (Tab, Enter, Escape)
+- [ ] Loading skeleton matches final layout
+- [ ] Error state shows retry option
+
+### Integration
+- [ ] Messages sync in <500ms
+- [ ] Optimistic updates feel instant
+- [ ] Reconnects automatically after disconnect
+- [ ] No memory leaks (check React DevTools)
+
+### Commands
+\`\`\`bash
+npm run lint:fix
+npx tsc --noEmit
+npm run test -- --coverage
+npm run build
+\`\`\`
+
+---
+
+## Edge Cases
+
+| Scenario | Handling |
+|----------|----------|
+| Empty room | Show "Start the conversation" prompt |
+| 1000+ messages | Virtual scrolling, load 50 at a time |
+| Very long message | Word-wrap, no horizontal scroll |
+| Image fails to load | Show placeholder + "Failed to load" |
+| Offline | Queue sends, show "Waiting for connection" |
+
+---
+
+## Implementation Order
+
+1. **P0-1**: Socket connection + useSocket hook
+2. **P0-2**: REST API types and functions  
+3. **P1-1**: MessageList with virtual scrolling
+4. **P1-2**: MessageBubble component
+5. **P1-3**: MessageInput with send functionality
+6. **P2-1**: Typing indicators
+7. **P2-2**: File attachments
+
+---
+
+## Notes for Implementing Agent
+
+- Run `npm run lint:fix` after every file edit
+- Check Figma node 1234:5678 for any design questions
+- Follow patterns in src/components/ui/Button.tsx
+- Commit after completing each PRD task
+- Use existing `useAuth()` hook for current user
+\`\`\`
 
 ## Troubleshooting
 
@@ -430,7 +701,7 @@ If `ralph-configure-mcp` or `ralph-afk` fails with "Invalid API key" or "Please 
 ### Task blocked unexpectedly
 If a task gets marked as 🚫 BLOCKED:
 1. Check `ralph-status` for blocker details
-2. Review `~/.local/PROGRESS.md` Blockers section
+2. Review `~/.local/ralph/PROGRESS.md` Blockers section
 3. Fix the issue (e.g., update Figma URL, add missing context)
 4. Remove the 🚫 BLOCKED marker from the task header in PRD.md
 5. Resume with `ralph-afk` or `ralph-once`

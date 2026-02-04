@@ -44,6 +44,7 @@ fi
 # List of scripts to symlink
 SCRIPTS=(
     "ralph-plan"
+    "ralph-tech-plan"
     "ralph-once"
     "ralph-afk"
     "ralph-init"

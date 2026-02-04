@@ -3,16 +3,18 @@
 # ralph-once: Run a single task implementation locally
 # Good for testing the process before going AFK
 
-PRD_DIR="$HOME/.local"
+PRD_DIR="$HOME/.local/ralph"
 PRD_FILE="$PRD_DIR/PRD.md"
 PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
 
 # Active task tracking
-ACTIVE_FILE="$HOME/.local/ralph-active.json"
+ACTIVE_FILE="$HOME/.local/ralph/ralph-active.json"
 WORKSPACE="$(pwd)"
 SANDBOX_NAME="local-$(basename "$WORKSPACE")"
 
-# Initialize active file if needed
+# Ensure directory exists and initialize active file if needed
+mkdir -p "$PRD_DIR"
 if [ ! -f "$ACTIVE_FILE" ]; then
     echo "[]" > "$ACTIVE_FILE"
 fi
@@ -101,14 +103,21 @@ update_status_to_in_progress
 CURRENT_TASK=$(get_next_task)
 add_active_task "$CURRENT_TASK"
 
-claude --permission-mode acceptEdits "$PRD_FILE $PROGRESS_FILE \
+# Build file list for claude
+FILES_TO_READ="$PRD_FILE $PROGRESS_FILE"
+if [ -f "$TECH_PLAN_FILE" ]; then
+    FILES_TO_READ="$FILES_TO_READ $TECH_PLAN_FILE"
+fi
+
+claude --permission-mode acceptEdits "$FILES_TO_READ \
 1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-1:, ### P1-1:, etc. - P0 is highest priority). \
 2. A task is incomplete if it does NOT have ✅ or [DONE] in its header. Skip tasks marked with 🚫 BLOCKED. \
-3. Spawn a sub-agent to read the PRD, load skills, load all Figma, and return a dedicated implementation plan including pixel perfect design. \
-4. Spawn a sub-agent to implement the task following its Implementation Details and Verification steps. \
-5. Run your type checks and validate (npm run lint:fix, tsc, npm run test, npm run build, etc.). Fix any problems now. \
-6. Commit your changes without co-authoring. \
-7. Update PRD.md marking the completed task header with ✅ (e.g., '### P0-1: Task Name ✅'). \
+3. Read the PRD and TECH_PLAN.md (if provided). The tech plan contains architecture decisions, code patterns, and implementation guidelines you MUST follow. \
+4. Load skills, load all Figma designs, and create a dedicated implementation plan including pixel perfect design. \
+5. Implement the task following the implementation plan and tech plan guidelines exactly. \
+6. Run your type checks and validate (npm run lint:fix, tsc, npm run test, npm run build, etc.). Fix any problems now. \
+7. Commit your changes without co-authoring. \
+8. Update PRD.md marking the completed task header with ✅ (e.g., '### P0-1: Task Name ✅'). \
 
 ONLY WORK ON A SINGLE TASK! \
 

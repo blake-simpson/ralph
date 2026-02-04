@@ -3,11 +3,15 @@
 # ralph-plan: Interactive planning session with Claude
 # Runs LOCALLY (not in sandbox) for interactive PRD creation
 
-PRD_DIR="$HOME/.local"
+PRD_DIR="$HOME/.local/ralph"
 PRD_FILE="$PRD_DIR/PRD.md"
 PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
 
-claude --permission-mode plan "$PRD_FILE $PROGRESS_FILE \
+# Create directory if it doesn't exist
+mkdir -p "$PRD_DIR"
+
+claude --allowedTools "Write,Read,Glob,Grep,LS,mcp__figma,mcp_atlasian,WebFetch" --disallowedTools "Bash,Edit,StrReplace" -- "$PRD_FILE $PROGRESS_FILE $TECH_PLAN_FILE \
 We are about to plan a set of technical features. \
 I will give you the input of what the tasks are. \
 Ask me as many questions as needed to clarify the approach as you plan. Continue to iteratively ask questions and refine until you are 100% concrete on your solution. Ensure all edge cases etc. are considered. Consider the product domain.  \
@@ -100,5 +104,5 @@ Progress files (PROGRESS.md) should follow this structure: \
 \`\`\` \
 
 We are in plan mode so that I can provide you the tasks to plan. Please await my input. \
-After we have finished planning you should write the PRD.md file and exit. We don't want to continue to implement the plan.
+After we have finished planning you should write the PRD.md file and exit. We DO NOT want to implement the plan now.
 "
