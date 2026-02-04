@@ -4,7 +4,7 @@
 # This file is sourced by other scripts, not run directly.
 
 RALPH_TASK_PROMPT='If any task is blocked, stop and report to the user you cannot continue. No tasks can be worked on if any are blocked.
-1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-1:, ### P1-1:, etc. - P0 is highest priority).
+1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-2-FIX:, ### P0-1:, ### P1-1:, etc. - P0 is highest priority, anything with FIX is critical).
 2. A task is incomplete if it does NOT have ✅ or [DONE] in its header. Skip tasks marked with 🚫 BLOCKED.
 3. Launch a sub-agent to:
     - Read current task, the relevant PRD info, and TECH_PLAN.md (if provided). The tech plan contains architecture decisions, code patterns, and implementation guidelines you MUST follow.
@@ -17,6 +17,9 @@ RALPH_TASK_PROMPT='If any task is blocked, stop and report to the user you canno
 5. Update .ralph/PRD.md and .ralph/PROGRESS.md marking the completed tasks with ✅ (e.g., '\''### P0-1: Task Name ✅'\'').
 
 ONLY WORK ON A SINGLE TASK!!
+
+If you discover issues with existing code, fix them if they are still within scope.
+If you discover tasks that need done that are out of scope, add the plan for them to the PRD + Progress file and mark as "FWLUP" (e.g., '\''### P0-2-FWLUP: Task Name 🔵'\'').
 
 === ESCAPE HATCH ===
 PRINCIPLE: Never guess when the cost of being wrong is high. If you lack information critical to the task, stop and block rather than guess.
