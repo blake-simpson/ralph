@@ -3,18 +3,30 @@
 # ralph-once: Run a single task implementation locally
 # Good for testing the process before going AFK
 
-PRD_DIR="$HOME/.local/ralph"
-PRD_FILE="$PRD_DIR/PRD.md"
-PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
-TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
+RALPH_DIR=".ralph"
+PRD_FILE="$RALPH_DIR/PRD.md"
+PROGRESS_FILE="$RALPH_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$RALPH_DIR/TECH_PLAN.md"
+ACTIVE_FILE="$RALPH_DIR/ralph-active.json"
 
-# Active task tracking
-ACTIVE_FILE="$HOME/.local/ralph/ralph-active.json"
 WORKSPACE="$(pwd)"
 SANDBOX_NAME="local-$(basename "$WORKSPACE")"
 
-# Ensure directory exists and initialize active file if needed
-mkdir -p "$PRD_DIR"
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the shared prompt
+source "$SCRIPT_DIR/ralph-prompt"
+
+# Check if .ralph directory exists
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "Error: No .ralph directory found."
+    echo ""
+    echo "Please run 'ralph-init' first to initialize this project."
+    exit 1
+fi
+
+# Initialize active file if needed
 if [ ! -f "$ACTIVE_FILE" ]; then
     echo "[]" > "$ACTIVE_FILE"
 fi
@@ -109,27 +121,8 @@ if [ -f "$TECH_PLAN_FILE" ]; then
     FILES_TO_READ="$FILES_TO_READ $TECH_PLAN_FILE"
 fi
 
-claude --permission-mode acceptEdits "$FILES_TO_READ \
-1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-1:, ### P1-1:, etc. - P0 is highest priority).
-2. A task is incomplete if it does NOT have ✅ or [DONE] in its header. Skip tasks marked with 🚫 BLOCKED.
-3. Launch a sub-agent to:
-    - Read current task, the relevant PRD info, and TECH_PLAN.md (if provided). The tech plan contains architecture decisions, code patterns, and implementation guidelines you MUST follow.
-    - Load skills, load all Figma designs, and create a dedicated implementation plan including pixel perfect design.
-    - Implement the task following the implementation plan and tech plan guidelines exactly.
-    - Run your type checks and validate (npm run lint:fix, tsc, etc.) and fix any issues.
-    - Verify task (playwright, npm run test, npm run build, etc.). Fix any problems now.
-    - At all times the sub-agent MUST consider the escape hatch protocol and report blocked if it is unable to continue.
-4. Commit your changes without co-authoring.
-8. Update PRD.md and PROGRESS.md marking the completed tasks with ✅ (e.g., '### P0-1: Task Name ✅'). \
-
-ONLY WORK ON A SINGLE TASK! \
-
-=== ESCAPE HATCH === \
-PRINCIPLE: Never guess when the cost of being wrong is high. If you lack information critical to the task, stop and block rather than guess. \
-HARD RULE: If Figma design URLs are specified, the design MUST load successfully. Do not proceed without loading the Figma design. \
-FOR OTHER SITUATIONS: Ask yourself - Am I guessing at something critical? Would significant work be wasted if I'm wrong? \
-When you decide to block: Mark the task header as '### P0-X: Task Name 🚫 BLOCKED' in the PRD. \
-Update PROGRESS.md status to '## Status: 🔴 BLOCKED: [reason]' and add blocker details to Blockers section."
+claude --permission-mode acceptEdits "$FILES_TO_READ
+$RALPH_TASK_PROMPT"
 
 # Remove active task after completion
 remove_active_task

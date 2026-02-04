@@ -32,11 +32,26 @@ if [ -z "$ITERATIONS" ]; then
     exit 1
 fi
 
-# Host paths for PRD files
-HOST_PRD_FILE="$HOME/.local/ralph/PRD.md"
-HOST_PROGRESS_FILE="$HOME/.local/ralph/PROGRESS.md"
-HOST_TECH_PLAN_FILE="$HOME/.local/ralph/TECH_PLAN.md"
+RALPH_DIR=".ralph"
+PRD_FILE="$RALPH_DIR/PRD.md"
+PROGRESS_FILE="$RALPH_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$RALPH_DIR/TECH_PLAN.md"
+ACTIVE_FILE="$RALPH_DIR/ralph-active.json"
 CONFIG_FILE="$HOME/.ralph/config"
+
+# Get the directory where this script lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the shared prompt
+source "$SCRIPT_DIR/ralph-prompt"
+
+# Check if .ralph directory exists
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "Error: No .ralph directory found."
+    echo ""
+    echo "Please run 'ralph-init' first to initialize this project."
+    exit 1
+fi
 
 # Load config if it exists
 if [ -f "$CONFIG_FILE" ]; then
@@ -51,11 +66,7 @@ fi
 WORKSPACE="$(pwd)"
 SANDBOX_NAME="claude-$(basename "$WORKSPACE")"
 
-# Active task tracking
-ACTIVE_FILE="$HOME/.local/ralph/ralph-active.json"
-
-# Ensure directory exists and initialize active file if needed
-mkdir -p "$HOME/.local/ralph"
+# Initialize active file if needed
 if [ ! -f "$ACTIVE_FILE" ]; then
     echo "[]" > "$ACTIVE_FILE"
 fi
@@ -101,7 +112,7 @@ with open('$ACTIVE_FILE', 'w') as f:
 get_next_task() {
     python3 -c "
 import re
-with open('$HOST_PRD_FILE', 'r') as f:
+with open('$PRD_FILE', 'r') as f:
     content = f.read()
 
 # Find task headers (### P0-1:, ### P1-1:, etc.) - prioritized by P0 > P1 > P2 > P3
@@ -124,18 +135,43 @@ for task_id, task_name in sorted(task_headers, key=lambda x: x[0]):
 "
 }
 
-# Clean up on exit (remove active task)
-trap remove_active_task EXIT
+# Function: Check if all tasks are complete
+all_tasks_complete() {
+    python3 -c "
+import re
+with open('$PRD_FILE', 'r') as f:
+    content = f.read()
+
+task_headers = re.findall(r'^###\s+(P\d+-\d+):\s*(.+?)$', content, re.MULTILINE)
+
+if not task_headers:
+    exit(1)  # No tasks found
+
+for task_id, task_name in task_headers:
+    task_section = re.search(rf'###\s+{re.escape(task_id)}:.*?(?=\n###|\n---|\Z)', content, re.DOTALL)
+    if task_section:
+        section_text = task_section.group(0)
+        is_complete = '✅' in section_text[:100] or '[DONE]' in section_text[:100] or '~~' in task_name
+        is_blocked = '🚫' in section_text[:100] or 'BLOCKED' in section_text[:100]
+        if not is_complete and not is_blocked:
+            exit(1)  # Found incomplete task
+
+exit(0)  # All tasks complete or blocked
+"
+}
 
 # Function: Update status to In Progress if currently Not Started
 update_status_to_in_progress() {
-    if [ -f "$HOST_PROGRESS_FILE" ]; then
-        if grep -q "^## Status: 🔴 Not Started" "$HOST_PROGRESS_FILE"; then
-            sed -i '' 's/^## Status: 🔴 Not Started/## Status: 🟡 In Progress/' "$HOST_PROGRESS_FILE"
+    if [ -f "$PROGRESS_FILE" ]; then
+        if grep -q "^## Status: 🔴 Not Started" "$PROGRESS_FILE"; then
+            sed -i '' 's/^## Status: 🔴 Not Started/## Status: 🟡 In Progress/' "$PROGRESS_FILE"
             echo "Status updated to 🟡 In Progress"
         fi
     fi
 }
+
+# Clean up on exit (remove active task)
+trap remove_active_task EXIT
 
 # Check sandbox exists
 if ! docker sandbox ls 2>/dev/null | grep -q "^$SANDBOX_NAME "; then
@@ -147,166 +183,56 @@ fi
 # Update status before starting work
 update_status_to_in_progress
 
+# Build file list for prompt
+FILES_TO_READ="$PRD_FILE $PROGRESS_FILE"
+if [ -f "$TECH_PLAN_FILE" ]; then
+    FILES_TO_READ="$FILES_TO_READ $TECH_PLAN_FILE"
+fi
+
 for ((i=1; i<=$ITERATIONS; i++)); do
     echo "=== Iteration $i of $ITERATIONS ==="
     if [ "$LOUD" = true ]; then
         say --voice Zarvox "Iteration $i of $ITERATIONS" 2>/dev/null || true
     fi
 
+    # Check if all tasks are complete before starting
+    if all_tasks_complete; then
+        echo "All tasks complete!"
+        if [ "$LOUD" = true ]; then
+            say --voice Zarvox "All tasks complete" 2>/dev/null || true
+        fi
+        exit 0
+    fi
+
     # Track the current task as active
     CURRENT_TASK=$(get_next_task)
+    if [ -z "$CURRENT_TASK" ]; then
+        echo "No more tasks to work on."
+        exit 0
+    fi
+    
     add_active_task "$CURRENT_TASK"
+    echo "Working on: $CURRENT_TASK"
 
-    # Read current PRD, progress, and tech plan content
-    PRD_CONTENT=$(cat "$HOST_PRD_FILE")
-    PROGRESS_CONTENT=$(cat "$HOST_PROGRESS_FILE")
-    TECH_PLAN_CONTENT=""
-    if [ -f "$HOST_TECH_PLAN_FILE" ]; then
-        TECH_PLAN_CONTENT=$(cat "$HOST_TECH_PLAN_FILE")
-    fi
-
-    # Build tech plan section for prompt
-    TECH_PLAN_SECTION=""
-    if [ -n "$TECH_PLAN_CONTENT" ]; then
-        TECH_PLAN_SECTION="
-=== TECH_PLAN.md ===
-$TECH_PLAN_CONTENT
-=== END TECH_PLAN.md ===
-"
-    fi
-
-    # Run Claude using sandbox name (no workspace path for existing sandbox)
-    result=$(docker sandbox run \
-        "$SANDBOX_NAME" -- --permission-mode acceptEdits -p "
-=== PRD.md ===
-$PRD_CONTENT
-=== END PRD.md ===
-
-=== PROGRESS.md ===
-$PROGRESS_CONTENT
-=== END PROGRESS.md ===
-$TECH_PLAN_SECTION
-Instructions:
-1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-1:, ### P1-1:, etc. - P0 is highest priority).
-2. A task is incomplete if it does NOT have ✅ or [DONE] in its header. Skip tasks marked with 🚫 BLOCKED.
-3. Launch a sub-agent to:
-    - Read current task, the relevant PRD info, and TECH_PLAN.md (if provided). The tech plan contains architecture decisions, code patterns, and implementation guidelines you MUST follow.
-    - Load skills, load all Figma designs, and create a dedicated implementation plan including pixel perfect design.
-    - Implement the task following the implementation plan and tech plan guidelines exactly.
-    - Run your type checks and validate (npm run lint:fix, tsc, etc.) and fix any issues.
-    - Verify task (playwright, npm run test, npm run build, etc.). Fix any problems now.
-    - At all times the sub-agent MUST consider the escape hatch protocol and report blocked if it is unable to continue.
-4. Commit your changes without co-authoring.
-
-ONLY WORK ON A SINGLE TASK!!!
-
-=== ESCAPE HATCH ===
-
-PRINCIPLE: Never guess when the cost of being wrong is high. If you lack
-information critical to the task and proceeding would produce fundamentally
-incorrect work, stop and block rather than guess.
-
-HARD RULE: If Figma design URLs are specified, the design MUST load successfully.
-Pixel-perfect implementation requires the actual design specs. Do not proceed
-without loading the Figma design.
-
-FOR OTHER SITUATIONS: Use your judgment. Ask yourself:
-- \"Am I guessing at something critical, or filling in reasonable defaults?\"
-- \"If I'm wrong, can it be easily fixed, or would significant work be wasted?\"
-- \"Is there ambiguity that the user should clarify before I proceed?\"
-
-When you decide to block, explain your reasoning so the user understands why.
-
-=== BLOCKED OUTPUT FORMAT ===
-
-If you cannot proceed, output:
-
-<promise>BLOCKED</promise>
-<blocked-details>
-  <task-id>[e.g., P0-5]</task-id>
-  <reason-category>[brief category, e.g., figma_unavailable, missing_context]</reason-category>
-  <explanation>[What went wrong, why you cannot proceed, and your reasoning for blocking]</explanation>
-  <resolution-hint>[How the user can resolve this]</resolution-hint>
-</blocked-details>
-
-<prd-output>
-[PRD with blocked task marked as '### P0-X: Task Name 🚫 BLOCKED']
-</prd-output>
-
-<progress-output>
-[PROGRESS with status '## Status: 🔴 BLOCKED: [reason]' and blocker in Blockers section]
-</progress-output>
-
-=== END ESCAPE HATCH ===
-
-After completing the task, output your updates in this EXACT format:
-
-<prd-output>
-[paste the COMPLETE updated PRD.md markdown here, with the completed task's header changed from '### P0-1: Task Name' to '### P0-1: Task Name ✅']
-[If the PRD was 🔴 Not Started, mark the PRD as 🟡 In Progress.]
-</prd-output>
-
-<progress-output>
-[paste the COMPLETE updated PROGRESS.md markdown here, with session history and decisions updated]
-</progress-output>
-
-If ALL tasks in the PRD are complete (all have ✅), output:
-<promise>COMPLETE</promise>
-")
-
-    echo "$result"
+    # Run Claude in sandbox - it will update files directly
+    docker sandbox run \
+        "$SANDBOX_NAME" -- --permission-mode acceptEdits -p "$FILES_TO_READ
+$RALPH_TASK_PROMPT"
 
     # Remove the active task after Claude completes
     remove_active_task
 
-    # Check for BLOCKED signal before processing other outputs
-    if [[ "$result" == *"<promise>BLOCKED</promise>"* ]]; then
-        # Extract blocked details
-        blocked_task_id=$(echo "$result" | sed -n '/<blocked-details>/,/<\/blocked-details>/p' | sed -n 's/.*<task-id>\(.*\)<\/task-id>.*/\1/p')
-        blocked_reason=$(echo "$result" | sed -n '/<blocked-details>/,/<\/blocked-details>/p' | sed -n 's/.*<reason-category>\(.*\)<\/reason-category>.*/\1/p')
-
+    # Check if blocked (look for BLOCKED status in progress file)
+    if grep -q "^## Status: 🔴 BLOCKED" "$PROGRESS_FILE" 2>/dev/null; then
         echo ""
-        echo "🚫 BLOCKED: Task $blocked_task_id"
-        echo "Reason: $blocked_reason"
-
+        echo "🚫 Task blocked. Check .ralph/PROGRESS.md for details."
         if [ "$LOUD" = true ]; then
-            say --voice Zarvox "Blocked on task $blocked_task_id" 2>/dev/null || true
+            say --voice Zarvox "Task blocked" 2>/dev/null || true
         fi
-
-        # Extract and save PRD update (with blocked marker)
-        prd_update=$(echo "$result" | sed -n '/<prd-output>/,/<\/prd-output>/p' | sed '1d;$d')
-        if [ -n "$prd_update" ]; then
-            echo "$prd_update" > "$HOST_PRD_FILE"
-        fi
-
-        # Extract and save progress update (with blocked status)
-        progress_update=$(echo "$result" | sed -n '/<progress-output>/,/<\/progress-output>/p' | sed '1d;$d')
-        if [ -n "$progress_update" ]; then
-            echo "$progress_update" > "$HOST_PROGRESS_FILE"
-        fi
-
         exit 2
     fi
 
-    # Extract and save PRD update (using sed for multiline)
-    prd_update=$(echo "$result" | sed -n '/<prd-output>/,/<\/prd-output>/p' | sed '1d;$d')
-    if [ -n "$prd_update" ]; then
-        echo "$prd_update" > "$HOST_PRD_FILE"
-    fi
-
-    # Extract and append progress update (using sed for multiline)
-    progress_update=$(echo "$result" | sed -n '/<progress-output>/,/<\/progress-output>/p' | sed '1d;$d')
-    if [ -n "$progress_update" ]; then
-        echo "$progress_update" > "$HOST_PROGRESS_FILE"
-    fi
-
-    if [[ "$result" == *"<promise>COMPLETE</promise>"* ]]; then
-        echo "PRD complete after $i iterations."
-        if [ "$LOUD" = true ]; then
-            say --voice Zarvox "PRD complete" 2>/dev/null || true
-        fi
-        exit 0
-    fi
+    echo ""
 done
 
 echo ""

@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# ralph-prompt: Shared prompt template for ralph-once and ralph-afk
+# This file is sourced by other scripts, not run directly.
+
+RALPH_TASK_PROMPT='1. Find the highest-priority incomplete task from the Technical Tasks section (tasks are headers like ### P0-1:, ### P1-1:, etc. - P0 is highest priority).
+2. A task is incomplete if it does NOT have ✅ or [DONE] in its header. Skip tasks marked with 🚫 BLOCKED.
+3. Launch a sub-agent to:
+    - Read current task, the relevant PRD info, and TECH_PLAN.md (if provided). The tech plan contains architecture decisions, code patterns, and implementation guidelines you MUST follow.
+    - Load skills, load all Figma designs, and create a dedicated implementation plan including pixel perfect design.
+    - Implement the task following the implementation plan and tech plan guidelines exactly.
+    - Run your type checks and validate (npm run lint:fix, tsc, etc.) and fix any issues.
+    - Verify task (playwright, npm run test, npm run build, etc.). Fix any problems now.
+    - At all times the sub-agent MUST consider the escape hatch protocol and report blocked if it is unable to continue.
+4. Commit your changes without co-authoring.
+5. Update .ralph/PRD.md and .ralph/PROGRESS.md marking the completed tasks with ✅ (e.g., '\''### P0-1: Task Name ✅'\'').
+
+ONLY WORK ON A SINGLE TASK!
+
+=== ESCAPE HATCH ===
+PRINCIPLE: Never guess when the cost of being wrong is high. If you lack information critical to the task, stop and block rather than guess.
+HARD RULE: If Figma design URLs are specified, the design MUST load successfully. Do not proceed without loading the Figma design.
+FOR OTHER SITUATIONS: Ask yourself - Am I guessing at something critical? Would significant work be wasted if I am wrong?
+When you decide to block: Mark the task header as '\''### P0-X: Task Name 🚫 BLOCKED'\'' in the PRD.
+Update .ralph/PROGRESS.md status to '\''## Status: 🔴 BLOCKED: [reason]'\'' and add blocker details to Blockers section.'

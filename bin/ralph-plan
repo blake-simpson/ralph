@@ -3,13 +3,18 @@
 # ralph-plan: Interactive planning session with Claude
 # Runs LOCALLY (not in sandbox) for interactive PRD creation
 
-PRD_DIR="$HOME/.local/ralph"
-PRD_FILE="$PRD_DIR/PRD.md"
-PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
-TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
+RALPH_DIR=".ralph"
+PRD_FILE="$RALPH_DIR/PRD.md"
+PROGRESS_FILE="$RALPH_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$RALPH_DIR/TECH_PLAN.md"
 
-# Create directory if it doesn't exist
-mkdir -p "$PRD_DIR"
+# Check if .ralph directory exists
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "Error: No .ralph directory found."
+    echo ""
+    echo "Please run 'ralph-init' first to initialize this project."
+    exit 1
+fi
 
 claude --allowedTools "Write,Read,Glob,Grep,LS,mcp__figma,mcp_atlasian,WebFetch" --disallowedTools "Bash,Edit,StrReplace" -- "$PRD_FILE $PROGRESS_FILE $TECH_PLAN_FILE \
 We are about to plan a set of technical features. \
@@ -77,7 +82,7 @@ Progress files (PROGRESS.md) should follow this structure: \
 ## Status: [🔴 Not Started | 🟡 In Progress | ✅ Complete] \
  
 ## PRD Reference \
-[Link or path to PRD] \
+.ralph/PRD.md \
  
 ## Milestones \
  

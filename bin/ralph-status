@@ -2,18 +2,25 @@
 
 # ralph-status: Show task completion summary from PRD.md (markdown format)
 
-PRD_DIR="$HOME/.local/ralph"
-PRD_FILE="$PRD_DIR/PRD.md"
-PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
-TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
-ACTIVE_FILE="$PRD_DIR/ralph-active.json"
+RALPH_DIR=".ralph"
+PRD_FILE="$RALPH_DIR/PRD.md"
+PROGRESS_FILE="$RALPH_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$RALPH_DIR/TECH_PLAN.md"
+ACTIVE_FILE="$RALPH_DIR/ralph-active.json"
 
 echo "Ralph Status"
 echo "============"
 echo ""
 
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "No .ralph directory found."
+    echo "Run 'ralph-init' to initialize this project."
+    exit 1
+fi
+
 if [ ! -f "$PRD_FILE" ]; then
     echo "No PRD.md found at $PRD_FILE"
+    echo "Run 'ralph-plan' to create tasks."
     exit 1
 fi
 
@@ -34,10 +41,11 @@ import json
 YELLOW = "\033[33m"
 RESET = "\033[0m"
 
-prd_file = os.path.expanduser("~/.local/ralph/PRD.md")
-progress_file = os.path.expanduser("~/.local/ralph/PROGRESS.md")
-tech_plan_file = os.path.expanduser("~/.local/ralph/TECH_PLAN.md")
-active_file = os.path.expanduser("~/.local/ralph/ralph-active.json")
+ralph_dir = ".ralph"
+prd_file = os.path.join(ralph_dir, "PRD.md")
+progress_file = os.path.join(ralph_dir, "PROGRESS.md")
+tech_plan_file = os.path.join(ralph_dir, "TECH_PLAN.md")
+active_file = os.path.join(ralph_dir, "ralph-active.json")
 
 try:
     with open(prd_file, "r") as f:

@@ -4,10 +4,18 @@
 # Examines the PRD from an engineering perspective
 # Runs LOCALLY (not in sandbox) for interactive technical planning
 
-PRD_DIR="$HOME/.local/ralph"
-PRD_FILE="$PRD_DIR/PRD.md"
-PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
-TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
+RALPH_DIR=".ralph"
+PRD_FILE="$RALPH_DIR/PRD.md"
+PROGRESS_FILE="$RALPH_DIR/PROGRESS.md"
+TECH_PLAN_FILE="$RALPH_DIR/TECH_PLAN.md"
+
+# Check if .ralph directory exists
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "Error: No .ralph directory found."
+    echo ""
+    echo "Please run 'ralph-init' first to initialize this project."
+    exit 1
+fi
 
 # Check if PRD exists and has content
 if [ ! -f "$PRD_FILE" ]; then
@@ -36,8 +44,9 @@ claude --allowedTools "Write,Read,Glob,Grep,LS,mcp__figma,WebFetch" --disallowed
 1. This is ONLY a planning session. Do NOT implement anything. \
 2. Do NOT create or edit any source code files (no .tsx, .ts, .css, etc.). \
 3. Ask AT LEAST 3-5 clarifying questions before writing the plan. \
-4. When done asking questions, write ONLY ONE FILE: ~/.local/ralph/TECH_PLAN.md \
-5. After writing the tech plan, say 'Tech plan complete.' and STOP. Do not implement. \
+4. When done asking questions, write your plan to: .ralph/TECH_PLAN.md \
+5. If new steps/tasks were discovered, ensure the PRD.md and PROGRESS.md files are updated with the new tasks. \
+6. After writing the tech plan, say 'Tech plan complete.' and STOP. Do not implement. \
 
 FORBIDDEN ACTIONS: \
 - Creating component files \
@@ -91,12 +100,12 @@ Include these exact values in the tech plan. \
 
 === WHEN READY TO WRITE === \
 
-Tell the user: 'I have enough information. I will now write the technical plan to ~/.local/ralph/TECH_PLAN.md' \
+Tell the user: 'I have enough information. I will now write the technical plan to .ralph/TECH_PLAN.md' \
 Then write the file and EXIT. Do NOT start implementing. \
 
 === TECH_PLAN.md FORMAT === \
 
-Write to ~/.local/ralph/TECH_PLAN.md with this structure: \
+Write to .ralph/TECH_PLAN.md with this structure: \
 
 \`\`\`markdown \
 # Technical Plan: [Feature Name] \

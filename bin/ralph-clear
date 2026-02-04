@@ -1,19 +1,20 @@
 #!/bin/bash
 
-# ralph-clear: Reset PRD.md and PROGRESS.md to start fresh
+# ralph-clear: Reset .ralph directory to start fresh
 
-PRD_DIR="$HOME/.local/ralph"
-PRD_FILE="$PRD_DIR/PRD.md"
-PROGRESS_FILE="$PRD_DIR/PROGRESS.md"
-TECH_PLAN_FILE="$PRD_DIR/TECH_PLAN.md"
+RALPH_DIR=".ralph"
 
-# Create directory if it doesn't exist
-mkdir -p "$PRD_DIR"
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "No .ralph directory found. Nothing to clear."
+    echo ""
+    echo "Run 'ralph-init' to initialize a new project."
+    exit 0
+fi
 
 echo "Clearing Ralph state files..."
 
 # Clear PRD.md with empty markdown template
-cat > "$PRD_FILE" << 'EOF'
+cat > "$RALPH_DIR/PRD.md" << 'EOF'
 # PRD: [Feature Name]
 
 ## Overview
@@ -84,16 +85,16 @@ Before implementing ANY task:
 3. Follow the verification steps exactly
 4. Mark task complete by adding ✅ to the header
 EOF
-echo "  Cleared: $PRD_FILE"
+echo "  Cleared: $RALPH_DIR/PRD.md"
 
 # Clear PROGRESS.md with empty markdown template
-cat > "$PROGRESS_FILE" << 'EOF'
+cat > "$RALPH_DIR/PROGRESS.md" << 'EOF'
 # Progress: [Feature Name]
 
 ## Status: 🔴 Not Started
 
 ## PRD Reference
-~/.local/ralph/PRD.md
+.ralph/PRD.md
 
 ## Milestones
 
@@ -115,13 +116,17 @@ cat > "$PROGRESS_FILE" << 'EOF'
 ## Blockers
 [Any blocking issues]
 EOF
-echo "  Cleared: $PROGRESS_FILE"
+echo "  Cleared: $RALPH_DIR/PROGRESS.md"
 
 # Remove TECH_PLAN.md if it exists
-if [ -f "$TECH_PLAN_FILE" ]; then
-    rm "$TECH_PLAN_FILE"
-    echo "  Removed: $TECH_PLAN_FILE"
+if [ -f "$RALPH_DIR/TECH_PLAN.md" ]; then
+    rm "$RALPH_DIR/TECH_PLAN.md"
+    echo "  Removed: $RALPH_DIR/TECH_PLAN.md"
 fi
+
+# Reset active tasks
+echo "[]" > "$RALPH_DIR/ralph-active.json"
+echo "  Cleared: $RALPH_DIR/ralph-active.json"
 
 echo ""
 echo "Done! Ready to start a new project cycle."

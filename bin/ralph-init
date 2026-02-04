@@ -1,28 +1,190 @@
 #!/bin/bash
 set -e
 
-# ralph-init: Initialize Docker sandbox for this project
+# ralph-init: Initialize Docker sandbox and local .ralph directory for this project
 # Run once per project before using ralph-afk
 
 WORKSPACE="$(pwd)"
 SANDBOX_NAME="claude-$(basename "$WORKSPACE")"
+RALPH_DIR=".ralph"
 
-echo "Initializing Docker sandbox for: $WORKSPACE"
+echo "Initializing Ralph for: $WORKSPACE"
 echo "Sandbox name: $SANDBOX_NAME"
 echo ""
 
-# Check if sandbox already exists
+# --- Step 1: Create .ralph directory with empty state files ---
+if [ -d "$RALPH_DIR" ]; then
+    echo "Directory '$RALPH_DIR' already exists."
+    read -p "Clear and reinitialize? [y/N] " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm -rf "$RALPH_DIR"
+    else
+        echo "Keeping existing .ralph directory."
+    fi
+fi
+
+if [ ! -d "$RALPH_DIR" ]; then
+    echo "Creating .ralph directory..."
+    mkdir -p "$RALPH_DIR"
+    
+    # Create empty PRD.md
+    cat > "$RALPH_DIR/PRD.md" << 'EOF'
+# PRD: [Feature Name]
+
+## Overview
+[1-2 sentence description]
+
+## Problem Statement
+[What problem does this solve?]
+
+## Success Criteria (Definition of Done)
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+
+## Acceptance Criteria (BDD)
+
+### Scenario: [Scenario Name]
+Given [context]
+And [more context]
+When [action]
+Then [expected result]
+And [additional assertions]
+
+## Technical Approach
+[High-level implementation strategy]
+
+## Out of Scope
+[What this feature explicitly does NOT include]
+
+## Open Questions
+[Questions that need answers before implementation]
+
+## Clarifications
+[Answers to open questions, added during planning]
+
+---
+
+## Technical Tasks
+
+### P0-1: [Task Name]
+**Severity**: CRITICAL
+**File**: [file path]
+
+**Problem**: [What's wrong]
+
+**Solution**: [How to fix]
+
+**Verification**:
+1. `npm run lint:fix`
+2. `npx tsc --noEmit`
+3. [Additional verification steps]
+
+---
+
+## Summary Statistics
+
+| Severity | Count | Status |
+|----------|-------|--------|
+| CRITICAL (P0) | 0 | Pending |
+| HIGH (P1) | 0 | Pending |
+| MEDIUM (P2) | 0 | Pending |
+| **Total** | **0** | |
+
+## Agent Instructions
+
+Before implementing ANY task:
+1. Load skills: `frontend-design`, `vercel-react-best-practices`, `vibesec`
+2. Read the full task description including Implementation Details
+3. Follow the verification steps exactly
+4. Mark task complete by adding ✅ to the header
+EOF
+
+    # Create empty PROGRESS.md
+    cat > "$RALPH_DIR/PROGRESS.md" << 'EOF'
+# Progress: [Feature Name]
+
+## Status: 🔴 Not Started
+
+## PRD Reference
+.ralph/PRD.md
+
+## Milestones
+
+### ⬜ M1: [Milestone Name]
+- [ ] Task 1
+- [ ] Task 2
+
+## Definition of Done Checklist
+- [ ] DoD Item 1
+- [ ] DoD Item 2
+
+## Session History
+| Session | Date | Context Used | Tasks Completed |
+|---------|------|--------------|-----------------|
+
+## Decisions Log
+[Numbered list of key decisions with rationale]
+
+## Blockers
+[Any blocking issues]
+EOF
+
+    # Create empty active tasks file
+    echo "[]" > "$RALPH_DIR/ralph-active.json"
+    
+    echo "  Created: $RALPH_DIR/PRD.md"
+    echo "  Created: $RALPH_DIR/PROGRESS.md"
+    echo "  Created: $RALPH_DIR/ralph-active.json"
+fi
+
+# --- Step 2: Add .ralph to .gitignore if needed ---
+GITIGNORE=".gitignore"
+
+if [ -f "$GITIGNORE" ]; then
+    if grep -q "^\.ralph/?$" "$GITIGNORE" || grep -q "^\.ralph$" "$GITIGNORE"; then
+        echo ""
+        echo ".ralph is already in .gitignore"
+    else
+        echo ""
+        read -p "Add .ralph to .gitignore? [Y/n] " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            echo "" >> "$GITIGNORE"
+            echo "# Ralph local state" >> "$GITIGNORE"
+            echo ".ralph/" >> "$GITIGNORE"
+            echo "Added .ralph/ to .gitignore"
+        fi
+    fi
+else
+    echo ""
+    read -p "Create .gitignore with .ralph entry? [Y/n] " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        echo "# Ralph local state" > "$GITIGNORE"
+        echo ".ralph/" >> "$GITIGNORE"
+        echo "Created .gitignore with .ralph/ entry"
+    fi
+fi
+
+# --- Step 3: Create Docker sandbox ---
+echo ""
 if docker sandbox ls 2>/dev/null | grep -q "^$SANDBOX_NAME "; then
     echo "Sandbox '$SANDBOX_NAME' already exists."
     echo "Run 'docker sandbox rm $SANDBOX_NAME' to recreate it."
-    exit 0
+else
+    echo "Creating sandbox and starting Claude..."
+    echo "Please run /login when Claude starts, then exit."
+    echo ""
+    docker sandbox run claude "$WORKSPACE"
 fi
 
-# Create and start sandbox (will prompt for login)
-echo "Creating sandbox and starting Claude..."
-echo "Please run /login when Claude starts, then exit."
 echo ""
-docker sandbox run claude "$WORKSPACE"
-
-echo ""
-echo "Sandbox initialized! You can now use 'ralph-afk'."
+echo "Ralph initialized! You can now use:"
+echo "  ralph-plan      - Create/update PRD interactively"
+echo "  ralph-tech-plan - Create technical implementation plan"
+echo "  ralph-once      - Run a single task locally"
+echo "  ralph-afk <n>   - Run n tasks in docker sandbox"
+echo "  ralph-status    - View progress"
+echo "  ralph-clear     - Reset .ralph for fresh start"
