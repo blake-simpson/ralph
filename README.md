@@ -1,193 +1,356 @@
-# Ralph CLI Toolkit
+# Belmont AI
 
-A CLI toolkit for running autonomous coding sessions with Claude. Ralph manages a PRD (Product Requirements Document), orchestrates specialized sub-agents, and tracks progress across multiple implementation iterations.
+A toolkit for running structured coding sessions with AI coding agents. Belmont manages a PRD (Product Requirements Document), orchestrates specialized sub-agent phases, and tracks progress across milestones.
 
-Based on the original work by Matt Pocock: [https://www.aihero.dev/getting-started-with-ralph](https://www.aihero.dev/getting-started-with-ralph)
+**Agent-agnostic** -- works with Claude Code, Cursor, Windsurf, Gemini, GitHub Copilot, and any tool that can read markdown files. No Docker required. No loops. Just skills and agents.
+
+A flexible PRD system has been used to provide the best level of context from plan to implementation. Tech plans allow you to specify specifics for the agent to follow while building.
+
+Strong guardrails are in place to keep the agent focused and on task.
+
+**Figma-first design workflow** -- Belmont is built heavily around understanding Figma designs. The design-agent extracts exact tokens (colors, typography, spacing), maps them to your design system, and produces implementation-ready component specs. The verification-agent compares your implementation against the Figma source using Playwright headless screenshots. For the best experience, install [figma-mcp](https://github.com/nichochar/figma-mcp) so Belmont can load and analyze your designs automatically.
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+- [Supported Tools](#supported-tools)
+- [Skills Reference](#skills-reference)
+- [Full Workflow](#full-workflow)
+- [Directory Structure](#directory-structure)
+- [PRD & Progress Format](#prd--progress-format)
+- [Agent Pipeline Details](#agent-pipeline-details)
+- [Updating Belmont](#updating-belmont)
+- [Troubleshooting](#troubleshooting)
+
+---
 
 ## Quick Start
 
 ```bash
-# One-time setup
-cd /path/to/ralph
-./bin/ralph-setup
+# One-time: make belmont-install available globally
+cd /path/to/belmont
+./bin/install.sh
 
-# Start a new project
+# Per-project: install into your project
 cd ~/your-project
-ralph-init               # Initialize .ralph directory and Docker sandbox
-ralph-clear              # Reset PRD and progress
-ralph-plan               # Create PRD interactively with Claude
-ralph-tech-plan          # Create technical implementation plan
-ralph-once               # Test one task locally
-ralph-afk 10             # Run 10 iterations in Docker sandbox
+belmont-install
 ```
 
-## Architecture
+The installer detects which AI tools you have (Claude Code, Cursor, Windsurf, etc.) and installs skills to `.agents/skills/belmont/`, then creates symlinks from each tool's native directory. Agents are installed to `.agents/belmont/`.
 
-Ralph uses a multi-agent pipeline to implement tasks. The orchestrator coordinates specialized sub-agents that each handle a specific part of the workflow.
+Then use the skills in your AI tool of choice. For example, in Claude Code:
 
-### Agent Pipeline
+```
+/belmont:product-plan
+/belmont:implement
+/belmont:next
+/belmont:status
+```
 
-#### Phase 1 - Sequential Execution
+---
 
-| Order | Agent | Model | Purpose |
-|-------|-------|-------|---------|
-| 1 | prd-agent | Sonnet | Analyze task from PRD/TECH_PLAN |
-| 2 | codebase-agent | Sonnet | Scan codebase for patterns and context |
-| 3 | design-agent | Opus | Analyze Figma designs, extract UI specs |
-| 4 | implementation-agent | Opus | Implement the task, write tests, commit |
+## How It Works
 
-#### Phase 2 - Parallel Execution
+Belmont breaks coding work into **phases**, each driven by a specialized agent. The user interacts through **skills** (markdown files loaded as slash commands or rules) that orchestrate these agents.
 
-| Agent | Model | Purpose |
-|-------|-------|---------|
-| verification-agent | Sonnet | Verify implementation meets requirements |
-| code-review-agent | Sonnet | Review code quality and PRD alignment |
+```
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐
+│  Plan        │ ──▶ │  Tech Plan    │ ──▶ │  Implement   │
+│  (PRD.md)    │     │ (TECH_PLAN)  │     │  (milestone) │
+└─────────────┘     └──────────────┘     └──────┬───────┘
+                                                │
+                         ┌──────────────────────┤
+                         ▼                      ▼
+                   ┌───────────┐         ┌────────────┐
+                   │  Verify    │         │  Status     │
+                   │ (parallel) │         │ (read-only) │
+                   └───────────┘         └────────────┘
+                         │
+                         ▼
+                   ┌───────────┐
+                   │  Next      │  (single task, lightweight)
+                   └───────────┘
+```
 
-The **ralph-orchestrator** (Opus) coordinates all agents, manages the PRD/PROGRESS files, and handles blockers.
+### Implementation Pipeline
 
-### Agent Responsibilities
+When you run the implement skill, each task goes through 4 sequential phases:
 
-- **prd-agent**: Reads the PRD and TECH_PLAN, extracts the current task, and produces a focused summary for downstream agents
-- **codebase-agent**: Scans the codebase to find existing patterns, utilities, and conventions relevant to the task
-- **design-agent**: Loads Figma designs (if provided), extracts design tokens, and produces implementation-ready component code
-- **implementation-agent**: Implements the task using all previous agent outputs, writes tests, runs verification, and commits
-- **verification-agent**: Verifies the implementation meets acceptance criteria, runs build/tests, checks visual fidelity
-- **code-review-agent**: Reviews code quality, pattern adherence, and PRD alignment
+| Phase              | Agent                  | What It Does                                                                            |
+|--------------------|------------------------|-----------------------------------------------------------------------------------------|
+| 1. Task Analysis   | `prd-agent`            | Reads the PRD and TECH_PLAN, extracts focused context for the current task              |
+| 2. Codebase Scan   | `codebase-agent`       | Scans the codebase for existing patterns, utilities, conventions, and CLAUDE.md rules   |
+| 3. Design Analysis | `design-agent`         | Loads Figma designs (if provided), extracts tokens, produces component specifications   |
+| 4. Implementation  | `implementation-agent` | Implements the task, writes tests, runs verification (tsc, lint, build), commits to git |
+
+### Verification Pipeline
+
+When you run the verify skill, two agents run **in parallel**:
+
+| Agent                | What It Does                                                                           |
+|----------------------|----------------------------------------------------------------------------------------|
+| `verification-agent` | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys |
+| `core-review-agent`  | Runs `npm run build`, `npm run test`, reviews code quality and PRD alignment           |
+
+Any issues found become follow-up tasks added to the PRD and PROGRESS files.
+
+---
 
 ## Installation
 
-Run the setup script:
+### Step 1: Global Setup (once)
+
+Clone the belmont repo and run the installer:
 
 ```bash
-cd /path/to/ralph
-./bin/ralph-setup
+cd /path/to/belmont
+./bin/install.sh
 ```
 
-This will:
-1. Create `~/.local/bin` directory (if needed)
-2. Create symlinks for all ralph commands
-3. Create `~/.ralph/` config directory
-4. Optionally configure your Figma token
-
-Make sure `~/.local/bin` is in your PATH:
+This creates a `belmont-install` symlink in `~/.local/bin/`. Make sure it's in your PATH:
 
 ```bash
+# Add to ~/.zshrc or ~/.bashrc
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Add this line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence.
+### Step 2: Per-Project Install
 
-## Commands
-
-### `ralph-init`
-Initialize a Docker sandbox and `.ralph` directory for the current project. Run once per project.
-
-- Creates `.ralph/` directory with PRD.md, PROGRESS.md templates
-- Creates a sandbox named `claude-<project-folder-name>`
-- Prompts you to log in to Claude inside the sandbox
-- Optionally adds `.ralph/` to `.gitignore`
+Navigate to your project and run:
 
 ```bash
 cd ~/your-project
-ralph-init
+belmont-install
 ```
 
-### `ralph-plan`
-Interactive planning session with Claude. Runs **locally** (not in sandbox) for interactive PRD creation.
+The installer will:
 
-- Uses `--permission-mode plan` for safe exploration
-- Guides you through defining tasks with iterative Q&A
-- Creates structured markdown PRD with prioritized tasks (P0, P1, P2, P3)
-- Includes Figma URLs, acceptance criteria, and verification steps
-
-```bash
-cd ~/your-project
-ralph-plan
-```
-
-### `ralph-tech-plan`
-Creates a detailed implementation specification. Runs **locally** with interactive Q&A.
-
-- Requires an existing PRD (run `ralph-plan` first)
-- Acts as a senior architect planning the entire implementation
-- Loads Figma designs and extracts exact design tokens (colors, spacing, typography)
-- Produces concrete file structures, component skeletons, and API types
-- Maps PRD tasks to specific code sections
-- The tech plan is automatically loaded by `ralph-afk` and `ralph-once`
-
-```bash
-ralph-tech-plan
-```
-
-**What it produces:**
-- PRD task mapping to code sections
-- Exact file structure with paths and descriptions
-- Design tokens extracted from Figma (hex colors, px values, font specs)
-- Component specifications with TypeScript interfaces and skeleton code
-- API integration details with types and function signatures
-- List of existing components to reuse
-- State management approach
-- Verification checklist per component
-- Edge cases and error handling
-- Implementation order mapped to PRD tasks
-
-### `ralph-once`
-Run a single task implementation locally. Good for testing before going AFK.
-
-- Uses `--permission-mode acceptEdits`
-- Triggers the full agent pipeline for one task
-- Implements highest priority incomplete task from PRD.md
-- Updates PRD.md marking task complete with ✅
-- Updates PROGRESS.md with session history
-
-```bash
-ralph-once
-```
-
-### `ralph-afk <iterations> [--loud]`
-Run multiple iterations in Docker sandbox. The main AFK mode.
-
-- Runs in project-specific Docker sandbox (`claude-<project-name>`)
-- Each iteration triggers the full agent pipeline for one task
-- Stops early if all tasks complete or a task is blocked
-- Tracks active tasks in `.ralph/ralph-active.json`
-
-```bash
-ralph-afk 10           # Run up to 10 iterations
-ralph-afk 50 --loud    # Run with voice announcements
-```
-
-**Options:**
-- `--loud` - Enable voice announcements (macOS `say` command)
-
-**Exit codes:**
-- `0` - All tasks completed successfully
-- `2` - Blocked on a task (Figma unavailable, missing context, etc.)
-
-### `ralph-clear`
-Reset PRD.md and PROGRESS.md to start fresh with template structure.
-
-```bash
-ralph-clear
-```
-
-### `ralph-status`
-Show task completion summary without invoking Claude.
-
-```bash
-ralph-status
-```
+1. **Scan for AI tools** -- detects `.claude/`, `.cursor/`, `.windsurf/`, `.gemini/`, `.github/`
+2. **Ask which to install for** -- all detected, a specific one, or skip
+3. **Sync agents** to `.agents/belmont/` (shared, tool-agnostic)
+4. **Sync skills** to `.agents/skills/belmont/` (canonical location, shared across tools)
+5. **Create symlinks** from each selected tool's native directory into `.agents/skills/belmont/`
+6. **Clean stale files** -- if a skill was renamed or removed in source, the old file is deleted from the target
+7. **Create `.belmont/`** directory with PRD.md and PROGRESS.md templates (if they don't exist)
+8. **Offer to update `.gitignore`** for the `.belmont/` state directory
 
 Example output:
+
 ```
-Ralph Status
-============
+Belmont Project Setup
+=====================
+
+Project: /Users/you/projects/my-app
+
+Detected AI tools:
+  [1] Claude Code (.claude/)
+  [2] Cursor (.cursor/)
+
+Install skills for:
+  [a] All detected tools
+  [1] Claude Code (.claude/) only
+  [2] Cursor (.cursor/) only
+  [s] Skip (install agents only)
+
+Choice [a]: a
+
+Installing agents to .agents/belmont/...
+  + prd-agent.md
+  + codebase-agent.md
+  + design-agent.md
+  + implementation-agent.md
+  + verification-agent.md
+  + core-review-agent.md
+
+Installing skills to .agents/skills/belmont/...
+  + product-plan.md
+  + tech-plan.md
+  + implement.md
+  + next.md
+  + verify.md
+  + status.md
+
+Linking Claude Code...
+  + .claude/commands/belmont -> ../../.agents/skills/belmont
+
+Linking Cursor...
+  + .cursor/rules/belmont/product-plan.mdc -> ../../../.agents/skills/belmont/product-plan.md
+  + .cursor/rules/belmont/tech-plan.mdc -> ../../../.agents/skills/belmont/tech-plan.md
+  + .cursor/rules/belmont/implement.mdc -> ../../../.agents/skills/belmont/implement.md
+  + .cursor/rules/belmont/next.mdc -> ../../../.agents/skills/belmont/next.md
+  + .cursor/rules/belmont/verify.mdc -> ../../../.agents/skills/belmont/verify.md
+  + .cursor/rules/belmont/status.mdc -> ../../../.agents/skills/belmont/status.md
+
+  + .belmont/PRD.md
+  + .belmont/PROGRESS.md
+
+Belmont installed!
+```
+
+If no AI tool directories are found, the installer asks which tool you want to set up and creates the directory for you.
+
+---
+
+## Supported Tools
+
+Agents and skills are always installed to `.agents/` -- the single source of truth shared across all tools.
+
+Each AI tool gets a **symlink** from its native directory into `.agents/skills/belmont/`:
+
+| Tool               | Symlink                       | Target                          | How to Use                                                            |
+|--------------------|-------------------------------|---------------------------------|-----------------------------------------------------------------------|
+| **Claude Code**    | `.claude/commands/belmont`    | `→ .agents/skills/belmont`      | Slash commands: `/belmont:product-plan`, `/belmont:implement`, etc.   |
+| **Cursor**         | `.cursor/rules/belmont/*.mdc` | `→ .agents/skills/belmont/*.md` | Toggle rules in Settings > Rules, or reference in Composer/Agent mode |
+| **Windsurf**       | `.windsurf/rules/belmont`     | `→ .agents/skills/belmont`      | Reference rules in Cascade                                            |
+| **Gemini**         | `.gemini/rules/belmont`       | `→ .agents/skills/belmont`      | Reference rules in Gemini                                             |
+| **GitHub Copilot** | `.github/belmont`             | `→ .agents/skills/belmont`      | Reference files in Copilot Chat                                       |
+| **Any other tool** | *(none)*                      | `.agents/skills/belmont/`       | Point your tool at the skill files directly                           |
+
+Cursor requires `.mdc` extension, so individual file symlinks are created (e.g. `implement.mdc → implement.md`). All other tools use a directory symlink.
+
+### Claude Code Usage
+
+Skills become native slash commands:
+
+```
+/belmont:product-plan   Interactive PRD creation
+/belmont:tech-plan      Technical implementation plan
+/belmont:implement      Implement next milestone (full pipeline)
+/belmont:next           Implement next single task (lightweight)
+/belmont:verify         Run verification and code review
+/belmont:status         View progress
+/belmont:reset          Reset state and start fresh
+```
+
+### Cursor Usage
+
+Skills are installed as rules (`.mdc` files). To use them:
+
+1. Open **Settings > Cursor Settings > Rules**
+2. You'll see the belmont rules listed (product-plan, tech-plan, implement, next, verify, status)
+3. Enable the one you want to activate
+4. Start a Composer or Agent session -- the rule will be loaded as context
+5. Or reference them directly: *"Follow the belmont implement workflow"*
+
+In the **Cursor Agent CLI**, you can reference the skill files directly:
+
+```bash
+cursor agent --rules .cursor/rules/belmont/implement.mdc
+```
+
+### Generic / Other Tools
+
+If your tool isn't auto-detected, the agent and skill files are still plain markdown. Point your tool at:
+
+- **Skills**: Read from `.agents/belmont/` (or wherever you've placed them)
+- **Agents**: `.agents/belmont/prd-agent.md`, `codebase-agent.md`, etc.
+- **State**: `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`
+
+You can paste the skill content directly into a chat or configure your tool to load it as system context.
+
+---
+
+## Skills Reference
+
+### `product-plan`
+
+Interactive planning session. Creates the PRD and PROGRESS files.
+
+- Asks clarifying questions one at a time until the plan is concrete
+- Creates structured PRD with prioritized tasks (P0-P3)
+- Organizes tasks into milestones in PROGRESS.md
+- Includes Figma URLs, acceptance criteria, verification steps
+- Does NOT implement anything -- plan mode only
+
+**Output**: `.belmont/PRD.md`, `.belmont/PROGRESS.md`
+
+### `tech-plan`
+
+Technical planning session. Creates a detailed implementation specification.
+
+- Requires an existing PRD (run plan first)
+- Acts as a senior architect reviewing and refining the plan
+- Loads Figma designs and extracts exact design tokens
+- Produces concrete file structures, component skeletons, API types
+- Maps PRD tasks to specific code sections
+- Interactive Q&A until both you and the AI are confident
+
+**Output**: `.belmont/TECH_PLAN.md`
+
+### `implement`
+
+Implements the next pending milestone from the PRD.
+
+- Reads PROGRESS.md to find the first incomplete milestone
+- For each task in that milestone, runs the 4-phase agent pipeline:
+  1. **Task Analysis** (prd-agent) -- Extract task context from PRD and TECH_PLAN
+  2. **Codebase Scan** (codebase-agent) -- Find patterns, conventions, related code
+  3. **Design Analysis** (design-agent) -- Load Figma, extract tokens, map components
+  4. **Implementation** (implementation-agent) -- Write code, tests, verify, commit
+- After each task: marks it complete in PRD.md, updates PROGRESS.md
+- After all milestone tasks: marks the milestone complete
+- Creates follow-up tasks (FWLUP) for out-of-scope issues discovered during implementation
+- Handles blockers gracefully -- marks blocked tasks and skips to the next
+
+### `next`
+
+Implements just the next single pending task — a lightweight alternative to the full implement pipeline.
+
+- Reads PROGRESS.md to find the first unchecked task in the first pending milestone
+- Skips the analysis phases (prd-agent, codebase-agent, design-agent)
+- Reads the PRD and TECH_PLAN directly to build a focused task summary
+- Dispatches the single task to the `implementation-agent` as a sub-agent
+- After the task is done: marks it complete in PRD.md and PROGRESS.md
+- If it was the last task in the milestone, marks the milestone complete
+- Creates follow-up tasks (FWLUP) for any out-of-scope issues
+
+**Best for**: Follow-up tasks from verification, small fixes, well-scoped isolated work.
+**Use `/belmont:implement` instead for**: Large tasks, first tasks in a milestone, tasks needing Figma analysis.
+
+### `verify`
+
+Runs verification and code review on all completed tasks.
+
+- Runs two agents **in parallel**:
+  - **Verification Agent** -- Checks acceptance criteria, Figma pixel comparison (Playwright headless), i18n text keys, edge cases, accessibility
+  - **Core Review Agent** -- Runs `npm run build`, `npm run test`, reviews code against project patterns, checks PRD alignment
+- Categorizes issues: Critical / Warnings / Suggestions
+- Creates follow-up tasks in PRD.md and PROGRESS.md for anything that needs fixing
+- Produces a combined summary report
+
+### `reset`
+
+Reset belmont state to start a new planning session.
+
+- Shows a summary of current state (feature name, task/milestone counts, completion status)
+- Asks for explicit confirmation before resetting
+- Resets PRD.md and PROGRESS.md to blank templates
+- Deletes TECH_PLAN.md if it exists
+- Does NOT touch agents, skills, or any source code
+
+**Resets**: `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`
+
+### `status`
+
+Read-only progress report. Does not modify any files.
+
+Example output:
+
+```
+Belmont Status
+==============
 
 Feature: Chat Application Redesign
 
+Tech Plan: ✅ Ready
+
 Status: 🟡 In Progress
 
-Tasks: 3 done, 1 in progress, 1 blocked, 2 pending (of 7)
+Tasks: 3 done, 1 blocked, 3 pending (of 7)
 
   ✅ P0-1: Set up project structure
   ✅ P0-2: Implement authentication flow
@@ -197,9 +360,10 @@ Tasks: 3 done, 1 in progress, 1 blocked, 2 pending (of 7)
   ⬜ P2-1: Add emoji picker
   ⬜ P2-2: Dark mode support
 
-In Progress: 1 task(s)
-  • P1-2: Add real-time message updates...
-    Started: 2026-02-04T14:32:00 | PID: 12345 | Sandbox: claude-my-app
+Milestones:
+  ✅ M1: Foundation
+  ⬜ M2: Core Features
+  ⬜ M3: Polish
 
 Active Blockers:
   - P1-3: Figma design not accessible
@@ -207,303 +371,477 @@ Active Blockers:
 Recent Activity:
 ---
 Last completed: P1-1 - Create chat message component
-Working on: P1-2: Add real-time message updates
 ```
-
-### `ralph-setup`
-One-time setup script. Creates symlinks and config directory.
-
-```bash
-./bin/ralph-setup
-```
-
-### `ralph-configure-mcp`
-Configure Figma MCP inside Docker sandbox. Run once after sandbox creation.
-
-```bash
-ralph-configure-mcp
-```
-
-## Configuration
-
-Configuration is stored in `~/.ralph/config`:
-
-```bash
-# Ralph configuration
-FIGMA_TOKEN=your-figma-personal-access-token
-```
-
-The Figma token is:
-- Used by `ralph-configure-mcp` to set up the Figma MCP server
-- Passed to Docker sandbox via environment variable
-
-## Workflow
-
-### Starting a New Project Cycle
-
-1. **Navigate** to your project directory
-2. **Initialize** (once per project): `ralph-init`
-3. **Clear** previous state: `ralph-clear`
-4. **Plan** interactively: `ralph-plan`
-5. **Technical review** (recommended): `ralph-tech-plan`
-6. **Test** locally: `ralph-once`
-7. **Go AFK**: `ralph-afk 20`
-
-### Typical Session
-
-```bash
-cd ~/projects/my-app
-
-# First time only: create sandbox and login
-ralph-init
-# When Claude starts, run /login, complete auth, then /exit
-
-# Start fresh
-ralph-clear
-
-# Interactive planning - Claude asks questions, you provide requirements
-ralph-plan
-# ... describe your features, provide Figma URLs, etc.
-
-# Technical review - Claude challenges and refines the plan
-ralph-tech-plan
-# ... discuss architecture, security, performance, edge cases
-
-# Check what was planned
-ralph-status
-
-# Test one iteration locally to verify setup
-ralph-once
-
-# Verify it worked
-git log -1
-ralph-status
-
-# Go AFK - Claude works autonomously with the agent pipeline
-ralph-afk 15
-```
-
-### Checking Progress
-
-While AFK mode is running (or after):
-
-```bash
-ralph-status                    # Quick summary with task states
-cat .ralph/PRD.md               # Full PRD with task details
-cat .ralph/PROGRESS.md          # Session history and decisions
-cat .ralph/TECH_PLAN.md         # Technical guidelines (if created)
-git log --oneline -10           # See commits
-```
-
-## Directory Structure
-
-```
-/path/to/ralph/
-├── .agents/
-│   ├── ralph-executor.md       # Orchestrator agent
-│   ├── prd-agent.md            # Task analysis agent
-│   ├── codebase-agent.md       # Codebase scanning agent
-│   ├── design-agent.md         # Figma/design analysis agent
-│   ├── implementation-agent.md # Implementation agent
-│   ├── verification-agent.md   # Verification agent
-│   └── code-review-agent.md    # Code review agent
-├── bin/
-│   ├── ralph-init
-│   ├── ralph-plan
-│   ├── ralph-tech-plan
-│   ├── ralph-prompt            # Shared prompt templates
-│   ├── ralph-once
-│   ├── ralph-afk
-│   ├── ralph-clear
-│   ├── ralph-status
-│   ├── ralph-setup
-│   └── ralph-configure-mcp
-└── README.md
-
-~/.local/bin/
-├── ralph-plan -> /path/to/ralph/bin/ralph-plan
-├── ralph-once -> ...
-└── ...
-
-~/.ralph/
-└── config                      # FIGMA_TOKEN and other settings
-
-~/your-project/.ralph/          # Per-project state (created by ralph-init)
-├── PRD.md                      # Task definitions (markdown)
-├── PROGRESS.md                 # Session history and status
-├── TECH_PLAN.md                # Technical guidelines (optional)
-└── ralph-active.json           # Currently running tasks
-```
-
-## PRD Format
-
-The PRD.md file uses structured markdown with prioritized tasks:
-
-```markdown
-# PRD: Chat Application Redesign
-
-## Overview
-Redesign the chat interface with real-time messaging support.
-
-## Problem Statement
-Current chat lacks real-time updates and modern UX.
-
-## Success Criteria (Definition of Done)
-- [ ] All messages sync in real-time
-- [ ] UI matches Figma designs
-- [ ] All tests pass
-
-## Acceptance Criteria (BDD)
-
-### Scenario: Send Message
-Given I am logged in
-And I am in a chat room
-When I type a message and press Enter
-Then the message appears immediately
-And other users see it within 1 second
-
-## Technical Approach
-WebSocket-based real-time sync with optimistic UI updates.
-
-## Out of Scope
-- Video calling
-- Message encryption
 
 ---
 
-## Technical Tasks
+## Full Workflow
 
-### P0-1: Set up WebSocket connection ✅
+### 1. Install
+
+```bash
+cd ~/projects/my-app
+belmont-install
+```
+
+### 2. Plan
+
+Start an interactive planning session. Describe what you want to build. The AI will ask clarifying questions, then write a structured PRD with prioritized tasks organized into milestones.
+
+```
+Claude Code:  /belmont:product-plan
+Cursor:       Enable the belmont product-plan rule, then: "Let's plan a new feature"
+Other:        Load skills/belmont/product-plan.md as context
+```
+
+**What happens:**
+- You describe the feature
+- AI asks questions one at a time (edge cases, dependencies, Figma URLs, etc.)
+- You finalize the plan together
+- AI writes `.belmont/PRD.md` and `.belmont/PROGRESS.md`
+
+It is strongly recommended you read the PRD created yourself. You can manually make edits before tech plan/implementation or you can run `belmont:product-plan` again and tell it what to refine.
+
+### 3. Tech Plan (recommended)
+
+Have a senior architect agent review the PRD and produce a detailed technical plan. This step is optional but strongly recommended -- it produces the TECH_PLAN.md that guides the implementation agents.
+
+You may add any additional context to the tech plan agent that you want to include.
+
+```
+Claude Code:  /belmont:tech-plan
+Cursor:       Enable the belmont tech-plan rule, then: "Let's review the technical plan"
+Other:        Load skills/belmont/tech-plan.md as context
+```
+
+**What happens:**
+- AI reads the PRD and explores the codebase
+- Interactive discussion about architecture, patterns, edge cases
+- AI writes `.belmont/TECH_PLAN.md` with file structures, component specs, API types
+
+### 4. Implement
+
+Run the implementation pipeline. The AI finds the next incomplete milestone and works through each task using the 4-phase agent pipeline.
+
+```
+Claude Code:  /belmont:implement
+Cursor:       Enable the belmont implement rule, then: "Implement the next milestone"
+Other:        Load skills/belmont/implement.md as context
+```
+
+**What happens per task:**
+1. `prd-agent` analyzes the task and extracts context
+2. `codebase-agent` scans for existing patterns and conventions
+3. `design-agent` loads Figma designs, design system info, and extracts specs (if applicable)
+4. `implementation-agent` writes code, tests, runs verification, and commits
+5. PRD.md and PROGRESS.md are updated
+
+**After all tasks in the milestone:**
+- Milestone is marked complete in PROGRESS.md
+- Summary is reported
+
+### 5. Quick Fix (optional)
+
+If verification created follow-up tasks or there's a small task to knock out, use `next` to implement just one task without the full pipeline overhead.
+
+```
+Claude Code:  /belmont:next
+Cursor:       Enable the belmont next rule, then: "Implement the next task"
+Other:        Load skills/belmont/next.md as context
+```
+
+**What happens:**
+- Finds the next unchecked task in the current milestone
+- Reads the PRD and TECH_PLAN for task context (skips analysis sub-agents)
+- Dispatches the single task to the implementation agent
+- Task is implemented, verified, committed, and marked complete
+- Reports a brief summary
+
+### 6. Verify
+
+Run comprehensive verification on all completed work.
+
+```
+Claude Code:  /belmont:verify
+Cursor:       Enable the belmont verify rule, then: "Verify the completed tasks"
+Other:        Load skills/belmont/verify.md as context
+```
+
+**What happens:**
+- Verification agent checks acceptance criteria, visual fidelity, i18n
+- Core review agent runs build, tests, reviews code quality
+- Issues become follow-up tasks in the PRD
+- Combined report is produced
+
+### 7. Check Progress
+
+Check where things stand at any point.
+
+```
+Claude Code:  /belmont:status
+Cursor:       Enable the belmont status rule, then: "Show belmont status"
+Other:        Load skills/belmont/status.md as context
+```
+
+### 8. Iterate
+
+After implementing a milestone:
+- Run `/belmont:verify` to catch issues
+- Run `/belmont:next` to quickly fix follow-up tasks from verification
+- Run `/belmont:implement` again for the next milestone
+- Run `/belmont:status` to check progress
+- Continue until all milestones are complete
+
+### 9. Start Fresh
+
+When you're done with a feature and want to plan something new:
+
+```
+Claude Code:  /belmont:reset
+Cursor:       Enable the belmont reset rule, then: "Reset belmont state"
+Other:        Load skills/belmont/reset.md as context
+```
+
+**What happens:**
+- Agent reads current state and shows what will be cleared (feature name, tasks, milestones)
+- Asks for explicit "yes" confirmation
+- Resets PRD.md and PROGRESS.md to blank templates
+- Deletes TECH_PLAN.md
+- Prompts you to start fresh with `/belmont:product-plan`
+
+---
+
+## Directory Structure
+
+### Belmont Repository
+
+```
+belmont/
+├── skills/
+│   └── belmont/
+│       ├── product-plan.md      # Planning skill
+│       ├── tech-plan.md         # Tech plan skill
+│       ├── implement.md         # Implementation skill (full milestone)
+│       ├── next.md              # Next task skill (single task, lightweight)
+│       ├── verify.md            # Verification skill
+│       ├── status.md            # Status skill
+│       └── reset.md             # Reset state skill
+├── agents/
+│   └── belmont/
+│       ├── prd-agent.md         # Task analysis agent
+│       ├── codebase-agent.md    # Codebase scanning agent
+│       ├── design-agent.md      # Figma/design analysis agent
+│       ├── implementation-agent.md  # Implementation agent
+│       ├── verification-agent.md    # Verification agent
+│       └── core-review-agent.md     # Code review agent
+├── bin/
+│   └── install.sh               # Installer script
+└── README.md
+```
+
+### After Installing in a Project
+
+```
+your-project/
+├── .agents/                     # Shared (committed to git)
+│   ├── belmont/                 # Agent instructions
+│   │   ├── prd-agent.md
+│   │   ├── codebase-agent.md
+│   │   ├── design-agent.md
+│   │   ├── implementation-agent.md
+│   │   ├── verification-agent.md
+│   │   └── core-review-agent.md
+│   └── skills/
+│       └── belmont/             # Skills (canonical location)
+│           ├── product-plan.md
+│           ├── tech-plan.md
+│           ├── implement.md
+│           ├── next.md
+│           ├── verify.md
+│           ├── status.md
+│           └── reset.md
+├── .belmont/                    # Local state (gitignored)
+│   ├── PRD.md
+│   ├── PROGRESS.md
+│   └── TECH_PLAN.md
+├── .claude/                     # Claude Code (if selected)
+│   └── commands/
+│       └── belmont -> ../../.agents/skills/belmont   (symlink)
+├── .cursor/                     # Cursor (if selected)
+│   └── rules/
+│       └── belmont/
+│           ├── product-plan.mdc -> ../../../.agents/skills/belmont/product-plan.md
+│           ├── tech-plan.mdc    -> ../../../.agents/skills/belmont/tech-plan.md
+│           ├── next.mdc         -> ../../../.agents/skills/belmont/next.md
+│           └── ...              (per-file symlinks, .mdc -> .md)
+└── ...
+```
+
+**Key separation:**
+- `.agents/belmont/` -- Shared agent instructions. Committed to git. Referenced by all tools.
+- `.agents/skills/belmont/` -- Canonical skill files. Single source of truth.
+- `.belmont/` -- Local planning state (PRD, PROGRESS, TECH_PLAN). Gitignored. Per-developer.
+- `.claude/`, `.cursor/`, etc. -- Symlinks into `.agents/skills/belmont/`. No duplicate files.
+
+---
+
+## PRD & Progress Format
+
+### PRD.md
+
+Tasks use structured markdown with priority levels:
+
+```markdown
+# PRD: Feature Name
+
+## Overview
+Brief description of the feature.
+
+## Problem Statement
+What problem does this solve?
+
+## Success Criteria (Definition of Done)
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+## Acceptance Criteria (BDD)
+
+### Scenario: User logs in
+Given a registered user
+When they enter valid credentials
+Then they see the dashboard
+
+## Technical Approach
+High-level implementation strategy.
+
+## Tasks
+
+### P0-1: Set up authentication ✅
 **Severity**: CRITICAL
-**File**: src/lib/socket.ts
+**Task Description**: Implement OAuth2 login flow
+**Solution**: Use next-auth with Google provider
+**Verification**: npm run test, manual login test
 
-**Problem**: No real-time communication layer exists
-
-**Solution**: Implement socket.io client with reconnection logic
-
-**Verification**:
-1. `npm run lint:fix`
-2. `npx tsc --noEmit`
-3. Verify connection in browser devtools
-
-### P1-1: Create message component
+### P1-1: Create dashboard layout
 **Severity**: HIGH
-**File**: src/components/Message.tsx
+**Task Description**: Build the main dashboard page
 **Figma**: https://figma.com/file/xxx/node-id=123
-
-**Problem**: Need pixel-perfect message bubbles
-
-**Solution**: Build component matching Figma spec exactly
-
-**Verification**:
-1. `npm run lint:fix`
-2. `npm run test`
-3. Visual comparison with Figma
-
-### P1-2: File attachments 🚫 BLOCKED
-**Severity**: HIGH
-**Figma**: https://figma.com/file/xxx/node-id=456
-
-**Blocked**: Figma design not accessible - need updated link
+**Solution**: Responsive grid layout with sidebar
+**Verification**: npm run build, visual comparison with Figma
 ```
 
 ### Task States
-- No marker = Pending
-- `✅` in header = Completed
-- `🚫 BLOCKED` in header = Blocked (cannot proceed)
-- `🔵` with `FWLUP` = Follow-up task (discovered during implementation)
+
+| Marker       | State     | Meaning                                                |
+|--------------|-----------|--------------------------------------------------------|
+| *(none)*     | Pending   | Not yet started                                        |
+| `✅`          | Complete  | Task finished and verified                             |
+| `🚫 BLOCKED` | Blocked   | Cannot proceed (missing info, Figma unavailable, etc.) |
+| `🔵 FWLUP`   | Follow-up | Discovered during implementation or verification       |
 
 ### Priority Levels
-- **P0 (CRITICAL)**: Must be done first, blockers for other work
-- **P1 (HIGH)**: Core functionality
-- **P2 (MEDIUM)**: Important but not blocking
-- **P3 (LOW)**: Nice to have
 
-## Agent Communication Protocol
+| Priority | Severity | Meaning                               |
+|----------|----------|---------------------------------------|
+| P0       | CRITICAL | Must be done first, blocks other work |
+| P1       | HIGH     | Core functionality                    |
+| P2       | MEDIUM   | Important but not blocking            |
+| P3       | LOW      | Nice to have                          |
 
-Sub-agents communicate via structured XML output:
+### PROGRESS.md
 
-```xml
-<agent-output>
-<status>SUCCESS|BLOCKED|PARTIAL|...</status>
-<task-id>P0-1</task-id>
-<!-- agent-specific fields -->
-<report>
-[Markdown report content]
-</report>
-</agent-output>
+Tracks milestones, session history, and blockers:
+
+```markdown
+# Progress: Feature Name
+
+## Status: 🟡 In Progress
+
+## Milestones
+
+### ✅ M1: Foundation
+- [x] P0-1: Set up authentication
+- [x] P0-2: Database schema
+
+### ⬜ M2: Core Features
+- [ ] P1-1: Dashboard layout
+- [ ] P1-2: User settings
+
+## Session History
+| Session | Date/Time           | Context Used    | Milestones Completed |
+|---------|---------------------|-----------------|----------------------|
+| 1       | 2026-02-05 10:00:00 | PRD + TECH_PLAN | M1                   |
+
+## Blockers
+[None currently]
 ```
 
-### Status Handling
+---
 
-| Status | Action |
-|--------|--------|
-| SUCCESS | Proceed to next agent/phase |
-| BLOCKED | Stop workflow, update files, report |
-| PARTIAL | Evaluate if can proceed, may need to stop |
-| FAILED | Treat as BLOCKED |
+## Agent Pipeline Details
+
+### Phase 1: Task Analysis (prd-agent)
+
+**File**: `.agents/belmont/prd-agent.md`
+
+Reads the PRD and TECH_PLAN to produce a focused summary for the current task:
+- Task ID, priority, description
+- Acceptance criteria
+- Figma URLs and design references
+- Target files and dependencies
+- Verification requirements
+- Scope boundaries
+
+### Phase 2: Codebase Scan (codebase-agent)
+
+**File**: `.agents/belmont/codebase-agent.md`
+
+Scans the project to understand existing patterns:
+- Framework, language, styling, testing stack
+- Project structure and conventions
+- Related code, utilities, and type definitions
+- CLAUDE.md rules (if present)
+- Import patterns, error handling patterns, test patterns
+
+### Phase 3: Design Analysis (design-agent)
+
+**File**: `.agents/belmont/design-agent.md`
+
+Analyzes Figma designs when provided:
+- Loads designs via Figma MCP
+- Extracts exact colors, typography, spacing, effects
+- Maps to existing design system components
+- Identifies new components to create
+- Produces implementation-ready component code
+
+**Blocking**: If Figma URLs are provided but fail to load, the task is blocked.
+
+### Phase 4: Implementation (implementation-agent)
+
+**File**: `.agents/belmont/implementation-agent.md`
+
+Implements the task using all previous phase outputs:
+- Types/interfaces first, then utilities, then components
+- Follows project patterns from codebase analysis
+- Uses design specifications for UI code
+- Writes unit tests
+- Runs verification: `tsc`, `lint:fix`, `test`, `build`
+- Commits to git with structured commit message
+- Reports out-of-scope issues as follow-up tasks
+
+### Verification (verification-agent)
+
+**File**: `.agents/belmont/verification-agent.md`
+
+Verifies implementations against requirements:
+- Acceptance criteria pass/fail
+- Visual comparison with Figma (Playwright headless)
+- i18n key verification
+- Functional testing (happy path, edge cases, accessibility)
+
+### Code Review (core-review-agent)
+
+**File**: `.agents/belmont/core-review-agent.md`
+
+Reviews code for quality and alignment:
+- Runs `npm run build` and `npm run test`
+- Checks pattern adherence and CLAUDE.md compliance
+- Verifies PRD/tech plan alignment
+- Security and performance review
+- Categorizes issues: critical, warnings, suggestions
+
+---
+
+## Updating Belmont
+
+To update skills and agents in an existing project after pulling new changes to the belmont repo:
+
+```bash
+cd ~/your-project
+belmont-install
+```
+
+The installer detects changes between the belmont source and your installed files:
+- **New files** are copied
+- **Changed files** are updated
+- **Renamed/deleted files** are removed from the target (keeps installed tree exact)
+- **Unchanged files** are skipped
+- **Symlinks** are verified and updated if needed
+- `.belmont/` state files (PRD, PROGRESS, TECH_PLAN) are always preserved
+
+---
 
 ## Troubleshooting
 
-### Commands not found
+### `belmont-install` command not found
+
 Ensure `~/.local/bin` is in your PATH:
+
 ```bash
-echo $PATH | grep -q ".local/bin" || echo "Add ~/.local/bin to PATH"
+echo $PATH | tr ':' '\n' | grep local
+# If missing:
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### Docker sandbox issues
-- Verify Docker Desktop is running
-- Check sandbox exists: `docker sandbox ls`
-- Sandbox names are project-specific: `claude-<project-folder>`
-- Recreate if needed: `docker sandbox rm claude-myproject && ralph-init`
-- Re-run `ralph-configure-mcp` after recreating
+Or re-run the global setup:
 
-### Sandbox not found
-If `ralph-afk` fails with "Sandbox not found":
 ```bash
-ralph-init    # Creates sandbox for current project
+cd /path/to/belmont
+./bin/install.sh
 ```
 
-### Sandbox not logged in
-If `ralph-configure-mcp` or `ralph-afk` fails with "Invalid API key" or "Please run /login":
-1. Run an interactive session: `docker sandbox run claude-<project-name>`
-2. Inside Claude, run `/login` and complete authentication
-3. Exit with `/exit`
-4. Retry your command
+### No AI tools detected during install
 
-### Figma MCP not working
-1. Verify token is set: `grep FIGMA_TOKEN ~/.ralph/config`
-2. Ensure sandbox is logged in (see above)
-3. Re-run configuration: `ralph-configure-mcp`
-4. Verify MCP is configured: `docker sandbox exec claude claude mcp list`
+If your project doesn't have a `.claude/`, `.cursor/`, etc. directory yet, the installer will ask which tool you're using and create the directory for you.
 
-### Task blocked unexpectedly
-If a task gets marked as 🚫 BLOCKED:
-1. Check `ralph-status` for blocker details
-2. Review `.ralph/PROGRESS.md` Blockers section
-3. Fix the issue (e.g., update Figma URL, add missing context)
-4. Remove the 🚫 BLOCKED marker from the task header in PRD.md
-5. Resume with `ralph-afk` or `ralph-once`
+### Skills not showing up in Claude Code
 
-### PRD.md issues
-- Run `ralph-clear` to reset with fresh template
-- Use `ralph-status` to validate current state
-- Check for markdown syntax errors in task headers
+Verify the symlink exists and points to the right place:
 
-## Tips
+```bash
+ls -la .claude/commands/belmont
+# Should show: belmont -> ../../.agents/skills/belmont
 
-- **Start small**: Use `ralph-once` to test before `ralph-afk`
-- **Check progress**: Run `ralph-status` periodically
-- **Incremental planning**: You can run `ralph-plan` multiple times to add tasks
-- **Git safety**: `.ralph/` should be in .gitignore (ralph-init offers to add it)
-- **Voice feedback**: Use `--loud` flag for audio notifications when AFK
-- **Project sandboxes**: Each project gets its own sandbox for isolation
-- **Handle blocks**: Check status after `ralph-afk` exits - exit code 2 means blocked
-- **Follow-up tasks**: Agents may create FWLUP tasks for out-of-scope issues discovered during implementation
+ls .agents/skills/belmont/
+# Should list the .md skill files
+```
+
+If the symlink is missing or broken, re-run `belmont-install` and select Claude Code.
+
+### Skills not showing up in Cursor
+
+Cursor uses per-file symlinks with `.mdc` extension. Verify:
+
+```bash
+ls -la .cursor/rules/belmont/
+# Should show .mdc symlinks pointing to .agents/skills/belmont/*.md
+```
+
+If you need to manually refresh, restart Cursor or reload the window.
+
+### PRD is empty / template only
+
+Run the product-plan skill first to create your PRD interactively. The tech-plan and implement skills require a populated PRD.
+
+### Task marked as BLOCKED
+
+Check `.belmont/PROGRESS.md` for blocker details. Common causes:
+- Figma URL not accessible
+- Missing context or dependencies
+- Build/test failures that can't be auto-resolved
+
+Fix the underlying issue, remove the `🚫 BLOCKED` marker from the task header in PRD.md, and re-run implement.
+
+### Want to start fresh
+
+Run the reset skill (`/belmont:reset` in Claude Code) to reset all state files. Alternatively, delete `.belmont/PRD.md`, `.belmont/PROGRESS.md`, and `.belmont/TECH_PLAN.md` manually, then re-run `belmont-install` to recreate templates.
+
+---
 
 ## Requirements
 
-- Claude CLI (`claude` command available)
-- Docker Desktop with sandbox support
-- Python 3 (for task parsing in scripts)
-- macOS (for `say` command with `--loud` flag, optional)
+- An AI coding tool (Claude Code, Cursor, Windsurf, Gemini, Copilot, or any tool that reads markdown)
+- [figma-mcp](https://github.com/nichochar/figma-mcp) (recommended) -- enables Belmont to load Figma designs, extract design tokens, and perform visual verification
+- No Docker required
+- No Python required
+- bash (for the installer only)
