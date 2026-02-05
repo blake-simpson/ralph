@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ralph-configure-mcp: Configure Figma MCP inside Docker sandbox
+# ralph-configure-mcp: Configure MCP servers inside Docker sandbox
 
 CONFIG_FILE="$HOME/.ralph/config"
 WORKSPACE="$(pwd)"
@@ -15,6 +15,33 @@ echo ""
 if [ -f "$CONFIG_FILE" ]; then
     source "$CONFIG_FILE"
 fi
+
+# =====================
+# Playwright MCP Setup
+# =====================
+echo "Configuring Playwright MCP (headless mode)..."
+echo ""
+
+# Remove existing playwright MCP config if present (ignore errors)
+docker sandbox run "$SANDBOX_NAME" -- mcp remove playwright 2>/dev/null || true
+
+# Add Playwright MCP server in headless mode
+echo "Adding Playwright MCP server..."
+if docker sandbox run "$SANDBOX_NAME" -- mcp add playwright -- npx -y @playwright/mcp@latest --headless 2>&1; then
+    echo "Playwright MCP configured successfully!"
+else
+    echo ""
+    echo "Warning: Failed to configure Playwright MCP."
+    echo "The sandbox may need browser dependencies. You can try running:"
+    echo "  docker sandbox run $SANDBOX_NAME -- npx playwright install-deps"
+    echo ""
+fi
+
+echo ""
+
+# =====================
+# Figma MCP Setup
+# =====================
 
 # Check for Figma token
 if [ -z "$FIGMA_TOKEN" ]; then
@@ -73,6 +100,10 @@ docker sandbox run "$SANDBOX_NAME" -- mcp list 2>&1
 
 echo ""
 echo "MCP configuration complete!"
+echo ""
+echo "Configured servers:"
+echo "  - Playwright (headless browser automation)"
+echo "  - Figma (design file access, if token provided)"
 echo ""
 echo "Note: This configuration persists in the Docker sandbox."
 echo "If you delete and recreate the sandbox, run this command again."
