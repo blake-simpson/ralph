@@ -1,5 +1,5 @@
 ---
-name: prd-agent
+name: ralph:prd-agent
 description: Reads and processes the current task from PRD, extracts relevant context from PRD and TECH_PLAN.md. Returns a focused task summary for subsequent agents.
 model: sonnet
 ---

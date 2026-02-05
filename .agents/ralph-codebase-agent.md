@@ -1,5 +1,5 @@
 ---
-name: codebase-agent
+name: ralph:codebase-agent
 description: Scans the codebase to find existing implementation patterns, related code, and project context relevant to the current task. Returns comprehensive codebase analysis.
 model: sonnet
 ---
@@ -81,13 +81,13 @@ Return a structured analysis in this exact format:
 # Codebase Analysis for Task [Task ID]
 
 ## Project Stack
-| Category | Technology | Version |
-|----------|------------|---------|
-| Framework | [e.g., Next.js] | [version] |
-| Language | [e.g., TypeScript] | [version] |
-| Styling | [e.g., Tailwind CSS] | [version] |
-| Testing | [e.g., Jest + RTL] | [version] |
-| Package Manager | [e.g., pnpm] | - |
+| Category        | Technology           | Version   |
+|-----------------|----------------------|-----------|
+| Framework       | [e.g., Next.js]      | [version] |
+| Language        | [e.g., TypeScript]   | [version] |
+| Styling         | [e.g., Tailwind CSS] | [version] |
+| Testing         | [e.g., Jest + RTL]   | [version] |
+| Package Manager | [e.g., pnpm]         | -         |
 
 ## Project Structure
 ```
@@ -100,24 +100,24 @@ Return a structured analysis in this exact format:
 ## Related Files Found
 
 ### Direct Task Files
-| File | Status | Purpose |
-|------|--------|---------|
+| File           | Status           | Purpose                  |
+|----------------|------------------|--------------------------|
 | [path/file.ts] | [EXISTS/MISSING] | [what it does/should do] |
 
 ### Similar/Reference Code
-| File | Relevance | Key Patterns |
-|------|-----------|--------------|
+| File           | Relevance      | Key Patterns         |
+|----------------|----------------|----------------------|
 | [path/file.ts] | [why relevant] | [patterns to follow] |
 
 ### Shared Utilities
-| Utility | Location | Usage |
-|---------|----------|-------|
-| [utility name] | [path] | [how to use] |
+| Utility        | Location | Usage        |
+|----------------|----------|--------------|
+| [utility name] | [path]   | [how to use] |
 
 ### Type Definitions
-| Type/Interface | Location | Purpose |
-|----------------|----------|---------|
-| [TypeName] | [path] | [what it defines] |
+| Type/Interface | Location | Purpose           |
+|----------------|----------|-------------------|
+| [TypeName]     | [path]   | [what it defines] |
 
 ## Code Patterns
 
@@ -153,8 +153,8 @@ Return a structured analysis in this exact format:
 - [file] - [reason]
 
 ## API Endpoints (if relevant)
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
+| Endpoint   | Method     | Purpose        |
+|------------|------------|----------------|
 | [/api/...] | [GET/POST] | [what it does] |
 
 ## Database/State (if relevant)

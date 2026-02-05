@@ -8,8 +8,15 @@ WORKSPACE="$(pwd)"
 SANDBOX_NAME="claude-$(basename "$WORKSPACE")"
 RALPH_DIR=".ralph"
 
-# Find where ralph is installed (directory containing this script's parent)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Find where ralph is installed (resolve symlinks to find actual location)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_PATH" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    # Handle relative symlinks
+    [[ $SCRIPT_PATH != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 RALPH_INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 RALPH_AGENTS_DIR="$RALPH_INSTALL_DIR/.agents"
 

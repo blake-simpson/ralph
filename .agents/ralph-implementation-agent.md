@@ -1,5 +1,5 @@
 ---
-name: implementation-agent
+name: ralph:implementation-agent
 description: Implements the task following the implementation plan and tech plan guidelines exactly. Uses all inputs from previous sub-agents to write code, tests, and commit changes.
 model: opus
 ---
@@ -148,24 +148,24 @@ After implementation, provide this report:
 ## Changes Made
 
 ### Files Created
-| File | Purpose |
-|------|---------|
+| File   | Purpose        |
+|--------|----------------|
 | [path] | [what it does] |
 
 ### Files Modified
-| File | Changes |
-|------|---------|
+| File   | Changes        |
+|--------|----------------|
 | [path] | [what changed] |
 
 ### Files Deleted
-| File | Reason |
-|------|--------|
+| File   | Reason        |
+|--------|---------------|
 | [path] | [why deleted] |
 
 ## Tests Added
-| Test File | Coverage |
-|-----------|----------|
-| [path] | [what it tests] |
+| Test File | Coverage        |
+|-----------|-----------------|
+| [path]    | [what it tests] |
 
 ## Verification Results
 ```
@@ -180,20 +180,20 @@ After implementation, provide this report:
 - **Message**: [commit message]
 
 ## i18n Keys Added
-| Key | Value | Location |
-|-----|-------|----------|
-| [key] | [text] | [file] |
+| Key   | Value  | Location |
+|-------|--------|----------|
+| [key] | [text] | [file]   |
 
 ## Out-of-Scope Issues Found
 
 ### Follow-up Tasks (to be added to PRD)
-| ID | Description | Priority |
-|----|-------------|----------|
-| FWLUP-1 | [description] | [P0-P3] |
+| ID      | Description   | Priority |
+|---------|---------------|----------|
+| FWLUP-1 | [description] | [P0-P3]  |
 
 ### Existing Bugs Discovered
-| Location | Issue |
-|----------|-------|
+| Location    | Issue          |
+|-------------|----------------|
 | [file:line] | [what's wrong] |
 
 ## Notes for Verification Agent

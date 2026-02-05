@@ -1,5 +1,5 @@
 ---
-name: design-agent
+name: ralph:design-agent
 description: Analyzes Figma designs, extracts design tokens, calculates correct UI implementation, and produces detailed component specifications. Returns implementation-ready design information.
 model: opus
 ---
@@ -93,9 +93,9 @@ Return detailed design specifications in this exact format:
 # Design Specification for Task [Task ID]
 
 ## Figma Sources
-| Node ID | Name | URL | Status |
-|---------|------|-----|--------|
-| [id] | [name] | [url] | [LOADED/FAILED] |
+| Node ID | Name   | URL   | Status          |
+|---------|--------|-------|-----------------|
+| [id]    | [name] | [url] | [LOADED/FAILED] |
 
 ## Design Tokens
 
@@ -189,19 +189,19 @@ const effects = {
 ## Component Analysis
 
 ### Existing Components to Use
-| Component | Location | Usage in Design |
-|-----------|----------|-----------------|
-| [Button] | [@/components/lego/bricks/Button] | [Primary action] |
-| [Card] | [@/components/lego/bricks/Card] | [Container] |
+| Component | Location                          | Usage in Design  |
+|-----------|-----------------------------------|------------------|
+| [Button]  | [@/components/lego/bricks/Button] | [Primary action] |
+| [Card]    | [@/components/lego/bricks/Card]   | [Container]      |
 
 ### Components to Create
-| Component | Purpose | Variants |
-|-----------|---------|----------|
+| Component       | Purpose        | Variants             |
+|-----------------|----------------|----------------------|
 | [ComponentName] | [what it does] | [variant1, variant2] |
 
 ### Components to Modify
-| Component | Modification Needed |
-|-----------|---------------------|
+| Component   | Modification Needed    |
+|-------------|------------------------|
 | [Component] | [what needs to change] |
 
 ## Detailed Component Specifications
@@ -298,11 +298,11 @@ export function ComponentName({
 ```
 
 ## Responsive Considerations
-| Breakpoint | Changes |
-|------------|---------|
-| Mobile (<768px) | [layout changes] |
+| Breakpoint          | Changes          |
+|---------------------|------------------|
+| Mobile (<768px)     | [layout changes] |
 | Tablet (768-1024px) | [layout changes] |
-| Desktop (>1024px) | [default layout] |
+| Desktop (>1024px)   | [default layout] |
 
 ## Accessibility Requirements
 - [ ] All interactive elements have focus states
@@ -312,14 +312,14 @@ export function ComponentName({
 - [ ] Keyboard navigation support
 
 ## CSS Class Mappings
-| Figma Style | Project Class | CSS Value |
-|-------------|---------------|-----------|
-| [Heading/H4] | .lego-heading-h4 | font-size: 20px... |
-| [Body/Medium] | .lego-body-md | font-size: 16px... |
+| Figma Style   | Project Class    | CSS Value          |
+|---------------|------------------|--------------------|
+| [Heading/H4]  | .lego-heading-h4 | font-size: 20px... |
+| [Body/Medium] | .lego-body-md    | font-size: 16px... |
 
 ## i18n Text Keys Needed
-| Text | Suggested Key | Context |
-|------|---------------|---------|
+| Text     | Suggested Key         | Context      |
+|----------|-----------------------|--------------|
 | "Submit" | common.actions.submit | Button label |
 | "Cancel" | common.actions.cancel | Button label |
 ```
