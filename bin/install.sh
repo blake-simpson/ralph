@@ -7,7 +7,7 @@ set -e
 #   ./bin/install.sh          First-time setup (creates belmont-install command)
 #   belmont-install            Install belmont into current project
 #
-# Agent-agnostic: works with Claude Code, Cursor, Windsurf, Gemini, and others.
+# Agent-agnostic: works with Claude Code, Codex, Cursor, Windsurf, Gemini, and others.
 # Agents and skills are installed to .agents/ (shared across tools).
 # Each AI tool gets a symlink from its native directory into .agents/skills/.
 
@@ -99,6 +99,10 @@ if [ -d ".claude" ]; then
     DETECTED+=("claude")
     DETECTED_LABELS+=("Claude Code (.claude/)")
 fi
+if [ -d ".codex" ]; then
+    DETECTED+=("codex")
+    DETECTED_LABELS+=("Codex (.codex/)")
+fi
 if [ -d ".cursor" ]; then
     DETECTED+=("cursor")
     DETECTED_LABELS+=("Cursor (.cursor/)")
@@ -148,10 +152,11 @@ else
     echo ""
     echo "Which tool are you using?"
     echo "  [1] Claude Code"
-    echo "  [2] Cursor"
-    echo "  [3] Windsurf"
-    echo "  [4] Gemini"
-    echo "  [5] GitHub Copilot"
+    echo "  [2] Codex"
+    echo "  [3] Cursor"
+    echo "  [4] Windsurf"
+    echo "  [5] Gemini"
+    echo "  [6] GitHub Copilot"
     echo "  [s] Skip (install agents only - reference files manually)"
     echo ""
     read -p "Choice: " -r TOOL_CHOICE
@@ -159,10 +164,11 @@ else
 
     case "$TOOL_CHOICE" in
         1) SELECTED_TOOLS=("claude") ;;
-        2) SELECTED_TOOLS=("cursor") ;;
-        3) SELECTED_TOOLS=("windsurf") ;;
-        4) SELECTED_TOOLS=("gemini") ;;
-        5) SELECTED_TOOLS=("copilot") ;;
+        2) SELECTED_TOOLS=("codex") ;;
+        3) SELECTED_TOOLS=("cursor") ;;
+        4) SELECTED_TOOLS=("windsurf") ;;
+        5) SELECTED_TOOLS=("gemini") ;;
+        6) SELECTED_TOOLS=("copilot") ;;
         [Ss]) SELECTED_TOOLS=() ;;
         *)
             echo "Invalid choice. Installing agents only."
@@ -265,6 +271,11 @@ setup_tool() {
             mkdir -p ".claude/agents"
             mkdir -p ".claude/agents/belmont"
             ensure_symlink ".claude/agents/belmont" "../../.agents/skills/belmont"
+            ;;
+        codex)
+            echo "Linking Codex..."
+            mkdir -p ".codex"
+            ensure_symlink ".codex/belmont" "../.agents/skills/belmont"
             ;;
         cursor)
             echo "Linking Cursor..."
@@ -437,6 +448,10 @@ if [ ${#SELECTED_TOOLS[@]} -gt 0 ]; then
             claude)
                 echo "  Claude Code  .claude/commands/belmont -> .agents/skills/belmont"
                 echo "    Use: /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:status"
+                ;;
+            codex)
+                echo "  Codex        .codex/belmont -> .agents/skills/belmont"
+                echo "    Use: Reference belmont files in Codex"
                 ;;
             cursor)
                 echo "  Cursor       .cursor/rules/belmont/*.mdc -> .agents/skills/belmont/*.md"

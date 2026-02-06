@@ -27,7 +27,7 @@ Read these files first:
 **CRITICAL**: You are the **orchestrator**. You MUST NOT perform the phase work yourself. Each phase below MUST be dispatched to a **sub-agent** — a separate, isolated process that runs the phase instructions and returns its output to you.
 
 **How to spawn sub-agents**:
-- **Claude Code**: Use the `Task` tool. Pass the sub-agent prompt as the task description.
+- **Claude Code / Codex**: Use the `Task` tool. Pass the sub-agent prompt as the task description.
 - **Cursor / Other tools**: If a sub-agent or task-dispatch mechanism is available, use it. If not, clearly separate each phase: read the agent file, execute its instructions fully, then capture the output before moving on — do NOT blend phase work together.
 
 **Why sub-agents matter**:

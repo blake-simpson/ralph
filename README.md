@@ -2,7 +2,7 @@
 
 A toolkit for running structured coding sessions with AI coding agents. Belmont manages a PRD (Product Requirements Document), orchestrates specialized sub-agent phases, and tracks progress across milestones.
 
-**Agent-agnostic** -- works with Claude Code, Cursor, Windsurf, Gemini, GitHub Copilot, and any tool that can read markdown files. No Docker required. No loops. Just skills and agents.
+**Agent-agnostic** -- works with Claude Code, Codex, Cursor, Windsurf, Gemini, GitHub Copilot, and any tool that can read markdown files. No Docker required. No loops. Just skills and agents.
 
 A flexible PRD system has been used to provide the best level of context from plan to implementation. Tech plans allow you to specify specifics for the agent to follow while building.
 
@@ -40,7 +40,7 @@ cd ~/your-project
 belmont-install
 ```
 
-The installer detects which AI tools you have (Claude Code, Cursor, Windsurf, etc.) and installs skills to `.agents/skills/belmont/`, then creates symlinks from each tool's native directory. Agents are installed to `.agents/belmont/`.
+The installer detects which AI tools you have (Claude Code, Codex, Cursor, Windsurf, etc.) and installs skills to `.agents/skills/belmont/`, then creates symlinks from each tool's native directory. Agents are installed to `.agents/belmont/`.
 
 Then use the skills in your AI tool of choice. For example, in Claude Code:
 
@@ -129,7 +129,7 @@ belmont-install
 
 The installer will:
 
-1. **Scan for AI tools** -- detects `.claude/`, `.cursor/`, `.windsurf/`, `.gemini/`, `.github/`
+1. **Scan for AI tools** -- detects `.claude/`, `.codex/`, `.cursor/`, `.windsurf/`, `.gemini/`, `.github/`
 2. **Ask which to install for** -- all detected, a specific one, or skip
 3. **Sync agents** to `.agents/belmont/` (shared, tool-agnostic)
 4. **Sync skills** to `.agents/skills/belmont/` (canonical location, shared across tools)
@@ -148,12 +148,14 @@ Project: /Users/you/projects/my-app
 
 Detected AI tools:
   [1] Claude Code (.claude/)
-  [2] Cursor (.cursor/)
+  [2] Codex (.codex/)
+  [3] Cursor (.cursor/)
 
 Install skills for:
   [a] All detected tools
   [1] Claude Code (.claude/) only
-  [2] Cursor (.cursor/) only
+  [2] Codex (.codex/) only
+  [3] Cursor (.cursor/) only
   [s] Skip (install agents only)
 
 Choice [a]: a
@@ -176,6 +178,9 @@ Installing skills to .agents/skills/belmont/...
 
 Linking Claude Code...
   + .claude/commands/belmont -> ../../.agents/skills/belmont
+
+Linking Codex...
+  + .codex/belmont -> ../.agents/skills/belmont
 
 Linking Cursor...
   + .cursor/rules/belmont/product-plan.mdc -> ../../../.agents/skills/belmont/product-plan.md
@@ -204,6 +209,7 @@ Each AI tool gets a **symlink** from its native directory into `.agents/skills/b
 | Tool               | Symlink                       | Target                          | How to Use                                                            |
 |--------------------|-------------------------------|---------------------------------|-----------------------------------------------------------------------|
 | **Claude Code**    | `.claude/commands/belmont`    | `→ .agents/skills/belmont`      | Slash commands: `/belmont:product-plan`, `/belmont:implement`, etc.   |
+| **Codex**          | `.codex/belmont`              | `→ .agents/skills/belmont`      | Reference files in Codex                                              |
 | **Cursor**         | `.cursor/rules/belmont/*.mdc` | `→ .agents/skills/belmont/*.md` | Toggle rules in Settings > Rules, or reference in Composer/Agent mode |
 | **Windsurf**       | `.windsurf/rules/belmont`     | `→ .agents/skills/belmont`      | Reference rules in Cascade                                            |
 | **Gemini**         | `.gemini/rules/belmont`       | `→ .agents/skills/belmont`      | Reference rules in Gemini                                             |
@@ -225,6 +231,14 @@ Skills become native slash commands:
 /belmont:status         View progress
 /belmont:reset          Reset state and start fresh
 ```
+
+### Codex Usage
+
+Skills are installed as a symlink. To use them:
+
+1. Open Codex in your project directory
+2. Reference the skill files when prompting (e.g., *"Follow the belmont implement workflow"*)
+3. Or point Codex at the skill file directly when starting a session
 
 ### Cursor Usage
 
@@ -567,6 +581,8 @@ your-project/
 ├── .claude/                     # Claude Code (if selected)
 │   └── commands/
 │       └── belmont -> ../../.agents/skills/belmont   (symlink)
+├── .codex/                      # Codex (if selected)
+│   └── belmont -> ../.agents/skills/belmont   (symlink)
 ├── .cursor/                     # Cursor (if selected)
 │   └── rules/
 │       └── belmont/
@@ -581,7 +597,7 @@ your-project/
 - `.agents/belmont/` -- Shared agent instructions. Committed to git. Referenced by all tools.
 - `.agents/skills/belmont/` -- Canonical skill files. Single source of truth.
 - `.belmont/` -- Local planning state (PRD, PROGRESS, TECH_PLAN). Gitignored. Per-developer.
-- `.claude/`, `.cursor/`, etc. -- Symlinks into `.agents/skills/belmont/`. No duplicate files.
+- `.claude/`, `.codex/`, `.cursor/`, etc. -- Symlinks into `.agents/skills/belmont/`. No duplicate files.
 
 ---
 
@@ -792,7 +808,7 @@ cd /path/to/belmont
 
 ### No AI tools detected during install
 
-If your project doesn't have a `.claude/`, `.cursor/`, etc. directory yet, the installer will ask which tool you're using and create the directory for you.
+If your project doesn't have a `.claude/`, `.codex/`, `.cursor/`, etc. directory yet, the installer will ask which tool you're using and create the directory for you.
 
 ### Skills not showing up in Claude Code
 
@@ -840,7 +856,7 @@ Run the reset skill (`/belmont:reset` in Claude Code) to reset all state files. 
 
 ## Requirements
 
-- An AI coding tool (Claude Code, Cursor, Windsurf, Gemini, Copilot, or any tool that reads markdown)
+- An AI coding tool (Claude Code, Codex, Cursor, Windsurf, Gemini, Copilot, or any tool that reads markdown)
 - [figma-mcp](https://github.com/nichochar/figma-mcp) (recommended) -- enables Belmont to load Figma designs, extract design tokens, and perform visual verification
 - No Docker required
 - No Python required
