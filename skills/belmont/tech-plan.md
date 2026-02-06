@@ -34,6 +34,10 @@ Before starting, verify:
 - `.belmont/PRD.md` exists and has meaningful content (not just template)
 - If PRD is empty or template-only, tell the user to run `/belmont:product-plan` first
 
+A file is **empty/default** if it doesn't exist, contains only the reset template text, or has placeholder names like `[Feature Name]`.
+
+**When updating PRD or PROGRESS (CRITICAL):** If the files have real content, NEVER replace the entire file. Only add/modify the specific tasks, milestones, or sections needed. Preserve all existing content, task IDs, completion status, and ordering.
+
 ## Your Workflow
 
 ### Phase 1 - Research (do silently, don't narrate)

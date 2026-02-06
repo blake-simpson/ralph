@@ -28,6 +28,13 @@ You are running an interactive planning session. You should not switch the agent
 - Writing to `.belmont/PRD.md` and `.belmont/PROGRESS.md`
 - Using WebFetch for research
 
+## Update vs. Create (CRITICAL)
+
+Before planning, read `.belmont/PRD.md` and `.belmont/PROGRESS.md`.
+
+- **Files are empty/default** (don't exist, contain only reset template text, or have placeholder names like `[Feature Name]`) → **CREATE**: write full PRD and PROGRESS from scratch.
+- **Files have real content** → **UPDATE**: only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
+
 ## Process
 
 1. Load relevant skills for the domain (frontend-design, vercel-react-best-practices, security, etc.)
@@ -38,7 +45,7 @@ You are running an interactive planning session. You should not switch the agent
 6. If Figma design URLs are included, spawn a belmont design-agent sub-agent (with the identity preamble and mandatory `.agents/belmont/design-agent.md` read) to assess them. Extract design context and add exact Figma URLs to the PRD for future agents to use
 7. Perform deep research on topics that are not clear
 8. Ask the user if they are happy to finalize the plan or if they have more questions
-9. Write the finalized PRD.md and PROGRESS.md
+9. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace)
 10. Exit - do NOT start implementation
 
 Final: Prompt uset to "/clear" and "/belmont:tech-plan"
