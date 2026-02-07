@@ -87,20 +87,28 @@ Execute in this order:
 
 #### Step 3: Verification
 
-Run these checks and fix any issues:
+**Detect the project's package manager** before running any commands. Check in this order:
+1. `pnpm-lock.yaml` exists → use `pnpm`
+2. `yarn.lock` exists → use `yarn`
+3. `bun.lockb` or `bun.lock` exists → use `bun`
+4. `package-lock.json` exists → use `npm`
+5. `packageManager` field in `package.json` → use whatever it specifies
+6. Default to `npm` if none of the above match
+
+Use the detected package manager (referred to as `<pkg>` below) for ALL commands:
 
 ```bash
 # Type checking
-npm run typecheck  # or: npx tsc --noEmit
+<pkg> run typecheck  # or: npx tsc --noEmit
 
 # Linting (with auto-fix)
-npm run lint:fix
+<pkg> run lint:fix
 
 # Tests
-npm run test
+<pkg> run test
 
 # Build (if quick)
-npm run build
+<pkg> run build
 ```
 
 **IMPORTANT**: Fix all errors before proceeding. Do not leave broken code.
@@ -242,7 +250,7 @@ If you cannot resolve build or type errors:
 
 ### Missing Dependencies
 If a required package is missing:
-1. Install it: `npm install [package]`
+1. Install it using the project's package manager: `<pkg> install [package]` (e.g. `pnpm add [package]`, `yarn add [package]`, `npm install [package]`, or `bun add [package]`)
 2. Document the addition in your report
 
 ### Design Ambiguity

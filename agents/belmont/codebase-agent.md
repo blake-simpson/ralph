@@ -31,7 +31,15 @@ Identify and report:
 - **State Management**: React Query, Zustand, Redux, etc.
 - **Testing**: Jest, Vitest, Playwright, etc.
 - **Build Tools**: Webpack, Vite, Turbopack, etc.
-- **Package Manager**: npm, pnpm, yarn, bun
+- **Package Manager**: Detect by checking (in order):
+  1. `pnpm-lock.yaml` exists → **pnpm**
+  2. `yarn.lock` exists → **yarn**
+  3. `bun.lockb` or `bun.lock` exists → **bun**
+  4. `package-lock.json` exists → **npm**
+  5. `packageManager` field in `package.json` → use whatever it specifies
+  6. Default to **npm** if none match
+
+  **This is critical** — downstream agents (implementation-agent, core-review-agent) use the detected package manager for all commands. Report it accurately.
 
 ### 2. Project Structure Scan
 

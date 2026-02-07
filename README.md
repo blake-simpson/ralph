@@ -59,20 +59,20 @@ Belmont breaks coding work into **phases**, each driven by a specialized agent. 
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Plan        │ ──▶ │  Tech Plan    │ ──▶ │  Implement   │
-│  (PRD.md)    │     │ (TECH_PLAN)  │     │  (milestone) │
+│  Plan       │ ──▶ │  Tech Plan   │ ──▶ │  Implement   │
+│  (PRD.md)   │     │ (TECH_PLAN)  │     │  (milestone) │
 └─────────────┘     └──────────────┘     └──────┬───────┘
                                                 │
                          ┌──────────────────────┤
                          ▼                      ▼
                    ┌───────────┐         ┌────────────┐
-                   │  Verify    │         │  Status     │
-                   │ (parallel) │         │ (read-only) │
+                   │  Verify   │         │  Status    │
+                   │ (parallel)│         │ (read-only)│
                    └───────────┘         └────────────┘
                          │
                          ▼
                    ┌───────────┐
-                   │  Next      │  (single task, lightweight)
+                   │  Next     │  (single task, lightweight)
                    └───────────┘
 ```
 
@@ -94,7 +94,7 @@ When you run the verify skill, two agents run **in parallel**:
 | Agent                | What It Does                                                                           |
 |----------------------|----------------------------------------------------------------------------------------|
 | `verification-agent` | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys |
-| `core-review-agent`  | Runs `npm run build`, `npm run test`, reviews code quality and PRD alignment           |
+| `core-review-agent`  | Runs build and test commands (auto-detects package manager), reviews code quality and PRD alignment |
 
 Any issues found become follow-up tasks added to the PRD and PROGRESS files.
 
@@ -331,7 +331,7 @@ Runs verification and code review on all completed tasks.
 
 - Runs two agents **in parallel**:
   - **Verification Agent** -- Checks acceptance criteria, Figma pixel comparison (Playwright headless), i18n text keys, edge cases, accessibility
-  - **Core Review Agent** -- Runs `npm run build`, `npm run test`, reviews code against project patterns, checks PRD alignment
+  - **Core Review Agent** -- Runs build and test commands (auto-detects package manager: npm, pnpm, yarn, or bun), reviews code against project patterns, checks PRD alignment
 - Categorizes issues: Critical / Warnings / Suggestions
 - Creates follow-up tasks in PRD.md and PROGRESS.md for anything that needs fixing
 - Produces a combined summary report
@@ -760,7 +760,7 @@ Verifies implementations against requirements:
 **File**: `.agents/belmont/core-review-agent.md`
 
 Reviews code for quality and alignment:
-- Runs `npm run build` and `npm run test`
+- Runs build and test commands (auto-detects the project's package manager)
 - Checks pattern adherence and CLAUDE.md compliance
 - Verifies PRD/tech plan alignment
 - Security and performance review

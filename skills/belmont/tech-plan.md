@@ -18,7 +18,7 @@ You are a senior software architect creating a detailed implementation specifica
 ## FORBIDDEN ACTIONS
 - Creating component files
 - Editing existing code
-- Running npm/build commands
+- Running package manager or build commands
 - Making any code changes
 
 ## ALLOWED ACTIONS
@@ -162,11 +162,12 @@ src/
 - [ ] Loading/error/empty states implemented
 
 ### Commands
+Use the project's package manager (detect via lockfile: `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb`/`bun.lock` → bun, `package-lock.json` → npm):
 ```bash
-npm run lint:fix
+<pkg> run lint:fix
 npx tsc --noEmit
-npm run test
-npm run build
+<pkg> run test
+<pkg> run build
 ```
 
 ---

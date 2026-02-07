@@ -92,7 +92,7 @@ For ALL completed tasks together, spawn these two sub-agents **simultaneously** 
 > Read `.belmont/PRD.md` for task details and planned solution.
 > Read `.belmont/TECH_PLAN.md` for technical specifications (if it exists).
 >
-> Run `npm run build` and `npm run test`. Review code quality, pattern adherence, and PRD alignment.
+> Detect the project's package manager (check for `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`/`bun.lock`, or `package-lock.json`; also check the `packageManager` field in `package.json`). Use the detected package manager to run build and test commands (e.g. `pnpm run build`, `yarn run build`, etc. — default to `npm` if unsure). Review code quality, pattern adherence, and PRD alignment.
 >
 > Return a complete code review report in the output format specified by the agent instructions.
 

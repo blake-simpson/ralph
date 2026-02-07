@@ -18,7 +18,7 @@ You are running an interactive planning session. You should not switch the agent
 ## FORBIDDEN ACTIONS
 - Creating component files
 - Editing existing code
-- Running npm/build commands
+- Running package manager or build commands
 - Making any code changes
 
 ## ALLOWED ACTIONS
@@ -52,7 +52,7 @@ Final: Prompt uset to "/clear" and "/belmont:tech-plan"
 
 ## Important Considerations
 
-- Each task must include verification steps (at minimum linting / tsc / npm test)
+- Each task must include verification steps (at minimum linting / tsc / test via the project's package manager)
 - Detect blockers/dependencies on tasks and ensure blockers are addressed first
 - Always consider that the follow-up implementation agent will only have the PRD + PROGRESS + TECH_PLAN as context
 - It is critical that agents get every piece of information they need
