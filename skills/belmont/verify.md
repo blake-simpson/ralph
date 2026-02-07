@@ -22,25 +22,29 @@ Also check for archived MILESTONE files (`.belmont/MILESTONE-*.done.md`) — the
 2. These are the tasks that need verification
 3. If no tasks are completed, report "No completed tasks to verify" and stop
 
-## Sub-Agent Execution Model
+## Execution Model
 
-**CRITICAL**: You are the **orchestrator**. You MUST NOT perform the verification or review work yourself. Each agent below MUST be dispatched as a **sub-agent** — a separate, isolated process.
+**CRITICAL**: You are the **orchestrator** (team lead). You MUST NOT perform the verification or review work yourself. Each agent below MUST be dispatched as either an **agent team teammate** or a **sub-agent** — a separate, isolated process.
 
-**How to spawn sub-agents**:
-- **Claude Code / Codex**: Use the `Task` tool. Pass the sub-agent prompt as the task description. Spawn both agents simultaneously for parallel execution.
-- **Cursor / Other tools**: If a sub-agent or task-dispatch mechanism is available, use it. Otherwise, execute each agent's instructions sequentially — but do NOT blend their work together.
+### Detect Execution Strategy
 
-**Rules for the orchestrator**:
-1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself — the sub-agents read them
-2. **DO NOT** run builds, tests, or check acceptance criteria — sub-agents do this
-3. **DO** compose the sub-agent prompts using the templates below
-4. **DO** collect each sub-agent's output report
+1. **Agent Teams** (preferred) — If you can spawn agent team teammates (e.g., Claude Code with agent teams enabled, or any tool with a multi-agent/swarm feature), spawn both agents as **teammates for true parallel execution**. You are the team lead.
+2. **Sub-Agents** (fallback) — Use the `Task` tool (Claude Code / Codex) or equivalent. Spawn both agents simultaneously for parallel execution if possible, or run them sequentially.
+
+Both agents are fully independent — they read the same input files but check different things and produce separate reports. This makes verification an ideal candidate for parallel execution via agent teams.
+
+### Rules for the orchestrator (both strategies)
+
+1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself — the agents read them
+2. **DO NOT** run builds, tests, or check acceptance criteria — agents do this
+3. **DO** compose the agent prompts using the templates below
+4. **DO** collect each agent's output report
 5. **DO** combine the reports in Step 3
-6. **DO** include the full sub-agent preamble (identity + mandatory agent file) in every sub-agent prompt — this prevents the sub-agent from using other agent definitions in the project
+6. **DO** include the full agent preamble (identity + mandatory agent file) in every agent prompt — this prevents the agent from using other agent definitions in the project
 
 ## Step 2: Run Verification and Code Review in Parallel
 
-For ALL completed tasks together, spawn these two sub-agents **simultaneously** (or sequentially if parallel dispatch is not available):
+For ALL completed tasks together, spawn these two agents **simultaneously** — as agent team teammates (preferred) or parallel sub-agents (fallback). If neither parallel mechanism is available, run them sequentially:
 
 ---
 
@@ -48,7 +52,7 @@ For ALL completed tasks together, spawn these two sub-agents **simultaneously** 
 
 **Purpose**: Verify task implementations meet all requirements.
 
-**Spawn a sub-agent with this prompt**:
+**Spawn an agent with this prompt**:
 
 > **IDENTITY**: You are the belmont verification agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -78,7 +82,7 @@ For ALL completed tasks together, spawn these two sub-agents **simultaneously** 
 
 **Purpose**: Review code changes for quality and PRD alignment.
 
-**Spawn a sub-agent with this prompt**:
+**Spawn an agent with this prompt**:
 
 > **IDENTITY**: You are the belmont code review agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >

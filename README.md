@@ -16,6 +16,7 @@ Strong guardrails are in place to keep the agent focused and on task.
 
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
+- [Agent Teams Support](#agent-teams-support)
 - [Installation](#installation)
 - [Supported Tools](#supported-tools)
 - [Skills Reference](#skills-reference)
@@ -81,33 +82,32 @@ Belmont breaks coding work into **phases**, each driven by a specialized agent. 
 Belmont uses a **MILESTONE file** (`.belmont/MILESTONE.md`) as the shared context between agents. Instead of the orchestrator passing large outputs between agents in their prompts, each agent reads from and writes to this single file. This dramatically reduces token usage and keeps each agent focused.
 
 ```
-Orchestrator
+Orchestrator (Team Lead)
     │
     ├─ 1. Creates MILESTONE.md with task list & PRD context
     │
-    ├─ 2. Spawns prd-agent ──────── reads MILESTONE.md + TECH_PLAN ── writes PRD Analysis section
-    │
-    ├─ 3. Spawns codebase-agent ─── reads MILESTONE.md + TECH_PLAN ── writes Codebase Analysis section
-    │
-    ├─ 4. Spawns design-agent ───── reads MILESTONE.md + TECH_PLAN ── writes Design Specifications section
+    ├─ 2-4. Research phases (parallel with agent teams, sequential without):
+    │     ├─ prd-agent ──────── reads MILESTONE.md + TECH_PLAN ── writes PRD Analysis section
+    │     ├─ codebase-agent ─── reads MILESTONE.md + TECH_PLAN ── writes Codebase Analysis section
+    │     └─ design-agent ───── reads MILESTONE.md + TECH_PLAN ── writes Design Specifications section
     │
     ├─ 5. Spawns implementation-agent reads MILESTONE.md + TECH_PLAN ── writes code + Implementation Log
     │
     └─ 6. Archives MILESTONE.md → MILESTONE-M2.done.md
 ```
 
-Each agent receives a **minimal prompt** (just identity + "read the MILESTONE file") instead of having the orchestrator paste all prior outputs into the prompt. The orchestrator's context stays flat — it never accumulates the massive outputs from each phase.
+Each agent receives a **minimal prompt** (just identity + "read the MILESTONE file") instead of having the orchestrator paste all prior outputs into the prompt. The orchestrator's context stays flat — it never accumulates the massive outputs from each phase. With agent teams enabled, the three research agents run as parallel teammates for faster milestone completion.
 
 ### Implementation Pipeline
 
-When you run the implement skill, the orchestrator creates a MILESTONE file, then each phase runs sequentially:
+When you run the implement skill, the orchestrator creates a MILESTONE file, then runs 4 phases. With [agent teams](#agent-teams-support), phases 1–3 run **in parallel** as teammates; without them, they run sequentially:
 
-| Phase              | Agent                  | Model  | Reads                              | Writes to MILESTONE             |
-|--------------------|------------------------|--------|------------------------------------|---------------------------------|
-| 1. Task Analysis   | `prd-agent`            | Sonnet | MILESTONE + PRD + TECH_PLAN        | `## PRD Analysis`               |
-| 2. Codebase Scan   | `codebase-agent`       | Sonnet | MILESTONE + TECH_PLAN + codebase   | `## Codebase Analysis`          |
-| 3. Design Analysis | `design-agent`         | Sonnet | MILESTONE + TECH_PLAN + Figma      | `## Design Specifications`      |
-| 4. Implementation  | `implementation-agent` | Opus   | MILESTONE + TECH_PLAN              | Code, tests, `## Implementation Log` |
+| Phase              | Agent                  | Model  | Reads                              | Writes to MILESTONE             | Parallel? |
+|--------------------|------------------------|--------|------------------------------------|---------------------------------|-----------|
+| 1. Task Analysis   | `prd-agent`            | Sonnet | MILESTONE + PRD + TECH_PLAN        | `## PRD Analysis`               | Yes (1–3) |
+| 2. Codebase Scan   | `codebase-agent`       | Sonnet | MILESTONE + TECH_PLAN + codebase   | `## Codebase Analysis`          | Yes (1–3) |
+| 3. Design Analysis | `design-agent`         | Sonnet | MILESTONE + TECH_PLAN + Figma      | `## Design Specifications`      | Yes (1–3) |
+| 4. Implementation  | `implementation-agent` | Opus   | MILESTONE + TECH_PLAN              | Code, tests, `## Implementation Log` | After 1–3 |
 
 After implementation, the MILESTONE file is archived (renamed to `MILESTONE-[ID].done.md`) to prevent stale context from bleeding into the next milestone.
 
@@ -121,6 +121,66 @@ When you run the verify skill, two agents run **in parallel**:
 | `core-review-agent`  | Sonnet | Runs build and test commands (auto-detects package manager), reviews code quality and PRD alignment |
 
 Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context. Any issues found become follow-up tasks added to the PRD and PROGRESS files.
+
+---
+
+## Agent Teams Support
+
+Belmont's orchestrator skills are written to automatically take advantage of **agent teams** (or similar multi-agent/swarm features) when available. If the feature is not enabled, Belmont falls back to its standard sequential sub-agent workflow. No configuration changes are needed — the orchestrator detects which execution strategy is available and adapts.
+
+### What Changes With Agent Teams
+
+| Skill | Without Agent Teams | With Agent Teams |
+|-------|-------------------|-----------------|
+| **implement** | 4 phases run sequentially (prd → codebase → design → implementation) | Research phases 1–3 run **in parallel** as teammates, then implementation runs after all three complete |
+| **verify** | 2 agents dispatched as sub-agents (parallel if tool supports it) | 2 agents spawned as **teammates** for true parallel execution |
+| **next** | Single sub-agent (no change) | Single agent — teams overhead not needed |
+
+### How It Works
+
+The orchestrator (your main Claude session) acts as the **team lead**. The specialized agents (PRD analyst, codebase analyst, design analyst, implementation agent, verification agent, core review agent) are the **teammates**.
+
+```
+                        ┌──────────────────┐
+                        │   Orchestrator   │
+                        │   (Team Lead)    │
+                        └────────┬─────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              ▼                  ▼                   ▼
+     ┌────────────────┐ ┌───────────────┐ ┌─────────────────┐
+     │  PRD Analyst   │ │   Codebase    │ │  Design Analyst │
+     │  (Teammate)    │ │   Analyst     │ │  (Teammate)     │
+     │                │ │  (Teammate)   │ │                 │
+     └────────┬───────┘ └───────┬───────┘ └────────┬────────┘
+              │                 │                   │
+              └─────── MILESTONE file ──────────────┘
+                        (shared context)
+                                │
+                                ▼
+                   ┌─────────────────────┐
+                   │  Implementation     │
+                   │  Agent (Teammate)   │
+                   └─────────────────────┘
+```
+
+In parallel mode, each research teammate writes to its own designated section of the MILESTONE file (`## PRD Analysis`, `## Codebase Analysis`, `## Design Specifications`). They read from the `## Orchestrator Context` section which contains the raw PRD task definitions — so they don't depend on each other's output.
+
+### Enabling Agent Teams
+
+**Claude Code**: Agent teams are experimental. Enable by adding to your settings:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  }
+}
+```
+
+See the [Claude Code agent teams documentation](https://code.claude.com/docs/en/agent-teams) for details.
+
+**Other tools**: If your AI tool supports a multi-agent, swarm, or team feature, the orchestrator prompts are written to detect and use it. If no such feature is available, the standard sub-agent workflow is used automatically.
 
 ---
 

@@ -23,6 +23,8 @@ You are the Codebase Agent - the second phase in the Belmont implementation pipe
 
 **IMPORTANT**: You do NOT receive input from the orchestrator's prompt. All your context comes from reading these files and scanning the codebase directly.
 
+**Parallel Execution Note**: If running as part of an agent team (in parallel with other research agents), the `## PRD Analysis` section may not be populated yet. In that case, use the `## Orchestrator Context` section directly — it contains the raw PRD task definitions and scope boundaries needed for your scan.
+
 ## Scanning Process
 
 ### 1. Project Stack Analysis
