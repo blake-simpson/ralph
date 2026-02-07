@@ -71,66 +71,47 @@ The four section headings (`## PRD Analysis`, `## Codebase Analysis`, `## Design
 
 ## Execution Model
 
-**CRITICAL**: You are the **orchestrator** (team lead). You MUST NOT perform the phase work yourself. Each phase below MUST be dispatched to either an **agent team teammate** or a **sub-agent** — a separate, isolated process that runs the phase instructions and returns when complete.
+**CRITICAL**: You are the **orchestrator**. You MUST NOT perform the phase work yourself. Each phase below MUST be dispatched to a **sub-agent** — a separate, isolated process that runs the phase instructions and returns when complete.
 
-### Detect Execution Strategy
+### How to Dispatch
 
-You have two strategies. Use the first one that your environment supports:
+Use the `Task` tool to spawn each phase as a sub-agent. Pass the **exact prompt** shown in each phase section below as the task description. Do NOT summarize, shorten, or paraphrase the prompt — copy it exactly.
 
-1. **Agent Teams** (preferred) — If you can spawn agent team teammates (e.g., Claude Code with agent teams enabled, or any tool with a multi-agent/swarm feature), use them. You are the **team lead**; the agents are your **teammates**. This enables parallel execution of the research phases for significant time savings.
-2. **Sub-Agents** (fallback) — If agent teams are not available, use the `Task` tool (Claude Code / Codex) or equivalent dispatch mechanism (Cursor / other tools) to run each phase as a sub-agent.
+Each sub-agent will:
+1. Read its agent file (specified in the prompt)
+2. Read the MILESTONE file
+3. Do its work
+4. Return when complete
 
-### Strategy A: Agent Teams (Parallel Research)
+Run phases **sequentially**: Phase 1 → Phase 2 → Phase 3 → Phase 4. Wait for each to complete before starting the next.
 
-When agent teams are available, the research phases (1–3) run **in parallel** as teammates:
+### Parallel research with agent teams/swarms (optional)
 
-1. **Create the MILESTONE file** (Step 2 — do this first)
-2. **Spawn three research teammates simultaneously** for Phases 1, 2, and 3:
-   - A **PRD analyst** teammate — writes `## PRD Analysis`
-   - A **Codebase analyst** teammate — writes `## Codebase Analysis`
-   - A **Design analyst** teammate — writes `## Design Specifications`
-3. **Wait for all three teammates to complete** — verify each section in the MILESTONE file is populated
-4. **Spawn the implementation agent** (Phase 4) — reads the complete MILESTONE file and implements all tasks
+If your environment supports **agent teams/swarms** (e.g., `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`), you may spawn Phases 1, 2, and 3 as parallel teammates instead of sequential sub-agents. Each writes to its own MILESTONE section so there are no conflicts. Phase 4 still runs after all three complete. If you are unsure whether agent teams/swarms are available, use sequential sub-agents — do not guess.
 
-Each teammate writes to its own designated section of the MILESTONE file. Use the same identity preamble and mandatory-read instruction from the phase prompts in Step 3 below.
+### Rules for the orchestrator
 
-> **Why parallel works**: Research phases 1–3 are independent. They all read from the Orchestrator Context section (which contains the raw PRD task definitions and TECH_PLAN guidance) and don't need each other's output. The implementation agent (Phase 4) sees all three analyses and synthesizes them.
->
-> **Conflict avoidance**: Each teammate writes to a different section of the MILESTONE file. Instruct each to ONLY modify their designated section and never touch other sections.
-
-### Strategy B: Sequential Sub-Agents (Fallback)
-
-When agent teams are NOT available:
-
-- **Claude Code / Codex**: Use the `Task` tool. Pass the sub-agent prompt as the task description.
-- **Cursor / Other tools**: If a sub-agent or task-dispatch mechanism is available, use it. If not, clearly separate each phase: read the agent file, execute its instructions fully, then capture the output before moving on — do NOT blend phase work together.
-
-Phases run sequentially: Phase 1 → 2 → 3 → 4. Each subsequent agent can read the output of previous agents from the MILESTONE file.
-
-### Rules for the orchestrator (both strategies)
-
-1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself — the agents read them
-2. **DO NOT** scan the codebase, analyze designs, or write implementation code — agents do this
-3. **DO** create the MILESTONE file with full orchestrator context before spawning any agent
-4. **DO** spawn agents with minimal prompts (they read the MILESTONE file themselves)
-5. **DO** wait for agents to complete before proceeding to the next step
-6. **DO** handle blockers and errors reported by agents
-7. **DO** include the full agent preamble (identity + mandatory agent file) in every agent prompt
+1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself — the sub-agents read them
+2. **DO NOT** scan the codebase, analyze designs, or write implementation code — sub-agents do this
+3. **DO** create the MILESTONE file with full orchestrator context before spawning any sub-agent
+4. **DO** use the `Task` tool for every phase — never do phase work inline
+5. **DO** pass the **exact prompt text** from each phase section as the task description
+6. **DO** wait for each sub-agent to complete before proceeding to the next phase
+7. **DO** handle blockers and errors reported by sub-agents
 
 ## Step 3: Run the Agent Pipeline
 
-Run ALL incomplete tasks in the milestone through the four phases below. Each agent reads its context from the MILESTONE file and writes its output back to it. You spawn exactly **4 agents per milestone** with minimal prompts.
+Run ALL incomplete tasks in the milestone through the four phases below. Each sub-agent reads its context from the MILESTONE file and writes its output back to it. You spawn exactly **4 sub-agents per milestone**.
 
-- **Agent Teams (Strategy A)**: Spawn Phases 1, 2, and 3 as teammates **in parallel**. Wait for all three, then spawn Phase 4.
-- **Sub-Agents (Strategy B)**: Run Phases 1 → 2 → 3 → 4 **sequentially**.
+Run phases sequentially: Phase 1 → Phase 2 → Phase 3 → Phase 4.
 
 ---
 
-### Phase 1: Task Analysis (prd-agent) — *parallelizable*
+### Phase 1: Task Analysis (prd-agent)
 
 **Purpose**: Analyze ALL tasks in the milestone, extract all relevant context from PRD and TECH_PLAN.md, write structured task summaries to the MILESTONE file.
 
-**Spawn an agent (teammate or sub-agent) with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont PRD analysis agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -138,15 +119,15 @@ Run ALL incomplete tasks in the milestone through the four phases below. Each ag
 >
 > The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
 
-**Wait for**: Agent to complete. Verify that `## PRD Analysis` in the MILESTONE file has been populated. (In Strategy A, this runs in parallel with Phases 2 and 3 — wait for all three before Phase 4.)
+**Wait for**: Sub-agent to complete. Verify that `## PRD Analysis` in the MILESTONE file has been populated.
 
 ---
 
-### Phase 2: Codebase Scan (codebase-agent) — *parallelizable*
+### Phase 2: Codebase Scan (codebase-agent)
 
 **Purpose**: Scan the codebase for existing patterns relevant to ALL tasks, write findings to the MILESTONE file.
 
-**Spawn an agent (teammate or sub-agent) with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont codebase analysis agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -154,15 +135,15 @@ Run ALL incomplete tasks in the milestone through the four phases below. Each ag
 >
 > The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
 
-**Wait for**: Agent to complete. Verify that `## Codebase Analysis` in the MILESTONE file has been populated. (In Strategy A, this runs in parallel with Phases 1 and 3 — wait for all three before Phase 4.)
+**Wait for**: Sub-agent to complete. Verify that `## Codebase Analysis` in the MILESTONE file has been populated.
 
 ---
 
-### Phase 3: Design Analysis (design-agent) — *parallelizable*
+### Phase 3: Design Analysis (design-agent)
 
 **Purpose**: Analyze Figma designs (if provided) for ALL tasks, write design specifications to the MILESTONE file.
 
-**Spawn an agent (teammate or sub-agent) with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont design analysis agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -170,7 +151,7 @@ Run ALL incomplete tasks in the milestone through the four phases below. Each ag
 >
 > The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
 
-**Wait for**: Agent to complete. Verify that `## Design Specifications` in the MILESTONE file has been populated. (In Strategy A, this runs in parallel with Phases 1 and 2 — wait for all three before Phase 4.)
+**Wait for**: Sub-agent to complete. Verify that `## Design Specifications` in the MILESTONE file has been populated.
 
 **IMPORTANT**: If the agent reports that specific tasks have Figma URLs that failed to load, mark ONLY those tasks as 🚫 BLOCKED in the PRD. The remaining tasks continue to Phase 4.
 
@@ -178,9 +159,9 @@ Run ALL incomplete tasks in the milestone through the four phases below. Each ag
 
 ### Phase 4: Implementation (implementation-agent) — *must run after Phases 1–3*
 
-**Purpose**: Implement ALL tasks using the accumulated context in the MILESTONE file. In both strategies, this phase runs only after all research phases are complete.
+**Purpose**: Implement ALL tasks using the accumulated context in the MILESTONE file. This phase runs only after all research phases (1–3) are complete.
 
-**Spawn an agent with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont implementation agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -188,7 +169,7 @@ Run ALL incomplete tasks in the milestone through the four phases below. Each ag
 >
 > The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
 
-**Wait for**: Agent to complete with all tasks implemented, verified, and committed. Verify that `## Implementation Log` in the MILESTONE file has been populated.
+**Wait for**: Sub-agent to complete with all tasks implemented, verified, and committed. Verify that `## Implementation Log` in the MILESTONE file has been populated.
 
 ---
 
@@ -280,8 +261,8 @@ If any check fails, STOP and report the issue rather than proceeding.
 1. **Create the MILESTONE file first** - Write it with full orchestrator context before spawning any agent
 2. **Minimal agent prompts** - Agents read from the MILESTONE file, not from your prompt
 3. **All tasks, all phases** - Pass every task in the milestone through every phase. Exactly 4 agents per milestone.
-4. **Follow the phase order** - prd-agent → codebase-agent → design-agent → implementation-agent (phases 1–3 can run in parallel with agent teams)
-5. **Dispatch to agents** - Spawn a teammate or sub-agent for each phase. Do NOT do the phase work inline.
+4. **Follow the phase order** - prd-agent → codebase-agent → design-agent → implementation-agent (sequential)
+5. **Dispatch via `Task` tool** - Every phase MUST be a sub-agent via `Task`. Do NOT do phase work inline.
 6. **Update tracking files** - Keep PRD.md and PROGRESS.md current after implementation completes
 7. **Don't skip phases** - Even if no Figma design, still run the design phase (it handles the no-design case)
 8. **Clean up the MILESTONE file** - Archive it after the milestone is complete

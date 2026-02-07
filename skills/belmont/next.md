@@ -92,7 +92,7 @@ If Figma URLs exist for this task, note them in the Design Specifications sectio
 
 ## Step 3: Dispatch to Implementation Agent
 
-**Spawn a sub-agent with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont implementation agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >

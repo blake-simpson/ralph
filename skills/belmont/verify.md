@@ -24,27 +24,22 @@ Also check for archived MILESTONE files (`.belmont/MILESTONE-*.done.md`) — the
 
 ## Execution Model
 
-**CRITICAL**: You are the **orchestrator** (team lead). You MUST NOT perform the verification or review work yourself. Each agent below MUST be dispatched as either an **agent team teammate** or a **sub-agent** — a separate, isolated process.
+**CRITICAL**: You are the **orchestrator**. You MUST NOT perform the verification or review work yourself. Each agent below MUST be dispatched as a **sub-agent** via the `Task` tool — a separate, isolated process.
 
-### Detect Execution Strategy
+**Parallel with agent teams/swarms (optional)**: If your environment supports agent teams/swarms (e.g., `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`), you may spawn both agents as parallel teammates instead of sequential sub-agents. They are fully independent. If unsure whether agent teams/swarms are available, use sequential sub-agents.
 
-1. **Agent Teams** (preferred) — If you can spawn agent team teammates (e.g., Claude Code with agent teams enabled, or any tool with a multi-agent/swarm feature), spawn both agents as **teammates for true parallel execution**. You are the team lead.
-2. **Sub-Agents** (fallback) — Use the `Task` tool (Claude Code / Codex) or equivalent. Spawn both agents simultaneously for parallel execution if possible, or run them sequentially.
+### Rules for the orchestrator
 
-Both agents are fully independent — they read the same input files but check different things and produce separate reports. This makes verification an ideal candidate for parallel execution via agent teams.
-
-### Rules for the orchestrator (both strategies)
-
-1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself — the agents read them
-2. **DO NOT** run builds, tests, or check acceptance criteria — agents do this
-3. **DO** compose the agent prompts using the templates below
-4. **DO** collect each agent's output report
+1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself — the sub-agents read them
+2. **DO NOT** run builds, tests, or check acceptance criteria — sub-agents do this
+3. **DO** use the `Task` tool for each agent — pass the **exact prompt text** from the templates below
+4. **DO** collect each sub-agent's output report
 5. **DO** combine the reports in Step 3
-6. **DO** include the full agent preamble (identity + mandatory agent file) in every agent prompt — this prevents the agent from using other agent definitions in the project
+6. **DO** include the full agent preamble (identity + mandatory agent file) in every sub-agent prompt — this prevents the sub-agent from using other agent definitions in the project
 
-## Step 2: Run Verification and Code Review in Parallel
+## Step 2: Run Verification and Code Review
 
-For ALL completed tasks together, spawn these two agents **simultaneously** — as agent team teammates (preferred) or parallel sub-agents (fallback). If neither parallel mechanism is available, run them sequentially:
+For ALL completed tasks together, dispatch these two sub-agents via the `Task` tool. Run them sequentially (verification first, then code review):
 
 ---
 
@@ -52,7 +47,7 @@ For ALL completed tasks together, spawn these two agents **simultaneously** — 
 
 **Purpose**: Verify task implementations meet all requirements.
 
-**Spawn an agent with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont verification agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -82,7 +77,7 @@ For ALL completed tasks together, spawn these two agents **simultaneously** — 
 
 **Purpose**: Review code changes for quality and PRD alignment.
 
-**Spawn an agent with this prompt**:
+**Dispatch a sub-agent via the `Task` tool with this exact prompt**:
 
 > **IDENTITY**: You are the belmont code review agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
@@ -175,7 +170,7 @@ Output a combined summary:
 
 ## Important Rules
 
-1. **Run both agents** - Always run verification AND code review
+1. **Run both sub-agents** - Always run verification AND code review via `Task` tool
 2. **Be thorough** - Check all completed tasks, not just the latest
 3. **Create actionable follow-ups** - Issues should become trackable tasks
 4. **Don't fix issues yourself** - Report them and create follow-up tasks

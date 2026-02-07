@@ -79,7 +79,8 @@ Recent decisions:
 ## Rules
 
 - **DO NOT** modify any files - this is read-only
-- **DO** read all relevant files
+- **DO NOT** scan the codebase / git. Just use the progress + PRD files for info.
+- **DO** read relevant files (PRD, PROGRESS only)
 - **DO** show all tasks with their current status
 - **DO** show milestones from PROGRESS.md
 - **DO** show blockers if any exist
