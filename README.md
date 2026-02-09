@@ -106,7 +106,7 @@ Orchestrator
     └─ 4. Archives MILESTONE.md → MILESTONE-M2.done.md
 ```
 
-Each agent reads **only the MILESTONE file** — the orchestrator extracts all relevant PRD and TECH_PLAN context into it upfront. Agents receive a minimal prompt (just identity + "read the MILESTONE file"). The orchestrator's context stays flat — it never accumulates the massive outputs from each phase.
+Each agent reads **only the MILESTONE file** — the orchestrator extracts all relevant PRD and TECH_PLAN context into it upfront. Agents receive a minimal prompt (just identity + "read the MILESTONE file"). The orchestrator's context stays flat — it never accumulates the massive outputs from each phase. This helps save tokens & prevent hallucinations.
 
 ### Implementation Pipeline
 
@@ -330,15 +330,15 @@ Agents and skills are always installed to `.agents/` -- the single source of tru
 
 Each AI tool is wired to `.agents/skills/belmont/` in the way it expects. Some tools use symlinks, while others get a copied/synced directory:
 
-| Tool               | Symlink                       | Target                          | How to Use                                                            |
-|--------------------|-------------------------------|---------------------------------|-----------------------------------------------------------------------|
-| **Claude Code**    | `.claude/agents/belmont`<br/>`.claude/commands/belmont` | `agents -> .agents/belmont` (symlink)<br/>`commands` copied from `.agents/skills/belmont` | Slash commands: `/belmont:product-plan`, `/belmont:implement`, etc. |
-| **Codex**          | `.codex/belmont`              | Copied from `.agents/skills/belmont` | `AGENTS.md` includes Belmont routing for `belmont:<skill>` prompts     |
-| **Cursor**         | `.cursor/rules/belmont/*.mdc` | `→ .agents/skills/belmont/*.md` | Toggle rules in Settings > Rules, or reference in Composer/Agent mode |
-| **Windsurf**       | `.windsurf/rules/belmont`     | Symlink to `.agents/skills/belmont` | Reference rules in Cascade                                            |
-| **Gemini**         | `.gemini/rules/belmont`       | Symlink to `.agents/skills/belmont` | Reference rules in Gemini                                             |
-| **GitHub Copilot** | `.github/belmont`             | Symlink to `.agents/skills/belmont` | Reference files in Copilot Chat                                       |
-| **Any other tool** | *(none)*                      | `.agents/skills/belmont/`       | Point your tool at the skill files directly                           |
+| Tool               | Symlink                                                 | Target                                                                                    | How to Use                                                            |
+|--------------------|---------------------------------------------------------|-------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
+| **Claude Code**    | `.claude/agents/belmont`<br/>`.claude/commands/belmont` | `agents -> .agents/belmont` (symlink)<br/>`commands` copied from `.agents/skills/belmont` | Slash commands: `/belmont:product-plan`, `/belmont:implement`, etc.   |
+| **Codex**          | `.codex/belmont`                                        | Copied from `.agents/skills/belmont`                                                      | `AGENTS.md` includes Belmont routing for `belmont:<skill>` prompts    |
+| **Cursor**         | `.cursor/rules/belmont/*.mdc`                           | `→ .agents/skills/belmont/*.md`                                                           | Toggle rules in Settings > Rules, or reference in Composer/Agent mode |
+| **Windsurf**       | `.windsurf/rules/belmont`                               | Symlink to `.agents/skills/belmont`                                                       | Reference rules in Cascade                                            |
+| **Gemini**         | `.gemini/rules/belmont`                                 | Symlink to `.agents/skills/belmont`                                                       | Reference rules in Gemini                                             |
+| **GitHub Copilot** | `.github/belmont`                                       | Symlink to `.agents/skills/belmont`                                                       | Reference files in Copilot Chat                                       |
+| **Any other tool** | *(none)*                                                | `.agents/skills/belmont/`                                                                 | Point your tool at the skill files directly                           |
 
 Cursor uses per-file symlinks. Windsurf/Gemini/Copilot use a directory symlink. Claude Code and Codex use copied skill files.
 
@@ -825,8 +825,8 @@ Tracks milestones, session history, and blockers:
 - [ ] P1-2: User settings
 
 ## Session History
-| Session | Date/Time           | Context Used | Milestones Completed |
-|---------|---------------------|--------------|----------------------|
+| Session | Date/Time           | Context Used    | Milestones Completed |
+|---------|---------------------|-----------------|----------------------|
 | 1       | 2026-02-05 10:00:00 | PRD + TECH_PLAN | M1                   |
 
 ## Decisions Log
