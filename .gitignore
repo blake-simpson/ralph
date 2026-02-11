@@ -5,3 +5,6 @@ dist/
 # Embedded content (copied by build script, cleaned up after)
 cmd/belmont/skills/
 cmd/belmont/agents/
+
+# Local Claude settings
+.claude/
