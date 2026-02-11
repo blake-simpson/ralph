@@ -23,11 +23,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT"
 
+# Regenerate skills from partials and check for uncommitted changes
+echo "Regenerating skills from partials..."
+"$SCRIPT_DIR/generate-skills.sh"
+
+if ! git diff --quiet; then
+    echo ""
+    echo "WARNING: Generated skill files are out of date with their templates."
+    echo "The following files have uncommitted changes after regeneration:"
+    echo ""
+    git diff --name-only
+    echo ""
+    echo "Please review, commit these changes, then re-run the release script."
+    exit 1
+fi
+
 # Check for uncommitted changes
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "Error: uncommitted changes detected. Commit or stash before releasing."
     exit 1
 fi
+
+# Verify the build succeeds before tagging
+echo "Verifying build..."
+"$SCRIPT_DIR/build.sh" "$VERSION"
+rm -rf "$ROOT/dist"  # Clean up — the real build happens in CI
+echo "Build verified."
+echo ""
 
 # Check tag doesn't already exist
 if git rev-parse "$TAG" >/dev/null 2>&1; then

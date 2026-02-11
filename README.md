@@ -676,11 +676,13 @@ belmont/
 ├── go.mod
 ├── skills/
 │   └── belmont/
-│       ├── product-plan.md      # Planning skill
-│       ├── tech-plan.md         # Tech plan skill
-│       ├── implement.md         # Implementation skill (full milestone)
-│       ├── next.md              # Next task skill (single task, lightweight)
-│       ├── verify.md            # Verification skill
+│       ├── _partials/           # Shared content blocks for templates
+│       ├── _src/                # Skill templates with @include directives
+│       ├── product-plan.md      # Planning skill (generated)
+│       ├── tech-plan.md         # Tech plan skill (generated)
+│       ├── implement.md         # Implementation skill (generated)
+│       ├── next.md              # Next task skill (generated)
+│       ├── verify.md            # Verification skill (generated)
 │       ├── status.md            # Status skill
 │       └── reset.md             # Reset state skill
 ├── agents/
@@ -692,7 +694,8 @@ belmont/
 │       └── core-review-agent.md     # Code review agent
 ├── scripts/
 │   ├── build.sh                 # Build with embedded content + version injection
-│   └── release.sh               # Prepare release (changelog + tag)
+│   ├── release.sh               # Prepare release (changelog + tag)
+│   └── generate-skills.sh      # Generate skills from templates + partials
 ├── .github/
 │   └── workflows/
 │       └── release.yml          # CI: cross-compile + publish on tag push
@@ -877,7 +880,7 @@ Reads the MILESTONE file, then scans the project:
 **File**: `.agents/belmont/design-agent.md` | **Model**: Sonnet
 
 Reads the MILESTONE file, then analyzes Figma designs when provided:
-- Loads designs via Figma MCP
+- Loads designs via Figma Plugin or MCP
 - Extracts exact colors, typography, spacing, effects
 - Maps to existing design system components
 - Identifies new components to create

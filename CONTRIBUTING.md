@@ -52,17 +52,17 @@ This reads directly from your working tree — no rebuild, no git push, no relea
 alias bdev="go run $(pwd)/cmd/belmont install --source $(pwd)"
 
 # Then from any project directory:
-bdev --project . --no-prompt
+bdev --project ~/your-project --no-prompt
 ```
 
 ### Dev vs Release Builds
 
-| | Dev build (`go build`) | Release build (`scripts/build.sh`) |
-|---|---|---|
-| Skills/agents embedded | No | Yes |
-| `install` requires `--source` | Yes | No |
-| Version info | `dev` | Injected (e.g. `0.2.0`) |
-| Build tag | `!embed` | `embed` |
+|                               | Dev build (`go build`) | Release build (`scripts/build.sh`) |
+|-------------------------------|------------------------|------------------------------------|
+| Skills/agents embedded        | No                     | Yes                                |
+| `install` requires `--source` | Yes                    | No                                 |
+| Version info                  | `dev`                  | Injected (e.g. `0.2.0`)            |
+| Build tag                     | `!embed`               | `embed`                            |
 
 To produce a release-style build locally:
 
@@ -82,11 +82,14 @@ belmont/
 │   ├── main.go          # All CLI logic (single file, no external deps)
 │   ├── embed.go         # go:embed directives (release builds)
 │   └── embed_dev.go     # Empty embed vars (dev builds)
-├── skills/belmont/      # Skill markdown files (source of truth)
+├── skills/belmont/      # Generated skill markdown files (source of truth)
+│   ├── _partials/       # Shared content blocks (identity-preamble, etc.)
+│   └── _src/            # Skill templates with @include directives
 ├── agents/belmont/      # Agent markdown files (source of truth)
 ├── scripts/
 │   ├── build.sh         # Build with embedded content + version injection
-│   └── release.sh       # Prepare release (changelog + tag)
+│   ├── release.sh       # Prepare release (changelog + tag)
+│   └── generate-skills.sh  # Generate skills from templates + partials
 ├── install.sh           # Public curl|sh installer for end users
 └── bin/
     ├── install.sh       # Dev installer (macOS/Linux)
@@ -97,7 +100,39 @@ belmont/
 
 ### Skills and Agents
 
-Skills live in `skills/belmont/` and agents in `agents/belmont/`. These are plain markdown files — edit them directly and test with `--source` as described above.
+Skills live in `skills/belmont/` and agents in `agents/belmont/`. Some skills are **generated from templates** — check whether a `_src/` counterpart exists before editing.
+
+#### Editing workflow
+
+1. **Check if the skill has a template**: Look in `skills/belmont/_src/` for a file with the same name.
+   - **If yes** → edit the `_src/` template (and/or `_partials/` if changing shared content), then run `scripts/generate-skills.sh`
+   - **If no** → edit the file in `skills/belmont/` directly (e.g., `status.md`, `reset.md`)
+
+2. **Shared partials** (`skills/belmont/_partials/`): Reusable content blocks included by templates. Partials support `{{variable}}` placeholders that are filled in by each template's `@include` directive.
+
+3. **Dispatch strategy** (`skills/belmont/_partials/dispatch-strategy.md`): The shared sub-agent dispatch model. Included at build time by orchestrator skill templates (implement, verify) via `@include`. Edit the partial, then run `generate-skills.sh`.
+
+4. **Agent files** (`agents/belmont/*-agent.md`): Edit directly. No generation involved.
+
+#### After any skill/agent change
+
+```bash
+# Regenerate (if you edited _src/ or _partials/)
+./scripts/generate-skills.sh
+
+# Test by installing into a project
+go run ./cmd/belmont install --source . --project ~/your-project --no-prompt
+```
+
+#### Quick reference
+
+| What to edit                         | Where                                                  |
+|--------------------------------------|--------------------------------------------------------|
+| Shared dispatch logic                | `skills/belmont/_partials/dispatch-strategy.md` → run `generate-skills.sh` |
+| Identity preamble, forbidden actions | `skills/belmont/_partials/` → run `generate-skills.sh` |
+| Skill-specific content (templated)   | `skills/belmont/_src/` → run `generate-skills.sh`      |
+| Skill-specific content (standalone)  | `skills/belmont/status.md`, `reset.md`                 |
+| Agent instructions                   | `agents/belmont/*-agent.md`                            |
 
 ### CLI (Go code)
 

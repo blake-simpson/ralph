@@ -34,6 +34,25 @@ go run ./cmd/belmont install --source . --project /tmp/test-project --no-prompt
 
 There are no tests or linter configured. Verify changes by compiling (`go build ./cmd/belmont`) and manually testing commands.
 
+## Skills Generation
+
+Skills in `skills/belmont/` are generated from templates. **Do not edit generated files directly** — edit the source:
+
+- **Shared content**: `skills/belmont/_partials/*.md` — reusable blocks with `{{variable}}` placeholders
+- **Templates**: `skills/belmont/_src/*.md` — skill templates that include partials via `<!-- @include ... -->`
+- **Generated output**: `skills/belmont/*.md` — the files that get installed into projects
+
+After editing partials or templates:
+
+```bash
+./scripts/generate-skills.sh          # Regenerate
+./scripts/generate-skills.sh --check  # Verify generated files are up to date
+```
+
+Files without a `_src/` counterpart (`status.md`, `reset.md`) are edited directly.
+
+The sub-agent dispatch strategy is shared via `skills/belmont/_partials/dispatch-strategy.md` and inlined at build time into orchestrator skills (implement, verify).
+
 ## Release Process
 
 ```bash
@@ -59,9 +78,12 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 - `cmd/belmont/embed.go` — `//go:embed` directives for release builds (build tag: `embed`). Embeds `skills/` and `agents/` into the binary.
 - `cmd/belmont/embed_dev.go` — Empty embed vars for dev builds (build tag: `!embed`). Allows `go run` without embedded content.
 - `skills/belmont/` — Skill markdown files (product-plan, tech-plan, implement, next, verify, status, reset). These are the source-of-truth copied/linked into target projects.
+- `skills/belmont/_partials/` — Shared content blocks used by skill templates (identity-preamble, forbidden-actions, progress-template, dispatch-strategy).
+- `skills/belmont/_src/` — Skill template files with `@include` directives. Processed by `generate-skills.sh` to produce `skills/belmont/*.md`.
 - `agents/belmont/` — Agent instruction markdown files (codebase-agent, design-agent, implementation-agent, verification-agent, core-review-agent). Copied into target projects.
-- `scripts/build.sh` — Copies skills/agents into `cmd/belmont/`, builds with `-tags embed` and ldflags version injection, then cleans up.
-- `scripts/release.sh` — Generates CHANGELOG entry, commits, creates annotated git tag.
+- `scripts/build.sh` — Regenerates skills from templates, copies skills/agents into `cmd/belmont/`, builds with `-tags embed` and ldflags version injection, then cleans up.
+- `scripts/release.sh` — Regenerates skills, verifies build, generates CHANGELOG entry, commits, creates annotated git tag.
+- `scripts/generate-skills.sh` — Generates skill files from `_src/` templates + `_partials/`. Supports `--check` to verify files are up to date.
 - `.github/workflows/release.yml` — GitHub Actions: cross-compile on tag push, create GitHub Release with binaries.
 - `install.sh` (root) — Public curl-pipe-sh installer for end users.
 - `bin/install.sh` / `bin/install.ps1` — Developer bootstrap scripts that build from source.
