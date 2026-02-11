@@ -15,13 +15,7 @@ If available, use the global CLI first:
 belmont status
 ```
 
-If the global CLI is not available, and a local helper exists, use it:
-
-```bash
-.belmont/bin/belmont status
-```
-
-If both commands fail or the helper is missing, fall back to the manual steps below.
+If the command fails, fall back to the manual steps below.
 
 ## Files to Read
 
