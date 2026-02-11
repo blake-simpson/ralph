@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.1
+
+**Released:** 2026-02-11
+
+### Changes since v0.3.0
+
+- Remove Claude settings
+- Fix GitHub Copilot detection to use .copilot/ directory instead of .github/
+
+
+
 ## v0.3.0
 
 **Released:** 2026-02-11
