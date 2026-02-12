@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.3
+
+**Released:** 2026-02-12
+
+### Changes since v0.3.2
+
+- Bugfixing prompts
+
+
+
 ## v0.3.2
 
 **Released:** 2026-02-11
