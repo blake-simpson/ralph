@@ -53,6 +53,36 @@ Before planning, read `.belmont/PRD.md` and `.belmont/PROGRESS.md`.
 9. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace)
 10. Exit - do NOT start implementation
 
+## Question Scope (CRITICAL)
+
+This is a **product** planning session, NOT a technical planning session. Technical decisions are made in the follow-up tech-plan step (`/belmont:tech-plan`).
+
+### ASK about (product concerns):
+- What the user wants to build and why (vision, goals, problem statement)
+- Target users / audience
+- User flows and journeys (what does the user do step by step?)
+- Feature requirements and business logic
+- Content and copy decisions
+- Priority and scope (what's in vs. out)
+- Success criteria from a user/business perspective
+- Edge cases in user behavior
+- Design intent (if no Figma: what should it look and feel like?)
+
+### DO NOT ASK about (defer to tech-plan):
+- Framework or library choices (Next.js vs Remix, React vs Vue, etc.)
+- Package manager preferences (npm, pnpm, bun, etc.)
+- Routing strategy (App Router vs Pages Router, etc.)
+- i18n library or localization setup
+- Data source format (static file vs API endpoint vs CMS)
+- Animation library or implementation approach
+- Asset strategy (placeholders vs real assets)
+- Component architecture or file structure
+- State management approach
+- Styling approach (Tailwind vs CSS modules, etc.)
+- Specific pricing values or placeholder content (these come from designs/implementation)
+
+If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
+
 Final: Prompt user to "/clear" and then "/belmont:tech-plan"
    - If you are Codex, instead prompt: "/new" and then "belmont:tech-plan"
 
@@ -91,9 +121,6 @@ And [more context]
 When [action]
 Then [expected result]
 And [additional assertions]
-
-## Technical Approach
-[High-level implementation strategy]
 
 ## Out of Scope
 [What this feature explicitly does NOT include]

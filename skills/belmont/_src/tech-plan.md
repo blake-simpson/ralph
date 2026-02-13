@@ -44,27 +44,50 @@ A file is **empty/default** if it doesn't exist, contains only the reset templat
 - Load relevant skills (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 - Consider middleware, webhooks, infrastructure (how are we hosted?), etc.
 
-### Phase 1.5 - Context Gathering (before questions)
+### Phase 2 - Context Gathering (before questions)
 - After completing research, briefly summarize what you found (PRD scope, relevant codebase patterns, Figma if any).
-- Then ask: **"Before I start asking questions, do you have any technical context, notes, or constraints you'd like to provide upfront? If not, I'll jump straight into questions."**
+- Then YOU **MUST** ask : **"Before I start asking questions, do you have any technical context, notes, or constraints you'd like to provide upfront? If not, I'll jump straight into questions."** BEFORE asking interview style questions.
 - If the user provides info, read and absorb ALL of it before proceeding. Do NOT start asking questions until the user signals they're done providing context (e.g. they say "that's it", "go ahead", etc.). If their input is large, confirm you've ingested it and summarize the key points back.
-- If the user says no / skip, proceed directly to questions.
+- If the user says no / skip, proceed directly to interview questions.
 
-### Phase 2 - Planning (interactive)
+### Phase 3 - Planning (interactive interview style questions)
 - With any upfront context in mind, ask targeted clarifying questions (ONE AT A TIME).
 - Use the AskUserQuestion tool when needed.
 - Be proactive — skip questions that were already answered by the user's upfront context.
 - Continue asking until you and the user are 100% confident in the plan.
-- Good questions to ask:
-  - What existing components/patterns should be reused?
-  - What's the design system (colors, spacing, typography)?
-  - What's the data model and API structure?
-  - What are the edge cases and error states?
-  - Are there performance requirements?
-  - What testing approach should be used?
+
+#### Question Scope (CRITICAL)
+
+This is a **technical** planning session. Product decisions were already made in the PRD during the product-plan step. Focus exclusively on HOW to build what the PRD describes.
+
+**ASK about (technical concerns):**
+- Framework, library, and tooling choices (if not already established in codebase)
+- Package manager preference (if new project)
+- Routing strategy, data fetching approach
+- What existing components/patterns should be reused?
+- Design system details (colors, spacing, typography — especially if no Figma)
+- Data model, API structure, and data source format
+- Component architecture and file structure
+- State management approach
+- Animation/interaction implementation approach
+- Asset strategy (placeholders vs real assets)
+- Performance requirements and constraints
+- Testing approach
+- Edge cases and error states (technical handling)
+- Infrastructure and deployment concerns
+
+**DO NOT RE-ASK about (already settled in PRD):**
+- What the user wants to build or why
+- Feature scope, priorities, or what's in/out
+- User flows and business logic (reference the PRD)
+- Success criteria
+- Content and copy decisions
+
+If something in the PRD is ambiguous or incomplete, ask for clarification — but frame it as a technical question, not a product re-do.
+
 - Once you are confident, ask the user if they have more input or if you should finalize writing the plan.
 
-### Phase 3 - Write Plan
+### Phase 4 - Write Plan
 - Say: "I will now write the technical plan."
 - Write the complete plan to `.belmont/TECH_PLAN.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
