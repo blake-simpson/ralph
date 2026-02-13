@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.4
+
+**Released:** 2026-02-13
+
+### Changes since v0.3.3
+
+- Separate product vs technical question scope in planning skills
+
+
+
 ## v0.3.3
 
 **Released:** 2026-02-12
