@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.5
+
+**Released:** 2026-02-13
+
+### Changes since v0.3.4
+
+- Fix Figma access in planning skills by using inline MCP calls
+
+
+
 ## v0.3.4
 
 **Released:** 2026-02-13
