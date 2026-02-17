@@ -74,12 +74,19 @@ Belmont breaks coding work into **phases**, each driven by a specialized agent. 
                                       ┌───────────┐           ┌────────────┐
                                       │  Verify   │           │  Status    │
                                       │ (parallel)│           │ (read-only)│
-                                      └───────────┘           └────────────┘
+                                      └─────┬─────┘           └────────────┘
+                                            │
+                              ┌─────────────┤
+                              ▼             ▼
+                        ┌───────────┐ ┌───────────┐
+                        │  Next     │ │  Review   │
+                        │ (1 task)  │ │ (drift)   │
+                        └───────────┘ └─────┬─────┘
                                             │
                                             ▼
-                                      ┌───────────┐
-                                      │  Next     │  (single task, lightweight)
-                                      └───────────┘
+                                     Updates PRDs,
+                                     Tech Plans,
+                                     PROGRESS
 ```
 
 ### MILESTONE File Architecture
@@ -436,6 +443,7 @@ Skills become native slash commands:
 /belmont:next           Implement next single task (lightweight)
 /belmont:verify         Run verification and code review
 /belmont:status         View progress
+/belmont:review         Review document alignment and detect drift
 /belmont:reset          Reset state and start fresh
 ```
 
@@ -558,6 +566,20 @@ Runs verification and code review on all completed tasks.
 - Categorizes issues: Critical / Warnings / Suggestions
 - Creates follow-up tasks in PRD.md and PROGRESS.md for anything that needs fixing
 - Produces a combined summary report
+
+### `review`
+
+Reviews alignment between planning documents and the codebase. Detects drift, conflicts, and gaps across the entire document hierarchy.
+
+- Compares PR/FAQ vision against master PRD feature catalog
+- Checks each feature's PRD and tech plan against master documents
+- Verifies task/milestone consistency between PRD and PROGRESS files
+- Scans codebase for unplanned implementations or stale task statuses
+- Presents each finding interactively with resolution options
+- Can update PRDs, tech plans, PROGRESS files, and NOTES based on decisions
+- Does NOT modify source code — planning audit only
+
+**When to use**: After implementation sessions, before major milestones, or periodically to keep plans aligned with reality.
 
 ### `reset`
 
@@ -729,7 +751,27 @@ Other:        Load skills/belmont/verify.md as context
 - Issues become follow-up tasks in the PRD
 - Combined report is produced
 
-### 7. Check Progress
+### 7. Review Alignment (recommended periodically)
+
+After implementing milestones or making significant changes, review the alignment between your plans and the codebase.
+
+```
+Claude Code:  /belmont:review
+Cursor:       Enable the belmont review rule, then: "Review document alignment"
+Other:        Load skills/belmont/review.md as context
+```
+
+**What happens:**
+- Reads all planning documents (PR/FAQ, master PRD, feature PRDs, tech plans, PROGRESS files)
+- Scans codebase for implemented features and compares against plans
+- Presents each discrepancy interactively with resolution options:
+  - Update the planning document to match reality
+  - Create a follow-up task to address the gap
+  - Mark as intentional deviation
+  - Skip
+- Produces a summary of all findings and actions taken
+
+### 8. Check Progress
 
 Check where things stand at any point.
 
@@ -739,16 +781,17 @@ Cursor:       Enable the belmont status rule, then: "Show belmont status"
 Other:        Load skills/belmont/status.md as context
 ```
 
-### 8. Iterate
+### 9. Iterate
 
 After implementing a milestone:
 - Run `/belmont:verify` to catch issues
 - Run `/belmont:next` to quickly fix follow-up tasks from verification
+- Run `/belmont:review` to check alignment between plans and codebase
 - Run `/belmont:implement` again for the next milestone
 - Run `/belmont:status` to check progress
 - Continue until all milestones are complete
 
-### 9. Start Fresh
+### 10. Start Fresh
 
 When you're done with a feature and want to plan something new:
 
@@ -790,6 +833,7 @@ belmont/
 │       ├── verify.md            # Verification skill (generated)
 │       ├── working-backwards.md  # Working backwards skill (generated)
 │       ├── status.md            # Status skill
+│       ├── review.md            # Alignment review skill
 │       └── reset.md             # Reset state skill
 ├── agents/
 │   └── belmont/
@@ -833,6 +877,7 @@ your-project/
 │           ├── next.md
 │           ├── verify.md
 │           ├── status.md
+│           ├── review.md
 │           └── reset.md
 ├── .belmont/                    # Local state (gitignored)
 │   ├── PR_FAQ.md
