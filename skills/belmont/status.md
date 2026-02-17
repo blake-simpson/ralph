@@ -17,15 +17,64 @@ belmont status
 
 If the command fails, fall back to the manual steps below.
 
+## Modes
+
+### Feature Listing Mode (default)
+
+When no specific feature is requested:
+
+1. Read `.belmont/PR_FAQ.md` — check if it exists and has content
+2. Read `.belmont/PRD.md` — the master PRD (feature catalog)
+3. Scan `.belmont/features/` for subdirectories
+4. For each feature directory, read its `PRD.md` for the feature name and `PROGRESS.md` for task counts
+5. Produce a **feature listing report** (see format below)
+
+If no features exist yet, tell the user to run `/belmont:product-plan` to create their first feature.
+
+### Single Feature Mode
+
+If a specific feature is requested (user says "show status for auth" or similar):
+
+1. Set base path to `.belmont/features/<slug>/`
+2. Read `{base}/PRD.md`, `{base}/PROGRESS.md`, check `{base}/TECH_PLAN.md`
+3. Produce the standard status report (see format below)
+
 ## Files to Read
 
-1. `.belmont/PRD.md` - Task definitions and completion status
-2. `.belmont/PROGRESS.md` - Milestones and session history
-3. `.belmont/TECH_PLAN.md` - Check if it exists and has content
+1. `{base}/PRD.md` - Task definitions and completion status
+2. `{base}/PROGRESS.md` - Milestones and session history
+3. `{base}/TECH_PLAN.md` - Check if it exists and has content
 
-If `.belmont/` directory doesn't exist, tell the user to run `belmont-install` first.
+If `.belmont/` directory doesn't exist, tell the user to run `belmont install` first.
 
-## Status Report Format
+## Feature Listing Report Format
+
+When in feature listing mode:
+
+```
+Belmont Status
+==============
+
+Product: [Extract from master PRD title, or "Unnamed Product"]
+
+PR/FAQ: [✅ Written / ⚠ Not written (run /belmont:working-backwards)]
+Master Tech Plan: [✅ Ready / ⚠ Not written]
+
+Features:
+  [status] [slug]  [feature name]  [X/Y tasks done]
+  [status] [slug]  [feature name]  [X/Y tasks done]
+  ...
+
+Use /belmont:status with a feature name for details.
+Use /belmont:product-plan to add a new feature.
+```
+
+Feature status icons:
+- ✅ All tasks complete
+- 🟡 In progress
+- 🔴 Not started
+
+## Standard Status Report Format
 
 Produce a report following this exact format:
 

@@ -11,8 +11,8 @@ You are a senior software architect creating a detailed implementation specifica
 
 1. This is ONLY a planning session. Do NOT implement anything.
 2. Do NOT create or edit any source code files (no .tsx, .ts, .css, etc.).
-3. When done asking questions, write your plan to: `.belmont/TECH_PLAN.md`
-4. If new steps/tasks were discovered, update `.belmont/PRD.md` and `.belmont/PROGRESS.md`.
+3. When done asking questions, write your plan to the appropriate TECH_PLAN.md (see Feature Detection below).
+4. If new steps/tasks were discovered, update the corresponding PRD.md and PROGRESS.md.
 5. After writing the tech plan, say "Tech plan complete." and STOP.
 
 <!-- @include forbidden-actions.md -->
@@ -21,13 +21,26 @@ You are a senior software architect creating a detailed implementation specifica
 - Reading files to understand codebase
 - Loading Figma designs
 - Asking the user questions
-- Writing to `.belmont/TECH_PLAN.md` (primary output)
-- Updating `.belmont/PRD.md` and `.belmont/PROGRESS.md` if new tasks discovered
+- Writing to `{base}/TECH_PLAN.md` (primary output)
+- Updating `{base}/PRD.md` and `{base}/PROGRESS.md` if new tasks discovered
+
+<!-- @include feature-detection.md feature_action="Ask which feature to create a tech plan for" -->
+
+## Strategic Context
+
+Check if `.belmont/PR_FAQ.md` exists and has real content. If it does, read it for strategic context — the PR/FAQ defines the customer, problem, and solution vision.
+
+## Master vs. Feature Tech Plan
+
+- **Master tech plan** (`.belmont/TECH_PLAN.md`): Cross-cutting architecture decisions, shared infrastructure, and conventions that apply across all features. Create this when the user wants to define overall architecture.
+- **Feature tech plan** (`{base}/TECH_PLAN.md` where base is `.belmont/features/<slug>/`): Feature-specific implementation details. When in feature mode, also read the master `.belmont/TECH_PLAN.md` for architecture context.
+
+Ask the user whether they want to write a master tech plan or a feature-specific tech plan.
 
 ## Prerequisites
 
 Before starting, verify:
-- `.belmont/PRD.md` exists and has meaningful content (not just template)
+- `{base}/PRD.md` exists and has meaningful content (not just template)
 - If PRD is empty or template-only, tell the user to run `/belmont:product-plan` first
 
 A file is **empty/default** if it doesn't exist, contains only the reset template text, or has placeholder names like `[Feature Name]`.
@@ -37,7 +50,8 @@ A file is **empty/default** if it doesn't exist, contains only the reset templat
 ## Your Workflow
 
 ### Phase 1 - Research (do silently, don't narrate)
-- Read the PRD at `.belmont/PRD.md`
+- Read the PRD at `{base}/PRD.md`
+- If in feature mode, also read `.belmont/TECH_PLAN.md` (master tech plan) for cross-cutting architecture context
 - If any Figma URLs are included in the PRD, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design tokens, layout, typography, and component specs. Document findings in the tech plan.
 - Explore the codebase for existing patterns. This may be done in a sub-agent if the codebase is large.
   - If the CLI is available, prefer `belmont tree --max-depth 3` and `belmont search --pattern "..."` (or `belmont find --name ...`) for quick structure/pattern checks.
@@ -89,16 +103,17 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 ### Phase 4 - Write Plan
 - Say: "I will now write the technical plan."
-- Write the complete plan to `.belmont/TECH_PLAN.md`
+- Write the complete plan to `{base}/TECH_PLAN.md`
+- If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
 - Say: "Tech plan complete."
 - STOP. Do not continue. Do not implement anything.
-- Final: Prompt uset to "/clear" and "/belmont:implement"
+- Final: Prompt user to "/clear" and "/belmont:implement"
     - If you are Codex, instead prompt: "/new" and then "belmont:implement"
 
 ## TECH_PLAN.md Format
 
-Write to `.belmont/TECH_PLAN.md` with this structure:
+Write to `{base}/TECH_PLAN.md` with this structure:
 
 ```markdown
 # Technical Plan: [Feature Name]

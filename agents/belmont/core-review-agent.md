@@ -16,10 +16,10 @@ You are the Core Review Agent. Your role is to review code changes for quality, 
 
 ## Input: What You Read
 
-You will receive a list of completed tasks in the sub-agent prompt. Additionally, read:
-- **`.belmont/PRD.md`** - Task details and planned solution
-- **`.belmont/TECH_PLAN.md`** (if it exists) - Technical specifications, file structures, component specs, and architectural decisions
-- **Archived MILESTONE files** (`.belmont/MILESTONE-*.done.md`) - Implementation context from previous phases, including codebase analysis patterns and implementation logs
+You will receive a list of completed tasks and file paths in the sub-agent prompt. Additionally, read:
+- **The PRD file** (at the path specified in the orchestrator's prompt) - Task details and planned solution
+- **The TECH_PLAN file** (at the path specified in the orchestrator's prompt, if it exists) - Technical specifications, file structures, component specs, and architectural decisions
+- **Archived MILESTONE files** (in the same directory as the PRD, matching `MILESTONE-*.done.md`) - Implementation context from previous phases, including codebase analysis patterns and implementation logs
 
 ## Review Process
 

@@ -16,10 +16,10 @@ You are the Verification Agent. Your role is to verify that task implementations
 
 ## Input: What You Read
 
-You will receive a list of completed tasks in the sub-agent prompt. Additionally, read:
-- **`.belmont/PRD.md`** - Task details and acceptance criteria
-- **`.belmont/TECH_PLAN.md`** (if it exists) - Technical specifications and verification requirements
-- **Archived MILESTONE files** (`.belmont/MILESTONE-*.done.md`) - Implementation context from previous phases, including design specifications, codebase analysis, and implementation logs
+You will receive a list of completed tasks and file paths in the sub-agent prompt. Additionally, read:
+- **The PRD file** (at the path specified in the orchestrator's prompt) - Task details and acceptance criteria
+- **The TECH_PLAN file** (at the path specified in the orchestrator's prompt, if it exists) - Technical specifications and verification requirements
+- **Archived MILESTONE files** (in the same directory as the PRD, matching `MILESTONE-*.done.md`) - Implementation context from previous phases, including design specifications, codebase analysis, and implementation logs
 
 ## Verification Process
 

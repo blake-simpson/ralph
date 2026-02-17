@@ -11,7 +11,7 @@ You are running an interactive planning session. You should not switch the agent
 
 1. This is ONLY a planning session. Do NOT implement anything.
 2. Do NOT create or edit any source code files (no .tsx, .ts, .css, etc.).
-3. ONLY write to `.belmont/PRD.md` and `.belmont/PROGRESS.md`.
+3. ONLY write to files in `.belmont/` (PRD.md, PROGRESS.md, and feature directories).
 4. Ask questions iteratively until the plan is 100% concrete.
 5. Always ask the user for clarification and approval before finalizing.
 
@@ -21,7 +21,8 @@ You are running an interactive planning session. You should not switch the agent
 - Reading files to understand the codebase
 - If any Figma URLs are included, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design context (layout, colors, typography, component structure, copy) and incorporate findings into the PRD.
 - Asking the user questions
-- Writing to `.belmont/PRD.md` and `.belmont/PROGRESS.md`
+- Writing to `.belmont/PRD.md`, `.belmont/PROGRESS.md`, and files under `.belmont/features/`
+- Creating feature directories under `.belmont/features/`
 - Using WebFetch for research
 
 ## Helper Commands (Optional)
@@ -32,12 +33,46 @@ If the CLI is available, prefer quick helpers for lightweight codebase context:
 
 If the CLI isn't available, read files directly.
 
-## Update vs. Create (CRITICAL)
+## Strategic Context
 
-Before planning, read `.belmont/PRD.md` and `.belmont/PROGRESS.md`.
+Before planning, check if `.belmont/PR_FAQ.md` exists and has real content (not just template text). If it does, read it and use it as strategic context for planning — the PR/FAQ defines the customer, problem, and solution vision that should inform the PRD.
 
-- **Files are empty/default** (don't exist, contain only reset template text, or have placeholder names like `[Feature Name]`) → **CREATE**: write full PRD and PROGRESS from scratch.
-- **Files have real content** → **UPDATE**: only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
+## Master PRD
+
+Read `.belmont/PRD.md` — the master feature catalog. If it's empty/default, you'll create it during this session.
+
+<!-- @include feature-detection.md feature_action="Ask the user to create a new feature or select an existing one to update" -->
+
+## Creating the Master PRD (first time)
+
+If `.belmont/PRD.md` is empty/default and no features exist yet, create the **master feature catalog**:
+
+```markdown
+# Product: [Product Name]
+
+## Vision
+[1-2 sentence product vision, drawn from PR_FAQ if available]
+
+## Features
+
+| Feature | Slug | Priority | Dependencies | Status |
+|---------|------|----------|-------------|--------|
+| [Feature Name] | [feature-slug] | P1 | None | Not Started |
+```
+
+Then immediately proceed to create the first feature (below).
+
+## Creating or Updating a Feature
+
+When the user selects or creates a feature:
+
+1. **Generate slug**: lowercase, hyphens, no special chars (e.g. "User Authentication" → `user-authentication`)
+2. **Create directory**: `.belmont/features/<slug>/`
+3. **Write feature PRD**: `.belmont/features/<slug>/PRD.md` (using the PRD format below)
+4. **Write feature PROGRESS**: `.belmont/features/<slug>/PROGRESS.md` (using the PROGRESS format below)
+5. **Update master PRD**: Add/update the feature entry in `.belmont/PRD.md`'s features table
+
+When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
 
 ## Process
 
@@ -85,6 +120,7 @@ If the user volunteers technical preferences unprompted, note them in the "Techn
 
 Final: Prompt user to "/clear" and then "/belmont:tech-plan"
    - If you are Codex, instead prompt: "/new" and then "belmont:tech-plan"
+   - If this was the first feature in a new product, also mention they can create more features later by running `/belmont:product-plan` again
 
 ## Important Considerations
 
@@ -97,7 +133,7 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 
 ## PRD Format
 
-Write `.belmont/PRD.md` with this structure:
+Write the PRD to `{base}/PRD.md` (i.e. `.belmont/features/<slug>/PRD.md`) with this structure:
 
 ```markdown
 # PRD: [Feature Name]
@@ -156,7 +192,7 @@ And [additional assertions]
 
 ## PROGRESS Format
 
-Write `.belmont/PROGRESS.md` with this structure:
+Write the PROGRESS to `{base}/PROGRESS.md` (same base path as the PRD) with this structure:
 
 ```markdown
 <!-- @include progress-template.md -->

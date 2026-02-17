@@ -7,21 +7,24 @@ alwaysApply: false
 
 You are the verification orchestrator. Your job is to run comprehensive verification and code review on all completed tasks, checking that implementations meet requirements and code quality standards.
 
+<!-- @include feature-detection.md feature_action="Ask which feature to verify, or auto-select the one with completed tasks" -->
+
 ## Setup
 
 Read these files first:
-- `.belmont/PRD.md` - The product requirements and task definitions
-- `.belmont/PROGRESS.md` - Current progress tracking
-- `.belmont/TECH_PLAN.md` - Technical implementation plan (if exists)
+- `{base}/PRD.md` - The product requirements and task definitions
+- `{base}/PROGRESS.md` - Current progress tracking
+- `{base}/TECH_PLAN.md` - Technical implementation plan (if exists)
+- `.belmont/TECH_PLAN.md` - Master tech plan for architecture context (if in feature mode and exists)
 
-Also check for archived MILESTONE files (`.belmont/MILESTONE-*.done.md`) — these contain the implementation context from the most recent milestone and can provide useful reference for verification.
+Also check for archived MILESTONE files (`{base}/MILESTONE-*.done.md`) — these contain the implementation context from the most recent milestone and can provide useful reference for verification.
 
 Optional helper:
 - If the CLI is available, `belmont status --format json` can provide a quick summary of completed tasks. Still read the files above for full context.
 
 ## Step 1: Identify Completed Tasks
 
-1. Read `.belmont/PRD.md` and find all tasks marked with ✅
+1. Read `{base}/PRD.md` and find all tasks marked with ✅
 2. These are the tasks that need verification
 3. If no tasks are completed, report "No completed tasks to verify" and stop
 
@@ -59,9 +62,9 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 > - P0-2: Database schema ✅]
 > ---
 >
-> Read `.belmont/PRD.md` for acceptance criteria and task details.
-> Read `.belmont/TECH_PLAN.md` for technical specifications (if it exists).
-> Check for archived MILESTONE files (`.belmont/MILESTONE-*.done.md`) for implementation context.
+> Read `{base}/PRD.md` for acceptance criteria and task details.
+> Read `{base}/TECH_PLAN.md` for technical specifications (if it exists).
+> Check for archived MILESTONE files (`{base}/MILESTONE-*.done.md`) for implementation context.
 >
 > Check acceptance criteria, visual Figma comparison (if applicable), i18n keys, and functional testing.
 >
@@ -87,9 +90,9 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 > - P0-2: Database schema ✅]
 > ---
 >
-> Read `.belmont/PRD.md` for task details and planned solution.
-> Read `.belmont/TECH_PLAN.md` for technical specifications (if it exists).
-> Check for archived MILESTONE files (`.belmont/MILESTONE-*.done.md`) for implementation context.
+> Read `{base}/PRD.md` for task details and planned solution.
+> Read `{base}/TECH_PLAN.md` for technical specifications (if it exists).
+> Check for archived MILESTONE files (`{base}/MILESTONE-*.done.md`) for implementation context.
 >
 > Detect the project's package manager (check for `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`/`bun.lock`, or `package-lock.json`; also check the `packageManager` field in `package.json`). Use the detected package manager to run build and test commands (e.g. `pnpm run build`, `yarn run build`, etc. — default to `npm` if unsure). Review code quality, pattern adherence, and PRD alignment.
 >
@@ -112,7 +115,7 @@ After both agents complete:
 
 ### Create Follow-up Tasks
 If any issues were found by either agent:
-1. Add new tasks to `.belmont/PRD.md` for each critical or warning issue:
+1. Add new tasks to `{base}/PRD.md` for each critical or warning issue:
    ```markdown
    ### P0-X-FWLUP: [Issue Description] 🔵
    **Severity**: [Based on issue category]
@@ -127,7 +130,7 @@ If any issues were found by either agent:
    **Verification**:
    1. [Steps to verify the fix]
    ```
-2. Add the follow-up tasks to a milestone in `.belmont/PROGRESS.md`:
+2. Add the follow-up tasks to a milestone in `{base}/PROGRESS.md`:
    - If a **pending** (⬜) milestone exists, add them to the last pending milestone
    - If **all milestones are complete** (✅), create a **new milestone** with the next sequential number (e.g., if M9 is the last, create `### ⬜ M10: Follow-ups`) and add them there
    - Follow-up tasks MUST live inside a milestone heading — never in a freestanding section outside the milestones structure

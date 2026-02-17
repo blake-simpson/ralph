@@ -48,9 +48,18 @@ type milestone struct {
 	Done bool
 }
 
+type featureSummary struct {
+	Slug      string `json:"slug"`
+	Name      string `json:"name"`
+	TasksDone int    `json:"tasks_done"`
+	TasksTotal int   `json:"tasks_total"`
+	Status    string `json:"status"`
+}
+
 type statusReport struct {
 	Feature         string
 	TechPlanReady   bool
+	PRFAQReady      bool
 	OverallStatus   string
 	TaskCounts      map[string]int
 	Tasks           []task
@@ -60,6 +69,7 @@ type statusReport struct {
 	NextTask        *task
 	LastCompleted   *task
 	RecentDecisions []string
+	Features        []featureSummary
 }
 
 type cacheIndex struct {
@@ -137,7 +147,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  belmont install [--source PATH] [--project PATH] [--tools all|none|claude,codex,...]")
 	fmt.Fprintln(w, "  belmont update [--check] [--force]")
-	fmt.Fprintln(w, "  belmont status [--root PATH] [--format text|json]")
+	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json]")
 	fmt.Fprintln(w, "  belmont tree [--root PATH] [--max-depth N] [--max-entries N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont find --name QUERY [--root PATH] [--regex] [--type file|dir|any] [--limit N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont search --pattern REGEX [--root PATH] [--limit N] [--format text|json]")
@@ -157,9 +167,11 @@ func runStatus(args []string) error {
 	var root string
 	var format string
 	var maxName int
+	var feature string
 	fsFlags.StringVar(&root, "root", ".", "project root")
 	fsFlags.StringVar(&format, "format", "text", "text or json")
 	fsFlags.IntVar(&maxName, "max-task-name", 55, "max task name length")
+	fsFlags.StringVar(&feature, "feature", "", "feature slug")
 	if err := fsFlags.Parse(args); err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
@@ -169,7 +181,7 @@ func runStatus(args []string) error {
 		return err
 	}
 
-	report, err := buildStatus(absRoot, maxName)
+	report, err := buildStatus(absRoot, maxName, feature)
 	if err != nil {
 		return err
 	}
@@ -187,7 +199,7 @@ func runStatus(args []string) error {
 	}
 }
 
-func buildStatus(root string, maxName int) (statusReport, error) {
+func buildStatus(root string, maxName int, feature string) (statusReport, error) {
 	var report statusReport
 	report.TaskCounts = map[string]int{
 		"done":        0,
@@ -197,52 +209,165 @@ func buildStatus(root string, maxName int) (statusReport, error) {
 		"total":       0,
 	}
 
-	prdPath := filepath.Join(root, ".belmont", "PRD.md")
-	progressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
-	techPlanPath := filepath.Join(root, ".belmont", "TECH_PLAN.md")
+	// Check for PR_FAQ
+	prfaqPath := filepath.Join(root, ".belmont", "PR_FAQ.md")
+	report.PRFAQReady = fileHasRealContent(prfaqPath)
 
-	prdContent, err := os.ReadFile(prdPath)
-	if err != nil {
-		return report, fmt.Errorf("status: missing %s", prdPath)
+	// Determine base path based on feature mode
+	featuresDir := filepath.Join(root, ".belmont", "features")
+
+	if feature != "" {
+		// Specific feature requested
+		featurePath := filepath.Join(featuresDir, feature)
+		if !dirExists(featurePath) {
+			return report, fmt.Errorf("status: feature %q not found in %s", feature, featuresDir)
+		}
+
+		prdPath := filepath.Join(featurePath, "PRD.md")
+		progressPath := filepath.Join(featurePath, "PROGRESS.md")
+		techPlanPath := filepath.Join(featurePath, "TECH_PLAN.md")
+
+		prdContent, err := os.ReadFile(prdPath)
+		if err != nil {
+			return report, fmt.Errorf("status: missing %s", prdPath)
+		}
+
+		progressContent, err := os.ReadFile(progressPath)
+		if err != nil {
+			return report, fmt.Errorf("status: missing %s", progressPath)
+		}
+
+		report.Feature = extractFeatureName(string(prdContent))
+		report.Tasks = parseTasks(string(prdContent), maxName)
+
+		assignTaskStatuses(report.Tasks)
+		report.TaskCounts["total"] = len(report.Tasks)
+		for _, t := range report.Tasks {
+			switch t.Status {
+			case taskComplete:
+				report.TaskCounts["done"]++
+			case taskBlocked:
+				report.TaskCounts["blocked"]++
+			case taskInProgress:
+				report.TaskCounts["in_progress"]++
+			case taskPending:
+				report.TaskCounts["pending"]++
+			}
+		}
+
+		report.LastCompleted = lastCompletedTask(report.Tasks)
+		report.Milestones = parseMilestones(string(progressContent))
+		report.Blockers = parseBlockers(string(progressContent))
+		report.RecentDecisions = parseDecisions(string(progressContent), 3)
+		report.NextMilestone = nextMilestone(report.Milestones)
+		report.NextTask = nextTask(report.Tasks)
+		report.TechPlanReady = techPlanReady(techPlanPath)
+		report.OverallStatus = computeOverallStatus(string(progressContent), report.Tasks)
+
+		return report, nil
 	}
 
-	progressContent, err := os.ReadFile(progressPath)
-	if err != nil {
-		return report, fmt.Errorf("status: missing %s", progressPath)
+	// Feature listing mode (default)
+	features := listFeatures(featuresDir, maxName)
+	if features == nil {
+		features = []featureSummary{}
 	}
+	report.Features = features
+	report.Feature = extractProductName(filepath.Join(root, ".belmont", "PRD.md"))
+	report.TechPlanReady = techPlanReady(filepath.Join(root, ".belmont", "TECH_PLAN.md"))
+	if len(features) > 0 {
+		report.OverallStatus = computeFeatureListStatus(features)
+	} else {
+		report.OverallStatus = "🔴 Not Started"
+	}
+	return report, nil
+}
 
-	report.Feature = extractFeatureName(string(prdContent))
-	report.Tasks = parseTasks(string(prdContent), maxName)
+func extractProductName(prdPath string) string {
+	content, err := os.ReadFile(prdPath)
+	if err != nil {
+		return "Unnamed Product"
+	}
+	re := regexp.MustCompile(`(?m)^#\s*Product:\s*(.+)$`)
+	match := re.FindStringSubmatch(string(content))
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+	return extractFeatureName(string(content))
+}
 
-	assignTaskStatuses(report.Tasks)
-	report.TaskCounts["total"] = len(report.Tasks)
-	for _, t := range report.Tasks {
-		switch t.Status {
-		case taskComplete:
-			report.TaskCounts["done"]++
-		case taskBlocked:
-			report.TaskCounts["blocked"]++
-		case taskInProgress:
-			report.TaskCounts["in_progress"]++
-		case taskPending:
-			report.TaskCounts["pending"]++
+func listFeatures(featuresDir string, maxName int) []featureSummary {
+	entries, err := os.ReadDir(featuresDir)
+	if err != nil {
+		return nil
+	}
+	var features []featureSummary
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		slug := entry.Name()
+		featurePath := filepath.Join(featuresDir, slug)
+		prdPath := filepath.Join(featurePath, "PRD.md")
+
+		name := slug
+		prdContent, err := os.ReadFile(prdPath)
+		if err == nil {
+			extracted := extractFeatureName(string(prdContent))
+			if extracted != "Unknown" {
+				name = extracted
+			}
+		}
+
+		tasksDone := 0
+		tasksTotal := 0
+		if err == nil {
+			tasks := parseTasks(string(prdContent), maxName)
+			assignTaskStatuses(tasks)
+			tasksTotal = len(tasks)
+			for _, t := range tasks {
+				if t.Status == taskComplete {
+					tasksDone++
+				}
+			}
+		}
+
+		status := "🔴 Not Started"
+		if tasksTotal > 0 && tasksDone == tasksTotal {
+			status = "✅ Complete"
+		} else if tasksDone > 0 {
+			status = "🟡 In Progress"
+		}
+
+		features = append(features, featureSummary{
+			Slug:       slug,
+			Name:       name,
+			TasksDone:  tasksDone,
+			TasksTotal: tasksTotal,
+			Status:     status,
+		})
+	}
+	return features
+}
+
+func computeFeatureListStatus(features []featureSummary) string {
+	allComplete := true
+	anyProgress := false
+	for _, f := range features {
+		if f.Status != "✅ Complete" {
+			allComplete = false
+		}
+		if f.TasksDone > 0 {
+			anyProgress = true
 		}
 	}
-
-	report.LastCompleted = lastCompletedTask(report.Tasks)
-
-	report.Milestones = parseMilestones(string(progressContent))
-	report.Blockers = parseBlockers(string(progressContent))
-	report.RecentDecisions = parseDecisions(string(progressContent), 3)
-
-	report.NextMilestone = nextMilestone(report.Milestones)
-	report.NextTask = nextTask(report.Tasks)
-
-	report.TechPlanReady = techPlanReady(techPlanPath)
-
-	report.OverallStatus = computeOverallStatus(string(progressContent), report.Tasks)
-
-	return report, nil
+	if allComplete && len(features) > 0 {
+		return "✅ Complete"
+	}
+	if anyProgress {
+		return "🟡 In Progress"
+	}
+	return "🔴 Not Started"
 }
 
 func extractFeatureName(prd string) string {
@@ -431,6 +556,24 @@ func techPlanReady(path string) bool {
 	return strings.TrimSpace(string(content)) != ""
 }
 
+// fileHasRealContent checks if a file exists and has content beyond template/placeholder text.
+func fileHasRealContent(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	trimmed := strings.TrimSpace(string(content))
+	if trimmed == "" {
+		return false
+	}
+	// Check for known template/placeholder texts
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "run /belmont:") || strings.HasPrefix(lower, "run the /belmont:") {
+		return false
+	}
+	return true
+}
+
 func computeOverallStatus(progress string, tasks []task) string {
 	statusLine := parseStatusLine(progress)
 	if strings.Contains(strings.ToLower(statusLine), "blocked") {
@@ -479,6 +622,11 @@ func parseStatusLine(progress string) string {
 }
 
 func renderStatus(report statusReport) string {
+	// Feature listing mode (default when no --feature specified)
+	if report.Features != nil {
+		return renderFeatureListing(report)
+	}
+
 	techPlan := "⚠ Not written (run /belmont:tech-plan to create)"
 	if report.TechPlanReady {
 		techPlan = "✅ Ready"
@@ -561,6 +709,42 @@ func renderStatus(report statusReport) string {
 			sb.WriteString(fmt.Sprintf("  - %s\n", d))
 		}
 	}
+	return sb.String()
+}
+
+func renderFeatureListing(report statusReport) string {
+	prfaq := "⚠ Not written (run /belmont:working-backwards)"
+	if report.PRFAQReady {
+		prfaq = "✅ Written"
+	}
+	techPlan := "⚠ Not written"
+	if report.TechPlanReady {
+		techPlan = "✅ Ready"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Belmont Status\n")
+	sb.WriteString("==============\n\n")
+	sb.WriteString(fmt.Sprintf("Product: %s\n\n", report.Feature))
+	sb.WriteString(fmt.Sprintf("PR/FAQ: %s\n", prfaq))
+	sb.WriteString(fmt.Sprintf("Master Tech Plan: %s\n\n", techPlan))
+	sb.WriteString(fmt.Sprintf("Status: %s\n\n", report.OverallStatus))
+	sb.WriteString("Features:\n")
+	if len(report.Features) == 0 {
+		sb.WriteString("  (none — run /belmont:product-plan to create your first feature)\n")
+	} else {
+		for _, f := range report.Features {
+			icon := "🔴"
+			if f.Status == "✅ Complete" {
+				icon = "✅"
+			} else if f.Status == "🟡 In Progress" {
+				icon = "🟡"
+			}
+			sb.WriteString(fmt.Sprintf("  %s %-20s %-30s %d/%d tasks done\n", icon, f.Slug, f.Name, f.TasksDone, f.TasksTotal))
+		}
+	}
+	sb.WriteString("\n")
+	sb.WriteString("Use --feature <slug> for detailed feature status.\n")
 	return sb.String()
 }
 
@@ -933,7 +1117,7 @@ func runInstall(args []string) error {
 			case "claude":
 				fmt.Println("  Claude Code  .claude/agents/belmont -> ../../.agents/belmont")
 				fmt.Println("              .claude/commands/belmont (copied from .agents/skills/belmont)")
-				fmt.Println("    Use: /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:status")
+				fmt.Println("    Use: /belmont:working-backwards, /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:status")
 			case "codex":
 				fmt.Println("  Codex        .codex/belmont (copied from .agents/skills/belmont)")
 				fmt.Println("    Use: AGENTS.md includes Belmont skill routing for belmont:<skill> prompts")
@@ -955,6 +1139,7 @@ func runInstall(args []string) error {
 
 	fmt.Println("")
 	fmt.Println("Workflow:")
+	fmt.Println("  0. PR/FAQ     - Define product vision (Working Backwards)")
 	fmt.Println("  1. Plan       - Create PRD interactively")
 	fmt.Println("  2. Tech Plan  - Create technical implementation plan")
 	fmt.Println("  3. Implement  - Implement next milestone (full pipeline)")
@@ -1608,6 +1793,28 @@ func ensureStateFiles(projectRoot string) error {
 		return err
 	}
 
+	// Create features directory
+	featuresDir := filepath.Join(stateDir, "features")
+	if !dirExists(featuresDir) {
+		if err := os.MkdirAll(featuresDir, 0o755); err != nil {
+			return err
+		}
+		fmt.Println("  + .belmont/features/")
+	} else {
+		fmt.Println("  Exists: .belmont/features/ (keeping)")
+	}
+
+	// Create PR_FAQ.md template
+	prfaqPath := filepath.Join(stateDir, "PR_FAQ.md")
+	if !fileExists(prfaqPath) {
+		if err := os.WriteFile(prfaqPath, []byte("Run /belmont:working-backwards to create your PR/FAQ document.\n"), 0o644); err != nil {
+			return err
+		}
+		fmt.Println("  + .belmont/PR_FAQ.md")
+	} else {
+		fmt.Println("  Exists: .belmont/PR_FAQ.md (keeping)")
+	}
+
 	prdPath := filepath.Join(stateDir, "PRD.md")
 	if !fileExists(prdPath) {
 		if err := os.WriteFile(prdPath, []byte("Run the /belmont:product-plan skill to create a plan for your feature.\n"), 0o644); err != nil {
@@ -1618,38 +1825,6 @@ func ensureStateFiles(projectRoot string) error {
 		fmt.Println("  Exists: .belmont/PRD.md (keeping)")
 	}
 
-	progressPath := filepath.Join(stateDir, "PROGRESS.md")
-	if !fileExists(progressPath) {
-		content := `# Progress: [Feature Name]
-
-## Status: 🔴 Not Started
-
-## PRD Reference
-.belmont/PRD.md
-
-## Milestones
-
-### ⬜ M1: [Milestone Name]
-- [ ] Task 1
-- [ ] Task 2
-
-## Session History
-| Session | Date/Time           | Context Used | Milestones Completed |
-|---------|------|--------------|---------------------|
-
-## Decisions Log
-[Numbered list of key decisions with rationale]
-
-## Blockers
-[Any blocking issues]
-`
-		if err := os.WriteFile(progressPath, []byte(content), 0o644); err != nil {
-			return err
-		}
-		fmt.Println("  + .belmont/PROGRESS.md")
-	} else {
-		fmt.Println("  Exists: .belmont/PROGRESS.md (keeping)")
-	}
 	return nil
 }
 
@@ -1687,7 +1862,7 @@ func codexAgentsGuidanceSection() string {
 		"- Belmont skills are local markdown files in `.agents/skills/belmont/` (and mirrored in `.codex/belmont/`).",
 		"- If the user says `belmont:<skill>` or \"Use the belmont:<skill> skill\", treat it as a skill reference, not a shell command.",
 		"- Load `.agents/skills/belmont/<skill>.md` first (fallback to `.codex/belmont/<skill>.md`) and follow that workflow.",
-		"- Known Belmont skills: `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `status`, `reset`.",
+		"- Known Belmont skills: `working-backwards`, `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `status`, `reset`.",
 		"- If a requested skill file is missing, list available files in those directories and continue with the closest matching Belmont skill.",
 		codexAgentsGuidanceEnd,
 	}

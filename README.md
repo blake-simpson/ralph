@@ -8,6 +8,8 @@ A flexible PRD system has been used to provide the best level of context from pl
 
 Strong guardrails are in place to keep the agent focused and on task.
 
+**Working Backwards (PR/FAQ)** -- Belmont supports Amazon's Working Backwards methodology as a strategic first step. Define your product vision with a PR/FAQ document before breaking it into features and tasks.
+
 **Figma-first design workflow** -- Belmont is built heavily around understanding Figma designs. The design-agent extracts exact tokens (colors, typography, spacing), maps them to your design system, and produces implementation-ready component specs. The verification-agent compares your implementation against the Figma source using Playwright headless screenshots. For the best experience, install [figma-mcp](https://github.com/nichochar/figma-mcp) so Belmont can load and analyze your designs automatically.
 
 ---
@@ -16,6 +18,8 @@ Strong guardrails are in place to keep the agent focused and on task.
 
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
+- [Working Backwards (PR/FAQ)](#working-backwards-prfaq)
+- [Sub-Feature Architecture](#sub-feature-architecture)
 - [Implementation Pipeline](#implementation-pipeline)
 - [Agent Teams Support](#agent-teams-support)
 - [Installation](#installation)
@@ -60,22 +64,22 @@ Then use the skills in your AI tool of choice. For example, in Claude Code:
 Belmont breaks coding work into **phases**, each driven by a specialized agent. The user interacts through **skills** (markdown files loaded as slash commands or rules) that orchestrate these agents.
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Plan       │ ──▶ │  Tech Plan   │ ──▶ │  Implement   │
-│  (PRD.md)   │     │ (TECH_PLAN)  │     │  (milestone) │
-└─────────────┘     └──────────────┘     └──────┬───────┘
-                                                │
-                         ┌──────────────────────┤
-                         ▼                      ▼
-                    ┌───────────┐         ┌────────────┐
-                    │  Verify   │         │  Status    │
-                    │ (parallel)│         │ (read-only)│
-                    └───────────┘         └────────────┘
-                          │
-                          ▼
-                    ┌───────────┐
-                    │  Next     │  (single task, lightweight)
-                    └───────────┘
+┌──────────────┐     ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
+│  PR/FAQ      │ ──▶ │  Plan       │ ──▶ │  Tech Plan   │ ──▶ │  Implement   │
+│ (optional)   │     │  (PRD.md)   │     │ (TECH_PLAN)  │     │  (milestone) │
+└──────────────┘     └─────────────┘     └──────────────┘     └──────┬───────┘
+                                                                      │
+                                           ┌──────────────────────────┤
+                                           ▼                          ▼
+                                      ┌───────────┐           ┌────────────┐
+                                      │  Verify   │           │  Status    │
+                                      │ (parallel)│           │ (read-only)│
+                                      └───────────┘           └────────────┘
+                                            │
+                                            ▼
+                                      ┌───────────┐
+                                      │  Next     │  (single task, lightweight)
+                                      └───────────┘
 ```
 
 ### MILESTONE File Architecture
@@ -159,6 +163,76 @@ If your environment supports **agent teams** (e.g. Claude Code's multi-agent fea
 
 ---
 
+## Working Backwards (PR/FAQ)
+
+Belmont supports Amazon's **Working Backwards** methodology — a product definition process that starts with the customer and works backwards to the solution. The centerpiece is the **PR/FAQ**: a one-page press release describing the product as if it's already launched, followed by FAQs that force clarity on every aspect of the idea.
+
+### Why PR/FAQ?
+
+Traditional product development often starts with solutions and works forward to find customers. Working Backwards reverses this: you write the press release first, then figure out how to build what you promised. This forces you to:
+
+- **Define the customer precisely** — not "users" but "enterprise procurement managers at companies with 500+ employees"
+- **Articulate the single most important benefit** — if you can't say it in one sentence, the idea isn't clear enough
+- **Eliminate vague thinking** — no weasel words, no adjectives without data, no magic solutions
+- **Surface hard questions early** — the FAQ section forces you to confront trade-offs, risks, and alternatives before writing any code
+
+### How It Fits Into Belmont
+
+The PR/FAQ is an optional but recommended first step in Belmont's workflow:
+
+```
+/belmont:working-backwards  →  .belmont/PR_FAQ.md  (strategic vision)
+        ↓
+/belmont:product-plan       →  .belmont/PRD.md     (feature catalog + detailed PRDs)
+        ↓
+/belmont:tech-plan          →  TECH_PLAN.md        (implementation spec)
+        ↓
+/belmont:implement          →  Code                (agent pipeline)
+```
+
+The PR/FAQ feeds into product planning — when you run `/belmont:product-plan`, it reads the PR/FAQ for strategic context, ensuring your features align with the customer promise.
+
+### Learn More
+
+- [Working Backwards: Insights, Stories, and Secrets from Inside Amazon](https://www.workingbackwards.com/) by Colin Bryar and Bill Carr
+- [Werner Vogels on Working Backwards](https://www.allthingsdistributed.com/2006/11/working_backwards.html) — the original blog post
+- [The Amazon PR/FAQ Process](https://productstrategy.co/working-backwards-the-amazon-prfaq-for-product-innovation/) — a practical guide
+
+---
+
+## Sub-Feature Architecture
+
+For products with multiple features, Belmont supports a **sub-feature directory structure** that keeps each feature's planning state isolated while maintaining a master product view.
+
+### File Structure
+
+```
+.belmont/
+  PR_FAQ.md                    ← Strategic vision (created by /belmont:working-backwards)
+  PRD.md                       ← Master PRD (feature catalog)
+  TECH_PLAN.md                 ← Master tech plan (cross-cutting architecture)
+  features/
+    user-authentication/
+      PRD.md                   ← Feature-specific requirements + tasks
+      TECH_PLAN.md             ← Feature-specific technical plan
+      PROGRESS.md              ← Milestones + task tracking
+      MILESTONE.md             ← Active implementation context
+      MILESTONE-M1.done.md     ← Archived milestones
+    payment-processing/
+      PRD.md
+      TECH_PLAN.md
+      PROGRESS.md
+```
+
+### How It Works
+
+- **Master files** persist at the product level — the PR/FAQ, master PRD (feature catalog), and master tech plan (cross-cutting architecture)
+- **Feature directories** contain the detailed planning state for each feature — isolated PRDs, tech plans, progress tracking, and milestone files
+- **Skills prompt for feature selection** — when running any skill, you select or create the feature to work on
+- **Reset is granular** — reset a single feature, all features, or everything including masters
+
+---
+
 ## Installation
 
 ### Install (one command)
@@ -224,7 +298,7 @@ The installer will:
 6. **For Codex installs, remove legacy Belmont `SKILLS.md`** at project root (if present)
 7. **Link or copy** skill files into each selected tool's native directory
 8. **Clean stale files** -- if a skill was renamed or removed in source, the old file is deleted from the target
-9. **Create `.belmont/`** directory with PRD.md and PROGRESS.md templates (if they don't exist)
+9. **Create `.belmont/`** directory with PR_FAQ.md, PRD.md templates and `features/` directory (if they don't exist)
 10. **Offer to update `.gitignore`** for the `.belmont/` state directory
 
 Example output:
@@ -306,6 +380,7 @@ belmont update                          # Update to latest release
 belmont update --check                  # Check for updates without installing
 belmont status                          # View project progress
 belmont status --format json            # Machine-readable status
+belmont status --feature auth           # Feature-specific status
 belmont tree --max-depth 3              # Project tree
 belmont find --name PRD --type file     # Find files
 belmont search --pattern "TECH_PLAN"    # Search file contents
@@ -354,6 +429,7 @@ Cursor uses per-file symlinks. Windsurf/Gemini/Copilot use a directory symlink. 
 Skills become native slash commands:
 
 ```
+/belmont:working-backwards  Define product vision (PR/FAQ)
 /belmont:product-plan   Interactive PRD creation
 /belmont:tech-plan      Technical implementation plan
 /belmont:implement      Implement next milestone (full pipeline)
@@ -394,7 +470,7 @@ If your tool isn't auto-detected, the agent and skill files are still plain mark
 
 - **Skills**: Read from `.agents/skills/belmont/` (or wherever you've placed them)
 - **Agents**: `.agents/belmont/codebase-agent.md`, `implementation-agent.md`, etc.
-- **State**: `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`
+- **State**: `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, `.belmont/features/`
 
 You can paste the skill content directly into a chat or configure your tool to load it as system context.
 
@@ -402,9 +478,22 @@ You can paste the skill content directly into a chat or configure your tool to l
 
 ## Skills Reference
 
+### `working-backwards`
+
+Amazon-style Working Backwards document creation. Produces a PR/FAQ with press release, FAQs, and appendix.
+
+- Guides you through customer definition, problem statement, and solution
+- Writes a one-page press release with leader quote and customer testimonial
+- Creates external (customer) and internal (stakeholder) FAQs
+- Includes appendix with product backlog, KPIs, and competitive analysis
+- Enforces writing quality: no weasel words, data over adjectives, under 30 words per sentence
+- Does NOT create PRDs or implementation plans — that comes next
+
+**Output**: `.belmont/PR_FAQ.md`
+
 ### `product-plan`
 
-Interactive planning session. Creates the PRD and PROGRESS files.
+Interactive planning session. Creates the PRD and PROGRESS files. Supports multi-feature products with a master PRD (feature catalog) and per-feature PRDs.
 
 - Asks clarifying questions one at a time until the plan is concrete
 - Creates structured PRD with prioritized tasks (P0-P3)
@@ -472,7 +561,7 @@ Runs verification and code review on all completed tasks.
 
 ### `reset`
 
-Reset belmont state to start a new planning session.
+Reset belmont state. In feature mode, choose to reset a specific feature, all features, or everything including masters and PR/FAQ.
 
 - Shows a summary of current state (feature name, task/milestone counts, completion status)
 - Asks for explicit confirmation before resetting
@@ -480,7 +569,7 @@ Reset belmont state to start a new planning session.
 - Deletes TECH_PLAN.md if it exists
 - Does NOT touch agents, skills, or any source code
 
-**Resets**: `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, `.belmont/MILESTONE-*.done.md`
+**Resets**: `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, `.belmont/MILESTONE-*.done.md`, `.belmont/features/`
 
 ### `status`
 
@@ -524,6 +613,22 @@ Last completed: P1-1 - Create chat message component
 ---
 
 ## Full Workflow
+
+### 0. Define Product Vision (optional)
+
+If you're building a product with multiple features, start with a PR/FAQ to define the strategic vision.
+
+```
+Claude Code:  /belmont:working-backwards
+Cursor:       Enable the belmont working-backwards rule, then: "Let's define the product vision"
+Other:        Load skills/belmont/working-backwards.md as context
+```
+
+**What happens:**
+- You describe the product idea and target customer
+- AI asks focused questions about the problem, solution, and key benefit
+- AI writes a PR/FAQ: press release + customer/stakeholder FAQs + appendix
+- AI writes `.belmont/PR_FAQ.md`
 
 ### 1. Install
 
@@ -683,6 +788,7 @@ belmont/
 │       ├── implement.md         # Implementation skill (generated)
 │       ├── next.md              # Next task skill (generated)
 │       ├── verify.md            # Verification skill (generated)
+│       ├── working-backwards.md  # Working backwards skill (generated)
 │       ├── status.md            # Status skill
 │       └── reset.md             # Reset state skill
 ├── agents/
@@ -720,6 +826,7 @@ your-project/
 │   │   └── core-review-agent.md
 │   └── skills/
 │       └── belmont/             # Skills (canonical location)
+│           ├── working-backwards.md
 │           ├── product-plan.md
 │           ├── tech-plan.md
 │           ├── implement.md
@@ -728,9 +835,16 @@ your-project/
 │           ├── status.md
 │           └── reset.md
 ├── .belmont/                    # Local state (gitignored)
+│   ├── PR_FAQ.md
 │   ├── PRD.md
 │   ├── PROGRESS.md
 │   ├── TECH_PLAN.md
+│   ├── features/                # Sub-feature directories (optional)
+│   │   └── <feature-slug>/
+│   │       ├── PRD.md
+│   │       ├── TECH_PLAN.md
+│   │       ├── PROGRESS.md
+│   │       └── MILESTONE.md
 │   ├── MILESTONE.md             # Active milestone context (created during implement)
 │   └── MILESTONE-M1.done.md     # Archived milestone (after completion)
 ├── .claude/                     # Claude Code (if selected)

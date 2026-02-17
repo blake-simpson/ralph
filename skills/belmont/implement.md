@@ -7,19 +7,45 @@ alwaysApply: false
 
 You are the implementation orchestrator. Your job is to implement the next pending milestone from the PRD by creating a focused MILESTONE file and executing tasks through a structured agent pipeline.
 
+## Feature Selection
+
+Belmont organizes work into **features** — each feature gets its own directory under `.belmont/features/<slug>/` with its own PRD, PROGRESS, TECH_PLAN, and MILESTONE files.
+
+### Select the Active Feature
+
+1. List all feature directories under `.belmont/features/`
+2. If features exist: read each feature's `PRD.md` for its name and status, then Ask which feature to implement, or auto-select the one with pending tasks
+3. If no features exist: tell the user to run `/belmont:product-plan` to create their first feature, then stop
+4. Set the **base path** to `.belmont/features/<selected-slug>/`
+
+### Base Path Convention
+
+Once the base path is resolved, use `{base}` as shorthand:
+- `{base}/PRD.md` — the feature PRD
+- `{base}/PROGRESS.md` — the feature progress tracker
+- `{base}/TECH_PLAN.md` — the feature tech plan
+- `{base}/MILESTONE.md` — the active milestone file
+- `{base}/MILESTONE-*.done.md` — archived milestones
+
+**Master files** (always at `.belmont/` root):
+- `.belmont/PR_FAQ.md` — strategic PR/FAQ document
+- `.belmont/PRD.md` — master PRD (feature catalog)
+- `.belmont/TECH_PLAN.md` — master tech plan (cross-cutting architecture)
+
 ## Setup
 
 Read these files first:
-- `.belmont/PRD.md` - The product requirements
-- `.belmont/PROGRESS.md` - Current progress and milestones
-- `.belmont/TECH_PLAN.md` - Technical implementation plan (if exists)
+- `{base}/PRD.md` - The product requirements
+- `{base}/PROGRESS.md` - Current progress and milestones
+- `{base}/TECH_PLAN.md` - Technical implementation plan (if exists)
+- `.belmont/TECH_PLAN.md` - Master tech plan for architecture context (if in feature mode and exists)
 
 Optional helper:
 - If the CLI is available, `belmont status --format json` can provide a quick summary of milestones/tasks. Still read the files above for full context.
 
 ## Step 1: Find Next Milestone
 
-1. Read `.belmont/PROGRESS.md` and find the Milestones section
+1. Read `{base}/PROGRESS.md` and find the Milestones section
 2. A milestone is **complete** if all its tasks are marked with `[x]` or `✅`
 3. A milestone is **pending** if any task is still `[ ]`
 4. Select the **first pending milestone**
@@ -29,7 +55,7 @@ Optional helper:
 
 **This is the key change.** Instead of passing context through sub-agent prompts, you write a structured MILESTONE file that all agents read from and write to.
 
-Create `.belmont/MILESTONE.md` with the following structure. Fill in the `## Orchestrator Context` section using information from the PRD, PROGRESS, and TECH_PLAN:
+Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orchestrator Context` section using information from the PRD, PROGRESS, and TECH_PLAN:
 
 ```markdown
 # Milestone: [ID] — [Name]
@@ -52,6 +78,10 @@ Create `.belmont/MILESTONE.md` with the following structure. Fill in the `## Orc
 
 ### Relevant Technical Context
 [Extract from TECH_PLAN.md: file structures, component specifications, TypeScript interfaces, implementation guidelines, and architecture decisions relevant to this milestone's tasks. Include code patterns and API specs. If no TECH_PLAN exists, write "No TECH_PLAN.md found."]
+
+### File Paths
+- **PRD**: {base}/PRD.md
+- **PROGRESS**: {base}/PROGRESS.md
 
 ### Scope Boundaries
 - **In Scope**: Only tasks listed above in this milestone
@@ -176,7 +206,7 @@ Use the dispatch method you selected in "Choosing Your Dispatch Method" above. F
 >
 > **MANDATORY FIRST STEP**: Read the file `.agents/belmont/codebase-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
 >
-> The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
+> The MILESTONE file is at `{base}/MILESTONE.md`. Read it, then follow your instructions.
 
 **Wait for**: Sub-agent to complete. Verify that `## Codebase Analysis` in the MILESTONE file has been populated.
 
@@ -192,7 +222,7 @@ Use the dispatch method you selected in "Choosing Your Dispatch Method" above. F
 >
 > **MANDATORY FIRST STEP**: Read the file `.agents/belmont/design-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
 >
-> The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
+> The MILESTONE file is at `{base}/MILESTONE.md`. Read it, then follow your instructions.
 
 **Wait for**: Sub-agent to complete. Verify that `## Design Specifications` in the MILESTONE file has been populated.
 
@@ -214,7 +244,7 @@ If you are NOT using Agent Teams: Spawn a sub-agent with this prompt:
 >
 > **MANDATORY FIRST STEP**: Read the file `.agents/belmont/implementation-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
 >
-> The MILESTONE file is at `.belmont/MILESTONE.md`. Read it, then follow your instructions.
+> The MILESTONE file is at `{base}/MILESTONE.md`. Read it, then follow your instructions.
 
 If you ARE using Agent Teams: Add an implementation-agent into the team per task in the milestone, with the same prompt as above. Use the team-lead to coordinate between them if they need to edit the same areas fo the codebase.
 
@@ -224,12 +254,12 @@ If you ARE using Agent Teams: Add an implementation-agent into the team per task
 
 ## Step 4: After Implementation Completes
 
-Read the `## Implementation Log` section from `.belmont/MILESTONE.md`. For each task:
+Read the `## Implementation Log` section from `{base}/MILESTONE.md`. For each task:
 
-1. **Verify tracking updates** — The implementation agent should have already marked tasks in PRD.md and PROGRESS.md. If any were missed, update them now.
+1. **Verify tracking updates** — The implementation agent should have already marked tasks in `{base}/PRD.md` and `{base}/PROGRESS.md`. If any were missed, update them now.
 2. **Handle follow-up tasks** — If the implementation log listed out-of-scope issues:
-   - Add them as new FWLUP tasks to `.belmont/PRD.md`
-   - Add them to a milestone in `.belmont/PROGRESS.md`:
+   - Add them as new FWLUP tasks to `{base}/PRD.md`
+   - Add them to a milestone in `{base}/PROGRESS.md`:
      - If they relate to existing tasks in an existing milestone, add them to that milestone
      - If they are not related to any existing tasks, create a **new milestone** with the next sequential number (e.g., if implementing M9, create `### ⬜ M10: Follow-ups`) and add them there
 3. **Handle blocked tasks** — If any tasks were reported as blocked during implementation:
@@ -252,7 +282,7 @@ When all tasks in the milestone are done:
 **After the milestone is complete (or all remaining tasks are blocked), clean up.**
 
 ### Archive the MILESTONE file
-1. **Archive** the MILESTONE file by renaming it: `.belmont/MILESTONE.md` → `.belmont/MILESTONE-[ID].done.md` (e.g., `MILESTONE-M2.done.md`)
+1. **Archive** the MILESTONE file by renaming it: `{base}/MILESTONE.md` → `{base}/MILESTONE-[ID].done.md` (e.g., `MILESTONE-M2.done.md`)
 2. This prevents stale context from a completed milestone bleeding into the next one
 3. If the user runs `/belmont:implement` again for the next milestone, a fresh MILESTONE file will be created
 
@@ -294,7 +324,7 @@ If you finish all tasks in the current milestone, **stop**. Report the milestone
 
 ### PRD Scope Boundary (HARD RULE)
 
-ALL work must trace back to a specific task in `.belmont/PRD.md`. You MUST NOT:
+ALL work must trace back to a specific task in `{base}/PRD.md`. You MUST NOT:
 
 - Implement features, capabilities, or behaviors not described in the PRD
 - Add "nice to have" improvements that aren't part of any task
@@ -311,8 +341,8 @@ If during implementation you discover something that **should** be done but **is
 
 The implementation agent (Phase 3) performs scope validation for each task before implementing it (see Step 0 in `implementation-agent.md`). As the orchestrator, verify before dispatching Phase 3:
 
-1. All task IDs in the milestone exist in `.belmont/PRD.md`
-2. All tasks belong to the current milestone in `.belmont/PROGRESS.md`
+1. All task IDs in the milestone exist in `{base}/PRD.md`
+2. All tasks belong to the current milestone in `{base}/PROGRESS.md`
 3. No tasks from other milestones have been included
 
 If any check fails, STOP and report the issue rather than proceeding.

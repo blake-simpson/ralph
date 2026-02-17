@@ -17,114 +17,77 @@ You are resetting the belmont state directory so the user can start a new planni
 
 Read the following files (if they exist) and collect a summary:
 
-- `.belmont/PRD.md` — Extract the feature name (from `# PRD: ...` heading), count of tasks, count of completed tasks (✅)
-- `.belmont/PROGRESS.md` — Extract the status line, count of milestones, count of completed milestones (✅)
-- `.belmont/TECH_PLAN.md` — Check if it exists and has content
-- `.belmont/MILESTONE.md` — Check if an active MILESTONE file exists
-- `.belmont/MILESTONE-*.done.md` — Check for any archived MILESTONE files
+- `.belmont/PR_FAQ.md` — Check if it exists and has real content
+- `.belmont/PRD.md` — Extract the product/feature name, check if it's a master feature catalog
+- `.belmont/TECH_PLAN.md` — Check if it exists and has content (master tech plan)
+- `.belmont/features/` — Scan for feature subdirectories. For each, read its PRD.md for name and PROGRESS.md for task counts.
 
 Optional helper:
-- If the CLI is available, `belmont status --format json` can provide a quick task/milestone summary. Still check for MILESTONE files and TECH_PLAN existence.
+- If the CLI is available, `belmont status --format json` can provide a quick task/milestone summary. Still check for MILESTONE files, TECH_PLAN, PR_FAQ, and features/ existence.
 
-If `.belmont/` does not exist or contains only empty templates, tell the user there is nothing to reset and stop.
+If `.belmont/` does not exist or contains only empty templates and no features, tell the user there is nothing to reset and stop.
 
-## Step 2: Confirm With User
+## Step 2: Present Options
 
-Present a clear summary of what will be destroyed and ask for confirmation. Use this exact format:
+Present a clear summary and options:
 
 ```
 ⚠️  Reset Belmont State
 ========================
 
-This will reset ALL belmont planning files to blank templates:
+Product: [product name from master PRD]
+PR/FAQ:       [Has content / Empty]
+Master PRD:   [Has content / Empty]
+Master Tech:  [Exists / Does not exist]
 
-  PRD.md        [feature name] — [X] tasks ([Y] complete)
-  PROGRESS.md   [status] — [N] milestones ([M] complete)
-  TECH_PLAN.md  [Exists / Does not exist]
-  MILESTONE.md  [Active / Does not exist]
-  Archives      [N archived MILESTONE files / None]
+Features:
+  [slug]  [feature name] — [X] tasks ([Y] complete)
+  [slug]  [feature name] — [X] tasks ([Y] complete)
+  ...
+
+Options:
+  [1] Reset a specific feature (delete its directory contents, preserve masters)
+  [2] Reset ALL features (clear all feature dirs, preserve masters)
+  [3] Full reset (everything, including masters and PR_FAQ)
+  [c] Cancel
 
 ⚠️  This cannot be undone.
-
-Type "yes" to confirm, or anything else to cancel.
 ```
-
-Fill in the bracketed values from Step 1. If a file is already a blank template or doesn't exist, say "blank template" or "does not exist" instead of counts.
 
 **Wait for the user's response.** Do NOT proceed until you receive a reply.
 
 ## Step 3: Handle Response
 
-### If the user confirms (responds "yes", "y", "confirm", or similar affirmative):
+**Option 1 — Reset specific feature:**
+1. Ask which feature to reset (by slug or number)
+2. Delete all files in `.belmont/features/<slug>/` (PRD.md, PROGRESS.md, TECH_PLAN.md, MILESTONE.md, MILESTONE-*.done.md)
+3. Remove the feature directory
+4. Update the master PRD features table to remove/mark the feature
+5. Report what was reset
 
-Reset each file to its template state:
+**Option 2 — Reset ALL features:**
+1. Delete all subdirectories under `.belmont/features/`
+2. Reset `.belmont/PRD.md` to the master template (keep product name, clear features table)
+3. Delete `.belmont/TECH_PLAN.md` (master tech plan)
+4. Delete any root-level MILESTONE files
+5. Preserve `.belmont/PR_FAQ.md`
+6. Report what was reset
 
-**`.belmont/PRD.md`** — overwrite with:
+**Option 3 — Full reset:**
+1. Delete all subdirectories under `.belmont/features/`
+2. Reset `.belmont/PR_FAQ.md` to template text: `"Run /belmont:working-backwards to create your PR/FAQ document.\n"`
+3. Reset `.belmont/PRD.md` to template text: `"Run the /belmont:product-plan skill to create a plan for your feature.\n"`
+4. Delete `.belmont/TECH_PLAN.md`
+5. Delete `.belmont/MILESTONE.md` (if exists at root)
+6. Delete all `.belmont/MILESTONE-*.done.md` (if any exist at root)
+7. Report what was reset
 
-```
-Run the /belmont:product-plan skill to create a plan for your feature.
-```
-
-**`.belmont/PROGRESS.md`** — overwrite with:
-
-```markdown
-# Progress: [Feature Name]
-
-## Status: 🔴 Not Started
-
-## PRD Reference
-.belmont/PRD.md
-
-## Milestones
-
-### ⬜ M1: [Milestone Name]
-- [ ] Task 1
-- [ ] Task 2
-
-## Session History
-| Session | Date/Time           | Context Used | Milestones Completed |
-|---------|------|--------------|---------------------|
-
-## Decisions Log
-[Numbered list of key decisions with rationale]
-
-## Blockers
-[Any blocking issues]
-```
-
-**`.belmont/TECH_PLAN.md`** — delete the file if it exists.
-
-**`.belmont/MILESTONE.md`** — delete the file if it exists.
-
-**`.belmont/MILESTONE-*.done.md`** — delete all archived MILESTONE files if any exist.
-
-After clearing, report:
-
-```
-✅ Belmont state reset.
-
-  PRD.md        → reset to template
-  PROGRESS.md   → reset to template
-  TECH_PLAN.md  → [deleted / did not exist]
-  MILESTONE.md  → [deleted / did not exist]
-  Archives      → [N deleted / none existed]
-
-Run /belmont:product-plan to start a new plan.
-```
-
-### If the user declines (anything other than clear affirmative):
-
-Report:
-
-```
-Cancelled. No files were changed.
-```
-
-Stop. Do not modify anything.
+**Option c — Cancel:**
+Report: `Cancelled. No files were changed.`
 
 ## Important Rules
 
 1. Always show the summary BEFORE asking for confirmation
-2. Never proceed without an explicit "yes" from the user
-3. Do not partially reset — either reset everything or nothing
-4. After clearing, prompt the user toward `/belmont:product-plan`
+2. Never proceed without an explicit confirmation from the user
+3. Respect the user's choice of scope (single feature, all features, or full)
+4. After clearing, prompt the user toward `/belmont:working-backwards` or `/belmont:product-plan`
