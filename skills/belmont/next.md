@@ -28,6 +28,7 @@ Once the base path is resolved, use `{base}` as shorthand:
 - `{base}/TECH_PLAN.md` — the feature tech plan
 - `{base}/MILESTONE.md` — the active milestone file
 - `{base}/MILESTONE-*.done.md` — archived milestones
+- `{base}/NOTES.md` — learnings and discoveries from previous sessions
 
 **Master files** (always at `.belmont/` root):
 - `.belmont/PR_FAQ.md` — strategic PR/FAQ document
@@ -55,6 +56,8 @@ Read these files first:
 - `{base}/PROGRESS.md` - Current progress and milestones
 - `{base}/TECH_PLAN.md` - Technical implementation plan (if exists)
 - `.belmont/TECH_PLAN.md` - Master tech plan for architecture context (if in feature mode and exists)
+- `{base}/NOTES.md` - Feature-level learnings from previous sessions (if exists)
+- `.belmont/NOTES.md` - Global learnings from previous sessions (if exists)
 
 Optional helper:
 - If the CLI is available, `belmont status --format json` can provide a quick summary of the next pending milestone/task. Still read the files above for full context.
@@ -103,10 +106,17 @@ Create `{base}/MILESTONE.md` with a focused, lightweight version of the mileston
 ### File Paths
 - **PRD**: {base}/PRD.md
 - **PROGRESS**: {base}/PROGRESS.md
+- **Feature Notes**: {base}/NOTES.md
+- **Global Notes**: .belmont/NOTES.md
 
 ### Scope Boundaries
 - **In Scope**: Only the single task listed above
 - **Out of Scope**: [Copy the PRD's "Out of Scope" section verbatim]
+
+### Learnings from Previous Sessions
+[If `.belmont/NOTES.md` exists, copy its contents here under "#### Global Notes".]
+[If `{base}/NOTES.md` exists, copy its contents here under "#### Feature Notes".]
+[If neither exists, write "No previous learnings found."]
 
 ## Codebase Analysis
 [Not populated — lightweight mode skips the codebase agent. The implementation agent will explore the codebase as needed.]

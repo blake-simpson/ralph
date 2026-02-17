@@ -36,7 +36,7 @@ If no features exist yet, tell the user to run `/belmont:product-plan` to create
 If a specific feature is requested (user says "show status for auth" or similar):
 
 1. Set base path to `.belmont/features/<slug>/`
-2. Read `{base}/PRD.md`, `{base}/PROGRESS.md`, check `{base}/TECH_PLAN.md`
+2. Read `{base}/PRD.md`, `{base}/PROGRESS.md`, check `{base}/TECH_PLAN.md`, check `{base}/NOTES.md` and `.belmont/NOTES.md`
 3. Produce the standard status report (see format below)
 
 ## Files to Read
@@ -44,6 +44,8 @@ If a specific feature is requested (user says "show status for auth" or similar)
 1. `{base}/PRD.md` - Task definitions and completion status
 2. `{base}/PROGRESS.md` - Milestones and session history
 3. `{base}/TECH_PLAN.md` - Check if it exists and has content
+4. `{base}/NOTES.md` - Check if feature-level notes exist
+5. `.belmont/NOTES.md` - Check if global notes exist
 
 If `.belmont/` directory doesn't exist, tell the user to run `belmont install` first.
 
@@ -85,6 +87,7 @@ Belmont Status
 Feature: [Extract from PRD title]
 
 Tech Plan: [✅ Ready / ⚠ Not written (run /belmont:tech-plan to create)]
+Notes:     [✅ Has notes / — None]
 
 Status: [🔴 Not Started | 🟡 In Progress | ✅ Complete | 🔴 BLOCKED: reason]
 

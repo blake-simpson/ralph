@@ -20,6 +20,7 @@ Read the following files (if they exist) and collect a summary:
 - `.belmont/PR_FAQ.md` — Check if it exists and has real content
 - `.belmont/PRD.md` — Extract the product/feature name, check if it's a master feature catalog
 - `.belmont/TECH_PLAN.md` — Check if it exists and has content (master tech plan)
+- `.belmont/NOTES.md` — Check if global notes exist
 - `.belmont/features/` — Scan for feature subdirectories. For each, read its PRD.md for name and PROGRESS.md for task counts.
 
 Optional helper:
@@ -39,6 +40,7 @@ Product: [product name from master PRD]
 PR/FAQ:       [Has content / Empty]
 Master PRD:   [Has content / Empty]
 Master Tech:  [Exists / Does not exist]
+Global Notes: [Exists / Does not exist]
 
 Features:
   [slug]  [feature name] — [X] tasks ([Y] complete)
@@ -60,7 +62,7 @@ Options:
 
 **Option 1 — Reset specific feature:**
 1. Ask which feature to reset (by slug or number)
-2. Delete all files in `.belmont/features/<slug>/` (PRD.md, PROGRESS.md, TECH_PLAN.md, MILESTONE.md, MILESTONE-*.done.md)
+2. Delete all files in `.belmont/features/<slug>/` (PRD.md, PROGRESS.md, TECH_PLAN.md, NOTES.md, MILESTONE.md, MILESTONE-*.done.md)
 3. Remove the feature directory
 4. Update the master PRD features table to remove/mark the feature
 5. Report what was reset
@@ -80,7 +82,8 @@ Options:
 4. Delete `.belmont/TECH_PLAN.md`
 5. Delete `.belmont/MILESTONE.md` (if exists at root)
 6. Delete all `.belmont/MILESTONE-*.done.md` (if any exist at root)
-7. Report what was reset
+7. Delete `.belmont/NOTES.md` (if exists)
+8. Report what was reset
 
 **Option c — Cancel:**
 Report: `Cancelled. No files were changed.`

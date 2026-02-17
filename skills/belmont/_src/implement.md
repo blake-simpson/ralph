@@ -16,6 +16,8 @@ Read these files first:
 - `{base}/PROGRESS.md` - Current progress and milestones
 - `{base}/TECH_PLAN.md` - Technical implementation plan (if exists)
 - `.belmont/TECH_PLAN.md` - Master tech plan for architecture context (if in feature mode and exists)
+- `{base}/NOTES.md` - Feature-level learnings from previous sessions (if exists)
+- `.belmont/NOTES.md` - Global learnings from previous sessions (if exists)
 
 Optional helper:
 - If the CLI is available, `belmont status --format json` can provide a quick summary of milestones/tasks. Still read the files above for full context.
@@ -59,11 +61,18 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 ### File Paths
 - **PRD**: {base}/PRD.md
 - **PROGRESS**: {base}/PROGRESS.md
+- **Feature Notes**: {base}/NOTES.md
+- **Global Notes**: .belmont/NOTES.md
 
 ### Scope Boundaries
 - **In Scope**: Only tasks listed above in this milestone
 - **Out of Scope**: [Copy the PRD's "Out of Scope" section verbatim]
 - **Milestone Boundary**: Do NOT implement tasks from other milestones
+
+### Learnings from Previous Sessions
+[If `.belmont/NOTES.md` exists, copy its contents here under "#### Global Notes".]
+[If `{base}/NOTES.md` exists, copy its contents here under "#### Feature Notes".]
+[If neither exists, write "No previous learnings found."]
 
 ## Codebase Analysis
 [Written by codebase-agent — stack, patterns, conventions, related code, utilities]
@@ -75,7 +84,7 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 [Written by implementation-agent — per-task status, files changed, commits, issues]
 ```
 
-**IMPORTANT**: The `## Orchestrator Context` section is the **single source of truth** for all sub-agents. It must contain ALL information they need — task definitions verbatim from the PRD, relevant TECH_PLAN specs, and scope boundaries. Sub-agents read ONLY the MILESTONE file, so anything not in it will be invisible to them. Copy task definitions verbatim — don't summarize.
+**IMPORTANT**: The `## Orchestrator Context` section is the **single source of truth** for all sub-agents. It must contain ALL information they need — task definitions verbatim from the PRD, relevant TECH_PLAN specs, scope boundaries, and learnings from previous sessions. Sub-agents read ONLY the MILESTONE file, so anything not in it will be invisible to them. Copy task definitions verbatim — don't summarize.
 
 The three section headings (`## Codebase Analysis`, `## Design Specifications`, `## Implementation Log`) should be present but empty — each agent will fill in its section.
 

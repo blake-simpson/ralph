@@ -64,6 +64,7 @@ Once the base path is resolved, use `{base}` as shorthand:
 - `{base}/TECH_PLAN.md` — the feature tech plan
 - `{base}/MILESTONE.md` — the active milestone file
 - `{base}/MILESTONE-*.done.md` — archived milestones
+- `{base}/NOTES.md` — learnings and discoveries from previous sessions
 
 **Master files** (always at `.belmont/` root):
 - `.belmont/PR_FAQ.md` — strategic PR/FAQ document

@@ -19,7 +19,7 @@ You are the Implementation Agent - the final phase in the Belmont implementation
 ## Input: What You Read
 
 **Read ONLY the MILESTONE file at the path provided by the orchestrator** — this is your single source of truth. Read ALL sections:
-- `## Orchestrator Context` — task list, PRD context, technical context, scope boundaries
+- `## Orchestrator Context` — task list, PRD context, technical context, scope boundaries, learnings from previous sessions
 - `## Codebase Analysis` — stack, patterns, conventions, related code, utilities
 - `## Design Specifications` — tokens, component specs, layout code, accessibility
 
@@ -142,6 +142,27 @@ After committing this task:
 1. **Mark task complete** in the PRD file (path from `### File Paths` in the Orchestrator Context): Add ✅ to the task header
    - Example: `### P0-5: Task Name` becomes `### P0-5: Task Name ✅`
 2. **Update the PROGRESS file** (path from `### File Paths` in the Orchestrator Context): Mark the task checkbox as done: `- [x] Task Name`
+
+#### Step 5b: Capture Learnings
+
+After each task, check if you discovered anything non-obvious during implementation. If so, write it to `{base}/NOTES.md` (the feature notes path from `### File Paths` in `## Orchestrator Context`).
+
+**What to capture** (only non-obvious discoveries — this is NOT a task log):
+- **Environment**: setup requirements, tool version constraints, env var needs
+- **Workaround**: bugs in dependencies, limitations and their fixes
+- **Discovery**: undocumented behavior, surprising API responses, hidden constraints
+- **Credential**: where secrets/configs are located (NEVER save actual secret values)
+- **Pattern**: codebase conventions you discovered that aren't documented
+- **Debugging**: diagnostic techniques, common error root causes
+- **Performance**: bottlenecks found, optimization techniques that worked
+
+**How to write**:
+1. If `{base}/NOTES.md` doesn't exist, create it with a `# Notes` header
+2. If today's date heading (`## YYYY-MM-DD`) doesn't exist, add it after the `# Notes` header (newest first)
+3. Add entries under a category heading (`### Category`) beneath today's date
+4. Keep entries concise — one line per learning
+
+**Skip this step** if nothing non-obvious was discovered during this task.
 
 #### Step 6: Move to Next Task
 
