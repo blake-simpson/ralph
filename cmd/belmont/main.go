@@ -1095,10 +1095,6 @@ func runInstall(args []string) error {
 		return err
 	}
 
-	if err := maybeUpdateGitignore(projectRoot, noPrompt); err != nil {
-		return err
-	}
-
 	fmt.Println("")
 	fmt.Println("Belmont installed!")
 	fmt.Println("")
@@ -1914,60 +1910,6 @@ func removeLegacyCodexSkillsIndex(projectRoot string) (bool, error) {
 	return true, nil
 }
 
-func maybeUpdateGitignore(projectRoot string, noPrompt bool) error {
-	path := filepath.Join(projectRoot, ".gitignore")
-	if fileExists(path) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if gitignoreHasBelmont(string(data)) {
-			fmt.Println(".belmont is already in .gitignore")
-			return nil
-		}
-		if noPrompt {
-			return nil
-		}
-		if !promptYes("Add .belmont to .gitignore? [Y/n] ") {
-			return nil
-		}
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		if _, err := f.WriteString("\n# Belmont local state\n.belmont/\n"); err != nil {
-			return err
-		}
-		fmt.Println("Added .belmont/ to .gitignore")
-		return nil
-	}
-
-	if noPrompt {
-		return nil
-	}
-	if !promptYes("Create .gitignore with .belmont entry? [Y/n] ") {
-		return nil
-	}
-	if err := os.WriteFile(path, []byte("# Belmont local state\n.belmont/\n"), 0o644); err != nil {
-		return err
-	}
-	fmt.Println("Created .gitignore with .belmont/ entry")
-	return nil
-}
-
-func gitignoreHasBelmont(content string) bool {
-	re := regexp.MustCompile(`(?m)^\s*\.belmont/?(\s|$)`)
-	return re.MatchString(content)
-}
-
-func promptYes(message string) bool {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print(message)
-	answer, _ := reader.ReadString('\n')
-	answer = strings.TrimSpace(answer)
-	return answer == "" || strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes")
-}
 
 func filesEqual(a, b string) (bool, error) {
 	ab, err := os.ReadFile(a)

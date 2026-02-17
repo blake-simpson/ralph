@@ -306,7 +306,6 @@ The installer will:
 7. **Link or copy** skill files into each selected tool's native directory
 8. **Clean stale files** -- if a skill was renamed or removed in source, the old file is deleted from the target
 9. **Create `.belmont/`** directory with PR_FAQ.md, PRD.md templates and `features/` directory (if they don't exist)
-10. **Offer to update `.gitignore`** for the `.belmont/` state directory
 
 Example output:
 
@@ -879,7 +878,7 @@ your-project/
 │           ├── status.md
 │           ├── review.md
 │           └── reset.md
-├── .belmont/                    # Local state (gitignored)
+├── .belmont/                    # Planning & state (commit to share with team)
 │   ├── PR_FAQ.md
 │   ├── PRD.md
 │   ├── PROGRESS.md
@@ -913,8 +912,10 @@ your-project/
 **Key separation:**
 - `.agents/belmont/` -- Shared agent instructions. Committed to git. Referenced by all tools.
 - `.agents/skills/belmont/` -- Canonical skill files. Single source of truth.
-- `.belmont/` -- Local planning state (PRD, PROGRESS, TECH_PLAN, MILESTONE). Gitignored. Per-developer.
+- `.belmont/` -- Planning state (PR/FAQ, PRD, PROGRESS, TECH_PLAN, MILESTONE). Commit to git so the whole team has shared context.
 - `.claude/`, `.codex/`, `.cursor/`, etc. -- Tool-specific wiring. Some use symlinks, some use copied/synced files.
+
+**Should I gitignore `.belmont/`?** Generally, no — commit it so planning docs (PR/FAQ, PRD, TECH_PLAN) are shared across the team. The only case to gitignore it is if you're a solo developer who wants to keep planning state purely local and ephemeral.
 
 ---
 
