@@ -44,11 +44,11 @@ For each acceptance criterion from the PRD:
 
 ### Phase 2: Visual Verification (if UI task)
 
-If the task involved UI changes:
+If the task involved UI changes, you MUST:
 
 1. **Load Figma Design** - Get the reference design
 2. **Start Dev Server** - Run the application
-3. **Use Playwright** - Navigate to the implemented UI
+3. **Use Playwright** - You MUST attempt to use the playwright MCP (if installed) to navigate to the implemented UI
 4. **Screenshot Comparison** - Compare against Figma   [Ensure local screenshots files are cleaned up after each test]
 5. **Check Pixel Accuracy**:
    - Colors match exactly
@@ -56,6 +56,8 @@ If the task involved UI changes:
    - Typography matches
    - Layout matches
    - States work (hover, active, disabled)
+
+Note: If the page is auth protected, you may need to ask the user to provide login credentials and where the login page is located. With this information perform a login then navigate to the UI and verify it.
 
 ### Phase 3: i18n Verification
 
