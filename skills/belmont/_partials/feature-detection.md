@@ -22,4 +22,5 @@ Once the base path is resolved, use `{base}` as shorthand:
 **Master files** (always at `.belmont/` root):
 - `.belmont/PR_FAQ.md` — strategic PR/FAQ document
 - `.belmont/PRD.md` — master PRD (feature catalog)
+- `.belmont/PROGRESS.md` — master progress tracking (feature summary table)
 - `.belmont/TECH_PLAN.md` — master tech plan (cross-cutting architecture)

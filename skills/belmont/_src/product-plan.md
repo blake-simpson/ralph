@@ -21,7 +21,7 @@ You are running an interactive planning session. You should not switch the agent
 - Reading files to understand the codebase
 - If any Figma URLs are included, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design context (layout, colors, typography, component structure, copy) and incorporate findings into the PRD.
 - Asking the user questions
-- Writing to `.belmont/PRD.md`, `.belmont/PROGRESS.md`, and files under `.belmont/features/`
+- Writing to `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/features/`, and master `.belmont/PROGRESS.md`
 - Creating feature directories under `.belmont/features/`
 - Using WebFetch for research
 
@@ -60,6 +60,23 @@ If `.belmont/PRD.md` is empty/default and no features exist yet, create the **ma
 | [Feature Name] | [feature-slug] | P1 | None | Not Started |
 ```
 
+Also create `.belmont/PROGRESS.md` (the master progress file) if it doesn't exist or still contains template/placeholder text:
+
+```markdown
+# Progress: [Product Name]
+
+## Status: 🔴 Not Started
+
+## Features
+
+| Feature | Slug | Status | Milestones | Tasks | Blockers |
+|---------|------|--------|------------|-------|----------|
+
+## Recent Activity
+| Date | Feature | Activity |
+|------|---------|----------|
+```
+
 Then immediately proceed to create the first feature (below).
 
 ## Creating or Updating a Feature
@@ -71,6 +88,7 @@ When the user selects or creates a feature:
 3. **Write feature PRD**: `.belmont/features/<slug>/PRD.md` (using the PRD format below)
 4. **Write feature PROGRESS**: `.belmont/features/<slug>/PROGRESS.md` (using the PROGRESS format below)
 5. **Update master PRD**: Add/update the feature entry in `.belmont/PRD.md`'s features table
+6. **Update master PROGRESS**: Add or update the feature's row in `.belmont/PROGRESS.md`'s `## Features` table with the feature name, slug, initial status, milestone/task counts, and blockers. Add a row to `## Recent Activity` noting the feature was created or updated.
 
 When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
 

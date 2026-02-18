@@ -129,6 +129,18 @@ After the implementation agent completes:
    - Add them to the appropriate milestone in `{base}/PROGRESS.md`
 4. **Check milestone completion** — if this was the last task in the milestone:
    - Update milestone status: `### ⬜ M1:` becomes `### ✅ M1:`
+5. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
+   ```
+   # Progress: [Product Name from .belmont/PRD.md]
+   ## Status: 🟡 In Progress
+   ## Features
+   | Feature | Slug | Status | Milestones | Tasks | Blockers |
+   |---------|------|--------|------------|-------|----------|
+   ## Recent Activity
+   | Date | Feature | Activity |
+   |------|---------|----------|
+   ```
+   Then find the row for the current feature's slug in the `## Features` table (add a new row if missing). Increment the Tasks done count. If this completed a milestone, also update the Milestones count and Status columns. Add a row to `## Recent Activity` noting what was completed.
 
 ## Step 5: Clean Up MILESTONE File
 

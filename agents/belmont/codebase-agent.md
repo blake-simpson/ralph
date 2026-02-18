@@ -53,7 +53,7 @@ Identify and report:
   5. `packageManager` field in `package.json` → use whatever it specifies
   6. Default to **npm** if none match
 
-  **This is critical** — downstream agents (implementation-agent, core-review-agent) use the detected package manager for all commands. Report it accurately.
+  **This is critical** — downstream agents (implementation-agent, code-review-agent) use the detected package manager for all commands. Report it accurately.
 
 ### 2. Project Structure Scan
 

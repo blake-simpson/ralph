@@ -32,7 +32,7 @@ Optional helper:
 
 Apply the following dispatch configuration:
 - **Team name**: `belmont-verify`
-- **Parallel agents**: verification-agent + core-review-agent — spawn simultaneously
+- **Parallel agents**: verification-agent + code-review-agent — spawn simultaneously
 - **Sequential agents**: None
 - **Cleanup timing**: After Step 3 completes
 
@@ -74,13 +74,13 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 
 ---
 
-### Agent 2: Code Review (core-review-agent)
+### Agent 2: Code Review (code-review-agent)
 
 **Purpose**: Review code changes for quality and PRD alignment.
 
 **Spawn a sub-agent with this prompt**:
 
-<!-- @include identity-preamble.md agent_role="code review" agent_file="core-review-agent.md" -->
+<!-- @include identity-preamble.md agent_role="code review" agent_file="code-review-agent.md" -->
 >
 > Review the code changes for the following completed tasks:
 >
@@ -113,13 +113,18 @@ After both agents complete:
    - **Warnings** - Should be fixed (non-blocking but important)
    - **Suggestions** - Nice to have improvements
 
+### Fix minor issues in scope
+If the issue is minor and in scope, you can fix it yourself. We want to avoid situations where we endlessly iplement, verify, and then implement again.
+
+If the issue is not minor and is out of scope for the verifier agent, we must create a follow-up task for it (See below).
+
 ### Create Follow-up Tasks
 If any issues were found by either agent:
 1. Add new tasks to `{base}/PRD.md` for each critical or warning issue:
    ```markdown
    ### P0-X-FWLUP: [Issue Description] 🔵
    **Severity**: [Based on issue category]
-   **Source**: [verification-agent / core-review-agent]
+   **Source**: [verification-agent / code-review-agent]
 
    **Task Description**:
    [Description of the issue and what needs to be fixed]
@@ -136,6 +141,18 @@ If any issues were found by either agent:
    - Follow-up tasks MUST live inside a milestone heading — never in a freestanding section outside the milestones structure
 3. If critical issues were found, update the overall status to reflect this
 4. If a new milestone was created, revert the overall status from `✅ Complete` to `🟡 In Progress`
+5. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
+   ```
+   # Progress: [Product Name from .belmont/PRD.md]
+   ## Status: 🟡 In Progress
+   ## Features
+   | Feature | Slug | Status | Milestones | Tasks | Blockers |
+   |---------|------|--------|------------|-------|----------|
+   ## Recent Activity
+   | Date | Feature | Activity |
+   |------|---------|----------|
+   ```
+   Then if follow-up tasks were added, update the Tasks total in the `## Features` table for this feature's row (add a new row if missing). If blockers were found, update the Blockers column. Add a row to `## Recent Activity` noting verification results.
 
 ### Report Summary
 

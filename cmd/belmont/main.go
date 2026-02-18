@@ -49,11 +49,17 @@ type milestone struct {
 }
 
 type featureSummary struct {
-	Slug      string `json:"slug"`
-	Name      string `json:"name"`
-	TasksDone int    `json:"tasks_done"`
-	TasksTotal int   `json:"tasks_total"`
-	Status    string `json:"status"`
+	Slug            string      `json:"slug"`
+	Name            string      `json:"name"`
+	TasksDone       int         `json:"tasks_done"`
+	TasksTotal      int         `json:"tasks_total"`
+	MilestonesDone  int         `json:"milestones_done"`
+	MilestonesTotal int         `json:"milestones_total"`
+	Milestones      []milestone `json:"milestones"`
+	NextMilestone   *milestone  `json:"next_milestone,omitempty"`
+	NextTask        *task       `json:"next_task,omitempty"`
+	Blockers        []string    `json:"blockers,omitempty"`
+	Status          string      `json:"status"`
 }
 
 type statusReport struct {
@@ -275,11 +281,26 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	report.Features = features
 	report.Feature = extractProductName(filepath.Join(root, ".belmont", "PRD.md"))
 	report.TechPlanReady = techPlanReady(filepath.Join(root, ".belmont", "TECH_PLAN.md"))
-	if len(features) > 0 {
+
+	// Read master PROGRESS.md for overall status and blockers
+	masterProgressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
+	if masterProgress, err := os.ReadFile(masterProgressPath); err == nil {
+		content := string(masterProgress)
+		statusLine := parseStatusLine(content)
+		if statusLine != "" {
+			report.OverallStatus = statusLine
+		} else if len(features) > 0 {
+			report.OverallStatus = computeFeatureListStatus(features)
+		} else {
+			report.OverallStatus = "🔴 Not Started"
+		}
+		report.Blockers = parseBlockers(content)
+	} else if len(features) > 0 {
 		report.OverallStatus = computeFeatureListStatus(features)
 	} else {
 		report.OverallStatus = "🔴 Not Started"
 	}
+
 	return report, nil
 }
 
@@ -332,6 +353,32 @@ func listFeatures(featuresDir string, maxName int) []featureSummary {
 			}
 		}
 
+		var milestones []milestone
+		var featureBlockers []string
+		milestonesDone := 0
+		milestonesTotal := 0
+		progressPath := filepath.Join(featurePath, "PROGRESS.md")
+		if progressContent, err := os.ReadFile(progressPath); err == nil {
+			milestones = parseMilestones(string(progressContent))
+			milestonesTotal = len(milestones)
+			for _, m := range milestones {
+				if m.Done {
+					milestonesDone++
+				}
+			}
+			featureBlockers = parseBlockers(string(progressContent))
+		}
+
+		// Compute next milestone and next task for this feature
+		var featureNextMilestone *milestone
+		var featureNextTask *task
+		if err == nil {
+			tasks := parseTasks(string(prdContent), maxName)
+			assignTaskStatuses(tasks)
+			featureNextTask = nextTask(tasks)
+		}
+		featureNextMilestone = nextMilestone(milestones)
+
 		status := "🔴 Not Started"
 		if tasksTotal > 0 && tasksDone == tasksTotal {
 			status = "✅ Complete"
@@ -340,11 +387,17 @@ func listFeatures(featuresDir string, maxName int) []featureSummary {
 		}
 
 		features = append(features, featureSummary{
-			Slug:       slug,
-			Name:       name,
-			TasksDone:  tasksDone,
-			TasksTotal: tasksTotal,
-			Status:     status,
+			Slug:            slug,
+			Name:            name,
+			TasksDone:       tasksDone,
+			TasksTotal:      tasksTotal,
+			MilestonesDone:  milestonesDone,
+			MilestonesTotal: milestonesTotal,
+			Milestones:      milestones,
+			NextMilestone:   featureNextMilestone,
+			NextTask:        featureNextTask,
+			Blockers:        featureBlockers,
+			Status:          status,
 		})
 	}
 	return features
@@ -729,8 +782,9 @@ func renderFeatureListing(report statusReport) string {
 	sb.WriteString(fmt.Sprintf("PR/FAQ: %s\n", prfaq))
 	sb.WriteString(fmt.Sprintf("Master Tech Plan: %s\n\n", techPlan))
 	sb.WriteString(fmt.Sprintf("Status: %s\n\n", report.OverallStatus))
-	sb.WriteString("Features:\n")
+
 	if len(report.Features) == 0 {
+		sb.WriteString("Features:\n")
 		sb.WriteString("  (none — run /belmont:product-plan to create your first feature)\n")
 	} else {
 		for _, f := range report.Features {
@@ -740,11 +794,53 @@ func renderFeatureListing(report statusReport) string {
 			} else if f.Status == "🟡 In Progress" {
 				icon = "🟡"
 			}
-			sb.WriteString(fmt.Sprintf("  %s %-20s %-30s %d/%d tasks done\n", icon, f.Slug, f.Name, f.TasksDone, f.TasksTotal))
+			sb.WriteString(fmt.Sprintf("%s %s (%s)\n", icon, f.Name, f.Slug))
+			sb.WriteString(fmt.Sprintf("  Tasks: %d/%d done", f.TasksDone, f.TasksTotal))
+			if f.MilestonesTotal > 0 {
+				sb.WriteString(fmt.Sprintf("  |  Milestones: %d/%d done", f.MilestonesDone, f.MilestonesTotal))
+			}
+			sb.WriteString("\n")
+
+			// Show milestone listing
+			if len(f.Milestones) > 0 {
+				for _, m := range f.Milestones {
+					mIcon := "⬜"
+					if m.Done {
+						mIcon = "✅"
+					} else if f.NextMilestone != nil && m.ID == f.NextMilestone.ID {
+						mIcon = "🔄"
+					}
+					sb.WriteString(fmt.Sprintf("    %s %s: %s\n", mIcon, m.ID, m.Name))
+				}
+			}
+
+			// Show next task if feature is in progress
+			if f.NextTask != nil && f.Status == "🟡 In Progress" {
+				sb.WriteString(fmt.Sprintf("  Next: %s — %s\n", f.NextTask.ID, f.NextTask.Name))
+			}
+
+			// Show blockers if any
+			if len(f.Blockers) > 0 {
+				sb.WriteString("  Blockers:\n")
+				for _, b := range f.Blockers {
+					sb.WriteString(fmt.Sprintf("    - %s\n", b))
+				}
+			}
+
+			sb.WriteString("\n")
 		}
 	}
-	sb.WriteString("\n")
-	sb.WriteString("Use --feature <slug> for detailed feature status.\n")
+
+	// Show master-level blockers if any (from master PROGRESS.md)
+	if len(report.Blockers) > 0 {
+		sb.WriteString("Active Blockers:\n")
+		for _, b := range report.Blockers {
+			sb.WriteString(fmt.Sprintf("  - %s\n", b))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("Use --feature <slug> for detailed task-level status.\n")
 	return sb.String()
 }
 

@@ -128,7 +128,7 @@ When you run the verify skill, two agents run:
 | Agent                | Model  | What It Does                                                                                        |
 |----------------------|--------|-----------------------------------------------------------------------------------------------------|
 | `verification-agent` | Sonnet | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys              |
-| `core-review-agent`  | Sonnet | Runs build and test commands (auto-detects package manager), reviews code quality and PRD alignment |
+| `code-review-agent`  | Sonnet | Runs build and test commands (auto-detects package manager), reviews code quality and PRD alignment |
 
 Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context. Any issues found become follow-up tasks added to the PRD and PROGRESS files.
 
@@ -192,7 +192,7 @@ The PR/FAQ is an optional but recommended first step in Belmont's workflow:
         ↓
 /belmont:product-plan       →  .belmont/PRD.md     (feature catalog + detailed PRDs)
         ↓
-/belmont:tech-plan          →  TECH_PLAN.md        (implementation spec)
+/belmont:tech-plan          →  TECH_PLAN.md        (master + feature implementation specs)
         ↓
 /belmont:implement          →  Code                (agent pipeline)
 ```
@@ -305,7 +305,7 @@ The installer will:
 6. **For Codex installs, remove legacy Belmont `SKILLS.md`** at project root (if present)
 7. **Link or copy** skill files into each selected tool's native directory
 8. **Clean stale files** -- if a skill was renamed or removed in source, the old file is deleted from the target
-9. **Create `.belmont/`** directory with PR_FAQ.md, PRD.md templates and `features/` directory (if they don't exist)
+9. **Create `.belmont/`** directory with PR_FAQ.md, PRD.md templates and `features/` directory (if they don't exist). The master PROGRESS.md is created by the product-plan skill when the first feature is planned.
 
 Example output:
 
@@ -334,7 +334,7 @@ Installing agents to .agents/belmont/...
   + design-agent.md
   + implementation-agent.md
   + verification-agent.md
-  + core-review-agent.md
+  + code-review-agent.md
 
 Installing skills to .agents/skills/belmont/...
   + product-plan.md
@@ -365,7 +365,6 @@ Linking Cursor...
   + .cursor/rules/belmont/reset.mdc -> ../../../.agents/skills/belmont/reset.md
 
   + .belmont/PRD.md
-  + .belmont/PROGRESS.md
 
 Belmont installed!
 ```
@@ -477,7 +476,7 @@ If your tool isn't auto-detected, the agent and skill files are still plain mark
 
 - **Skills**: Read from `.agents/skills/belmont/` (or wherever you've placed them)
 - **Agents**: `.agents/belmont/codebase-agent.md`, `implementation-agent.md`, etc.
-- **State**: `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, `.belmont/features/`
+- **State**: `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/PROGRESS.md` (master feature summary), `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, `.belmont/features/`
 
 You can paste the skill content directly into a chat or configure your tool to load it as system context.
 
@@ -508,7 +507,7 @@ Interactive planning session. Creates the PRD and PROGRESS files. Supports multi
 - Includes Figma URLs, acceptance criteria, verification steps
 - Does NOT implement anything -- plan mode only
 
-**Output**: `.belmont/PRD.md`, `.belmont/PROGRESS.md`
+**Output**: `.belmont/PRD.md`, `.belmont/PROGRESS.md` (master feature summary), `.belmont/features/<slug>/PRD.md`, `.belmont/features/<slug>/PROGRESS.md`
 
 ### `tech-plan`
 
@@ -560,7 +559,7 @@ Runs verification and code review on all completed tasks.
 
 - Runs two agents **in parallel**:
   - **Verification Agent** -- Checks acceptance criteria, Figma pixel comparison (Playwright headless), i18n text keys, edge cases, accessibility
-  - **Core Review Agent** -- Runs build and test commands (auto-detects package manager: npm, pnpm, yarn, or bun), reviews code against project patterns, checks PRD alignment
+  - **Code Review Agent** -- Runs build and test commands (auto-detects package manager: npm, pnpm, yarn, or bun), reviews code against project patterns, checks PRD alignment
 - Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context
 - Categorizes issues: Critical / Warnings / Suggestions
 - Creates follow-up tasks in PRD.md and PROGRESS.md for anything that needs fixing
@@ -596,19 +595,44 @@ Reset belmont state. In feature mode, choose to reset a specific feature, all fe
 
 Read-only progress report. Does not modify any files.
 
-Example output:
+Example output (project-level):
 
 ```
 Belmont Status
 ==============
 
-Feature: Chat Application Redesign
+Product: My App
+
+PR/FAQ: ✅ Written
+Master Tech Plan: ✅ Ready
+
+Status: 🟡 In Progress
+
+🟡 Chat Application (chat-app)
+  Tasks: 3/7 done  |  Milestones: 1/3 done
+    ✅ M1: Foundation
+    🔄 M2: Core Features
+    ⬜ M3: Polish
+  Next: P1-2 — Add real-time message updates
+  Blockers:
+    - P1-3: Figma design not accessible
+
+Use --feature <slug> for detailed task-level status.
+```
+
+Example output (feature-level with `--feature chat-app`):
+
+```
+Belmont Status
+==============
+
+Feature: Chat Application
 
 Tech Plan: ✅ Ready
 
 Status: 🟡 In Progress
 
-Tasks: 3 done, 1 blocked, 3 pending (of 7)
+Tasks: 3 done, 1 in progress, 1 blocked, 2 pending (of 7 total)
 
   ✅ P0-1: Set up project structure
   ✅ P0-2: Implement authentication flow
@@ -746,7 +770,7 @@ Other:        Load skills/belmont/verify.md as context
 
 **What happens:**
 - Verification agent checks acceptance criteria, visual fidelity, i18n
-- Core review agent runs build, tests, reviews code quality
+- Code review agent runs build, tests, reviews code quality
 - Issues become follow-up tasks in the PRD
 - Combined report is produced
 
@@ -840,7 +864,7 @@ belmont/
 │       ├── design-agent.md      # Figma/design analysis agent
 │       ├── implementation-agent.md  # Implementation agent
 │       ├── verification-agent.md    # Verification agent
-│       └── core-review-agent.md     # Code review agent
+│       └── code-review-agent.md     # Code review agent
 ├── scripts/
 │   ├── build.sh                 # Build with embedded content + version injection
 │   ├── release.sh               # Prepare release (changelog + tag)
@@ -866,7 +890,7 @@ your-project/
 │   │   ├── design-agent.md
 │   │   ├── implementation-agent.md
 │   │   ├── verification-agent.md
-│   │   └── core-review-agent.md
+│   │   └── code-review-agent.md
 │   └── skills/
 │       └── belmont/             # Skills (canonical location)
 │           ├── working-backwards.md
@@ -881,7 +905,7 @@ your-project/
 ├── .belmont/                    # Planning & state (commit to share with team)
 │   ├── PR_FAQ.md
 │   ├── PRD.md
-│   ├── PROGRESS.md
+│   ├── PROGRESS.md              # Master progress (feature summary table, created by product-plan)
 │   ├── TECH_PLAN.md
 │   ├── features/                # Sub-feature directories (optional)
 │   │   └── <feature-slug>/
@@ -1077,9 +1101,9 @@ Verifies implementations against requirements:
 - i18n key verification
 - Functional testing (happy path, edge cases, accessibility)
 
-### Code Review (core-review-agent)
+### Code Review (code-review-agent)
 
-**File**: `.agents/belmont/core-review-agent.md` | **Model**: Sonnet
+**File**: `.agents/belmont/code-review-agent.md` | **Model**: Sonnet
 
 Reviews code for quality and alignment:
 - Reads PRD, TECH_PLAN, and archived MILESTONE files for context

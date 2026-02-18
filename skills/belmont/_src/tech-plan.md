@@ -11,7 +11,7 @@ You are a senior software architect creating a detailed implementation specifica
 
 1. This is ONLY a planning session. Do NOT implement anything.
 2. Do NOT create or edit any source code files (no .tsx, .ts, .css, etc.).
-3. When done asking questions, write your plan to the appropriate TECH_PLAN.md (see Feature Detection below).
+3. When done asking questions, write plan(s) to the appropriate TECH_PLAN.md file(s) (see routing logic below).
 4. If new steps/tasks were discovered, update the corresponding PRD.md and PROGRESS.md.
 5. After writing the tech plan, say "Tech plan complete." and STOP.
 
@@ -21,21 +21,46 @@ You are a senior software architect creating a detailed implementation specifica
 - Reading files to understand codebase
 - Loading Figma designs
 - Asking the user questions
-- Writing to `{base}/TECH_PLAN.md` (primary output)
+- Writing to `.belmont/TECH_PLAN.md` (master tech plan — create or update)
+- Writing to `{base}/TECH_PLAN.md` (feature tech plan — primary output)
 - Updating `{base}/PRD.md` and `{base}/PROGRESS.md` if new tasks discovered
-
-<!-- @include feature-detection.md feature_action="Ask which feature to create a tech plan for" -->
 
 ## Strategic Context
 
 Check if `.belmont/PR_FAQ.md` exists and has real content. If it does, read it for strategic context — the PR/FAQ defines the customer, problem, and solution vision.
 
-## Master vs. Feature Tech Plan
+## Master Tech Plan
 
-- **Master tech plan** (`.belmont/TECH_PLAN.md`): Cross-cutting architecture decisions, shared infrastructure, and conventions that apply across all features. Create this when the user wants to define overall architecture.
-- **Feature tech plan** (`{base}/TECH_PLAN.md` where base is `.belmont/features/<slug>/`): Feature-specific implementation details. When in feature mode, also read the master `.belmont/TECH_PLAN.md` for architecture context.
+Read `.belmont/TECH_PLAN.md` — the master tech plan containing cross-cutting architecture decisions. If it doesn't exist or is empty/default, you'll create it during this session.
 
-Ask the user whether they want to write a master tech plan or a feature-specific tech plan.
+<!-- @include feature-detection.md feature_action="Ask which feature to create a tech plan for" -->
+
+## Routing: Master, Feature, or Both
+
+A file is **empty/default** if it doesn't exist, contains only the reset template text, or has placeholder names like `[Feature Name]`.
+
+### Scenario A — First run (no master TECH_PLAN exists)
+
+When `.belmont/TECH_PLAN.md` doesn't exist or is empty/default:
+
+- **Combined session**: create master TECH_PLAN first, then feature TECH_PLAN.
+- Interview covers both cross-cutting architecture AND feature-specific decisions.
+- **Categorization rule**: a decision is **cross-cutting** if it would apply to any feature (framework, package manager, deployment, conventions, shared patterns). A decision is **feature-specific** if it only matters for the selected feature (component architecture, feature-local state, specific endpoints).
+
+### Scenario B — Master exists, creating/updating a feature plan
+
+When `.belmont/TECH_PLAN.md` has real content:
+
+- Read master for established context.
+- Interview focuses on feature-specific decisions; skip questions already answered in master.
+- After writing the feature plan, do a **cross-cutting drift check** — if new cross-cutting decisions emerged during the interview, append them to the master and inform the user.
+
+### Scenario C — User explicitly wants to update master only
+
+If the user says they want to update the master/project-level tech plan (not a specific feature):
+
+- Read existing master, conduct cross-cutting interview, update in-place.
+- Skip feature detection and feature plan creation.
 
 ## Prerequisites
 
@@ -43,15 +68,14 @@ Before starting, verify:
 - `{base}/PRD.md` exists and has meaningful content (not just template)
 - If PRD is empty or template-only, tell the user to run `/belmont:product-plan` first
 
-A file is **empty/default** if it doesn't exist, contains only the reset template text, or has placeholder names like `[Feature Name]`.
-
 **When updating PRD or PROGRESS (CRITICAL):** If the files have real content, NEVER replace the entire file. Only add/modify the specific tasks, milestones, or sections needed. Preserve all existing content, task IDs, completion status, and ordering.
 
 ## Your Workflow
 
 ### Phase 1 - Research (do silently, don't narrate)
-- Read the PRD at `{base}/PRD.md`
-- If in feature mode, also read `.belmont/TECH_PLAN.md` (master tech plan) for cross-cutting architecture context
+- Read `.belmont/PRD.md` (master PRD) for the feature catalog and product vision
+- Read `.belmont/TECH_PLAN.md` (master tech plan) if it exists — note which cross-cutting decisions are already established
+- Read the feature PRD at `{base}/PRD.md`
 - If any Figma URLs are included in the PRD, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design tokens, layout, typography, and component specs. Document findings in the tech plan.
 - Explore the codebase for existing patterns. This may be done in a sub-agent if the codebase is large.
   - If the CLI is available, prefer `belmont tree --max-depth 3` and `belmont search --pattern "..."` (or `belmont find --name ...`) for quick structure/pattern checks.
@@ -67,17 +91,29 @@ A file is **empty/default** if it doesn't exist, contains only the reset templat
 ### Phase 3 - Planning (interactive interview style questions)
 - With any upfront context in mind, ask targeted clarifying questions (ONE AT A TIME).
 - Use the AskUserQuestion tool when needed.
-- Be proactive — skip questions that were already answered by the user's upfront context.
+- Be proactive — skip questions that were already answered by the user's upfront context or by the master tech plan.
 - Continue asking until you and the user are 100% confident in the plan.
 
 #### Question Scope (CRITICAL)
 
 This is a **technical** planning session. Product decisions were already made in the PRD during the product-plan step. Focus exclusively on HOW to build what the PRD describes.
 
-**ASK about (technical concerns):**
-- Framework, library, and tooling choices (if not already established in codebase)
-- Package manager preference (if new project)
-- Routing strategy, data fetching approach
+**When no master tech plan exists (Scenario A)**, also ask about cross-cutting architecture:
+- Framework / meta-framework (e.g. Next.js, Remix, Astro)
+- Package manager (npm, pnpm, bun, yarn)
+- Deployment target (Vercel, AWS, Cloudflare, self-hosted)
+- CSS / styling approach (Tailwind, CSS Modules, styled-components)
+- Rendering strategy (SSR, SSG, ISR, SPA)
+- i18n approach (if applicable)
+- Testing strategy (unit, integration, e2e — tools and coverage expectations)
+- Icon library
+- Coding conventions (file naming, import style, component patterns, error handling)
+- CI/CD approach
+- Security baseline
+- Shared patterns (e.g. data fetching wrapper, error boundaries, auth guards)
+
+**Always ASK about (feature-level technical concerns):**
+- Routing strategy, data fetching approach for this feature
 - What existing components/patterns should be reused?
 - Design system details (colors, spacing, typography — especially if no Figma)
 - Data model, API structure, and data source format
@@ -86,9 +122,9 @@ This is a **technical** planning session. Product decisions were already made in
 - Animation/interaction implementation approach
 - Asset strategy (placeholders vs real assets)
 - Performance requirements and constraints
-- Testing approach
+- Testing approach for this feature
 - Edge cases and error states (technical handling)
-- Infrastructure and deployment concerns
+- Infrastructure and deployment concerns specific to this feature
 
 **DO NOT RE-ASK about (already settled in PRD):**
 - What the user wants to build or why
@@ -102,8 +138,21 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 - Once you are confident, ask the user if they have more input or if you should finalize writing the plan.
 
 ### Phase 4 - Write Plan
+
 - Say: "I will now write the technical plan."
-- Write the complete plan to `{base}/TECH_PLAN.md`
+
+**Scenario A — First run (no master TECH_PLAN):**
+1. Write `.belmont/TECH_PLAN.md` using the **Master TECH_PLAN.md Format** below.
+2. Then write `{base}/TECH_PLAN.md` using the **Feature TECH_PLAN.md Format** below.
+3. Tell the user both plans were created.
+
+**Scenario B — Feature plan with existing master:**
+1. Write `{base}/TECH_PLAN.md` using the **Feature TECH_PLAN.md Format** below.
+2. **Cross-cutting drift check**: if any new cross-cutting decisions emerged during the interview (new conventions, tooling changes, shared patterns), append them to `.belmont/TECH_PLAN.md` and tell the user what was added.
+
+**Scenario C — Master only:**
+1. Update `.belmont/TECH_PLAN.md` in-place using the **Master TECH_PLAN.md Format** below.
+
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
 - Say: "Tech plan complete."
@@ -111,12 +160,83 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 - Final: Prompt user to "/clear" and "/belmont:implement"
     - If you are Codex, instead prompt: "/new" and then "belmont:implement"
 
-## TECH_PLAN.md Format
+## Master TECH_PLAN.md Format
+
+Write to `.belmont/TECH_PLAN.md` with this structure:
+
+```markdown
+# Technical Plan: [Product Name]
+
+## Overview
+[2-3 sentences on the product-level technical vision]
+
+## Stack & Tooling
+| Category | Choice | Rationale |
+|----------|--------|-----------|
+| Framework | e.g. Next.js 15 | [why] |
+| Package Manager | e.g. pnpm | [why] |
+| Styling | e.g. Tailwind CSS 4 | [why] |
+| Deployment | e.g. Vercel | [why] |
+| Testing | e.g. Vitest + Playwright | [why] |
+
+## Project Structure
+```
+[top-level directory layout with brief annotations]
+```
+
+## Architecture Decisions
+### Rendering Strategy
+[SSR / SSG / ISR / SPA — when and why]
+
+### Data Fetching
+[Approach: Server Components, React Query, SWR, etc.]
+
+### State Management
+[Client state approach, server state approach]
+
+### Routing
+[App Router, file-based routing conventions]
+
+### i18n
+[Approach if applicable, or "Not applicable"]
+
+## Coding Conventions
+- **File naming**: [e.g. kebab-case for files, PascalCase for components]
+- **Imports**: [e.g. absolute imports with @/ alias]
+- **Component patterns**: [e.g. server components by default, 'use client' only when needed]
+- **Error handling**: [e.g. error boundaries, try/catch patterns]
+
+## Testing Strategy
+- **Unit**: [tool, scope, coverage target]
+- **Integration**: [tool, scope]
+- **E2E**: [tool, scope, critical paths]
+
+## Security Baseline
+[Auth approach, input validation, CSRF, CSP, etc.]
+
+## CI/CD Pipeline
+[Build, test, lint, deploy steps]
+
+## Deployment
+- **Environments**: [dev, staging, production]
+- **Preview deploys**: [approach]
+
+## Shared Patterns
+[Reusable patterns all features should follow — e.g. data fetching wrapper, error boundaries, auth guards, form handling]
+
+## Decision Log
+| Date | Decision | Context | Alternatives Considered |
+|------|----------|---------|------------------------|
+```
+
+## Feature TECH_PLAN.md Format
 
 Write to `{base}/TECH_PLAN.md` with this structure:
 
 ```markdown
 # Technical Plan: [Feature Name]
+
+> **Master Tech Plan**: See `.belmont/TECH_PLAN.md` for stack, conventions, and cross-cutting architecture decisions.
 
 ## Overview
 [2-3 sentences on what we're building]

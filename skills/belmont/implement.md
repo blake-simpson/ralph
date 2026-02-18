@@ -31,6 +31,7 @@ Once the base path is resolved, use `{base}` as shorthand:
 **Master files** (always at `.belmont/` root):
 - `.belmont/PR_FAQ.md` — strategic PR/FAQ document
 - `.belmont/PRD.md` — master PRD (feature catalog)
+- `.belmont/PROGRESS.md` — master progress tracking (feature summary table)
 - `.belmont/TECH_PLAN.md` — master tech plan (cross-cutting architecture)
 
 ## Setup
@@ -286,6 +287,18 @@ When all tasks in the milestone are done:
    - Commits made
    - Follow-up tasks created
    - Any issues encountered
+4. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first using the master progress format from the product-plan skill:
+   ```
+   # Progress: [Product Name from .belmont/PRD.md]
+   ## Status: 🟡 In Progress
+   ## Features
+   | Feature | Slug | Status | Milestones | Tasks | Blockers |
+   |---------|------|--------|------------|-------|----------|
+   ## Recent Activity
+   | Date | Feature | Activity |
+   |------|---------|----------|
+   ```
+   Then find the row for the current feature's slug in the `## Features` table (add a new row if missing) and update the Status, Milestones, and Tasks columns. Update the top-level `## Status` line if all features are now complete. Add a row to `## Recent Activity` noting the milestone completion.
 
 ## Step 6: Clean Up
 
@@ -317,8 +330,9 @@ Skip this if you used Approach B or C.
 If any task is blocked:
 1. Mark it as `🚫 BLOCKED` in PRD.md with the reason
 2. Add blocker details to the Blockers section in PROGRESS.md
-3. Skip to the next task in the milestone
-4. If ALL remaining tasks in the milestone are blocked, report and stop (still clean up the MILESTONE file)
+3. Update the Blockers column for this feature's row in `.belmont/PROGRESS.md` (initialize the file first if it doesn't exist or is still a template — see Step 5.4 for the format)
+4. Skip to the next task in the milestone
+5. If ALL remaining tasks in the milestone are blocked, report and stop (still clean up the MILESTONE file)
 
 ## Scope Guardrails
 
