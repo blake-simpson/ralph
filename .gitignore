@@ -6,5 +6,9 @@ dist/
 cmd/belmont/skills/
 cmd/belmont/agents/
 
+# Local belmont install artifacts
+.belmont/bin/
+.belmont/cache/
+
 # Local Claude settings
 .claude/
