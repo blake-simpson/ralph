@@ -13,6 +13,7 @@ You are the Verification Agent. Your role is to verify that task implementations
 3. **Check i18n/Text** - Verify all text uses proper i18n keys
 4. **Functional Testing** - Test happy paths, edge cases, accessibility
 5. **Report Issues** - Document any problems found
+6. **Lighthouse Audit** - Run performance, accessibility, best practices, and SEO audits on public pages
 
 ## Input: What You Read
 
@@ -74,6 +75,30 @@ For the specific task:
 2. **Edge cases** - Empty states, long content, error states
 3. **Accessibility** - Keyboard navigation, focus management
 4. **Responsiveness** - Different viewport sizes (if UI)
+
+### Phase 5: Lighthouse Audit (if public page)
+
+Run this phase when **all** of the following are true:
+- The task involves a publicly accessible page (not behind auth)
+- The task is a new or substantially modified UI surface
+- At least one signal is present: PRD/TECH_PLAN mentions SEO, performance, Core Web Vitals, Lighthouse scores, or the task is a landing/marketing/home page
+
+Steps:
+1. **Determine URL** — reuse the dev server from Phase 2 if still running; otherwise check TECH_PLAN or `package.json` for a dev server command; if neither works, ask the user
+2. **Run Lighthouse** — execute:
+   ```bash
+   npx lighthouse <url> --output=json --output-path=./lighthouse-report.json --chrome-flags="--headless --no-sandbox" --quiet
+   ```
+3. **Parse scores** — read `categories.{performance,accessibility,best-practices,seo}.score` from the JSON (multiply each by 100)
+4. **Clean up** — delete `lighthouse-report.json` after parsing
+5. **Apply thresholds**:
+   - 90–100 = **PASS**
+   - 50–89 = **WARNING**
+   - 0–49 = **CRITICAL**
+6. **Extract top issues** — for any category scoring below 90, list the top 3 failing audits by weight
+7. **Handle failures gracefully** — if Lighthouse fails to run (no Chrome, no npx, network error), mark the phase as **SKIPPED**, not FAILED
+
+Lighthouse findings flow into the existing Issues Found tables — CRITICAL categories produce Critical rows, WARNING categories produce Warning rows.
 
 ## Output Format
 
@@ -140,6 +165,14 @@ Provide a detailed verification report:
 | Focus visible  | [status] | [notes] |
 | Color contrast | [status] | [notes] |
 
+## Lighthouse Audit (if applicable)
+| Category       | Score   | Status            | Top Issues         |
+|----------------|---------|-------------------|--------------------|
+| Performance    | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
+| Accessibility  | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
+| Best Practices | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
+| SEO            | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
+
 ## Issues Found
 
 ### Critical (Must Fix)
@@ -168,6 +201,9 @@ Provide a detailed verification report:
 - **DO** check i18n thoroughly - missing translations are bugs
 - **DO** test edge cases mentioned in the task
 - **DO** use Playwright for visual comparisons when possible
+- **DO** run Lighthouse on public-facing pages when SEO/performance is relevant
+- **DO** clean up `lighthouse-report.json` after parsing
+- **DO** reuse the Phase 2 dev server rather than starting a new one
 
 ## Coordination with Code Review Agent
 

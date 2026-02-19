@@ -169,6 +169,7 @@ Output a combined summary:
 - Visual Verification: [PASS/FAIL/N/A]
 - i18n Check: [PASS/FAIL/N/A]
 - Functional Tests: [PASS/FAIL]
+- Lighthouse Audit: [PASS/WARNING/CRITICAL/N/A]
 
 ## Code Review Results
 - Build: [PASS/FAIL]
