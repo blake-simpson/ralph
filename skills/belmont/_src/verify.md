@@ -113,11 +113,6 @@ After both agents complete:
    - **Warnings** - Should be fixed (non-blocking but important)
    - **Suggestions** - Nice to have improvements
 
-### Fix minor issues in scope
-If the issue is minor and in scope, you can fix it yourself. We want to avoid situations where we endlessly iplement, verify, and then implement again.
-
-If the issue is not minor and is out of scope for the verifier agent, we must create a follow-up task for it (See below).
-
 ### Create Follow-up Tasks
 If any issues were found by either agent:
 1. Add new tasks to `{base}/PRD.md` for each critical or warning issue:
