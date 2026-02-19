@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.1
+
+**Released:** 2026-02-19
+
+### Changes since v0.4.0
+
+- Remove tracked build artifacts and update .gitignore
+- Add conditional Lighthouse audit phase to verification agent
+
+
+
 ## v0.4.0
 
 **Released:** 2026-02-18
