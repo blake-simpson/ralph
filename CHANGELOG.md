@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.2
+
+**Released:** 2026-02-19
+
+### Changes since v0.4.1
+
+- Release vv0.4.2
+- Strength rule to cleanup Playwright MCP screenshots
+
+
+
 ## vv0.4.2
 
 **Released:** 2026-02-19
