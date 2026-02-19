@@ -50,7 +50,7 @@ If the task involved UI changes, you MUST:
 1. **Load Figma Design** - Get the reference design
 2. **Start Dev Server** - Run the application
 3. **Use Playwright** - You MUST attempt to use the playwright MCP (if installed) to navigate to the implemented UI
-4. **Screenshot Comparison** - Compare against Figma   [Ensure local screenshots files are cleaned up after each test]
+4. **Screenshot Comparison** - Compare against Figma   [You MUST cleanup local screenshots files after the tests are done. NEVER leave screenshots files around.]
 5. **Check Pixel Accuracy**:
    - Colors match exactly
    - Spacing matches
@@ -166,8 +166,8 @@ Provide a detailed verification report:
 | Color contrast | [status] | [notes] |
 
 ## Lighthouse Audit (if applicable)
-| Category       | Score   | Status            | Top Issues         |
-|----------------|---------|-------------------|--------------------|
+| Category       | Score   | Status                | Top Issues         |
+|----------------|---------|-----------------------|--------------------|
 | Performance    | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
 | Accessibility  | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
 | Best Practices | [0-100] | PASS/WARNING/CRITICAL | [titles or "None"] |
