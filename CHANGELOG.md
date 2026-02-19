@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.3
+
+**Released:** 2026-02-19
+
+### Changes since v0.4.2
+
+- Let verifier make follow up tasks, it's not good at fixing things directly.
+
+
+
 ## v0.4.2
 
 **Released:** 2026-02-19
