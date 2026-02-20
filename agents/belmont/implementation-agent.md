@@ -122,31 +122,18 @@ Use the detected package manager (referred to as `<pkg>` below) for ALL commands
 
 **IMPORTANT**: Fix all errors before proceeding. Do not leave broken code.
 
-#### Step 4: Commit
+#### Step 4: Update Tracking
 
-1. Stage all relevant changes for THIS task
-2. Write a clear commit message following project conventions
-3. Do NOT commit planning files if `.belmont` is in gitignore
-4. DO commit `.belmont/` directory if it IS in source control (not in the .gitignore)
-
-Commit message format:
-```
-[Task ID]: Brief description
-
-- Detail 1
-- Detail 2
-```
-
-#### Step 5: Update Tracking
-
-After committing this task:
+After verifying this task:
 1. **Mark task complete** in the PRD file (path from `### File Paths` in the Orchestrator Context): Add ✅ to the task header
    - Example: `### P0-5: Task Name` becomes `### P0-5: Task Name ✅`
 2. **Update the PROGRESS file** (path from `### File Paths` in the Orchestrator Context): Mark the task checkbox as done: `- [x] Task Name`
 
-#### Step 5b: Capture Learnings
+#### Step 4b: Capture Learnings
 
-After each task, check if you discovered anything non-obvious during implementation. If so, write it to `{base}/NOTES.md` (the feature notes path from `### File Paths` in `## Orchestrator Context`).
+Check if you discovered anything non-obvious during implementation. If so, write it to `{base}/NOTES.md` (the feature notes path from `### File Paths` in `## Orchestrator Context`).
+
+**Skip this step** if nothing non-obvious was discovered during this task.
 
 **What to capture** (only non-obvious discoveries — this is NOT a task log):
 - **Environment**: setup requirements, tool version constraints, env var needs
@@ -163,7 +150,23 @@ After each task, check if you discovered anything non-obvious during implementat
 3. Add entries under a category heading (`### Category`) beneath today's date
 4. Keep entries concise — one line per learning
 
-**Skip this step** if nothing non-obvious was discovered during this task.
+#### Step 5: Commit
+
+1. Stage all code changes for THIS task
+2. Stage `.belmont/` planning files (PRD, PROGRESS, NOTES) you updated in Steps 4 and 4b:
+   ```bash
+   git add .belmont/
+   ```
+   Skip this if `.belmont/` is in `.gitignore` — check with `git check-ignore -q .belmont/`
+3. Write a clear commit message following project conventions
+
+Commit message format:
+```
+[Task ID]: Brief description
+
+- Detail 1
+- Detail 2
+```
 
 #### Step 6: Move to Next Task
 
@@ -299,7 +302,8 @@ If design specification is unclear:
 5. **MILESTONE File Is Your Only Input** - All context is in the MILESTONE file. Do not read other `.belmont/` files for context.
 6. **Verify Before Commit** - All checks must pass for each task before committing.
 7. **Commit Each Task Separately** - One commit per task with a clear `[Task ID]: description` message.
-8. **Update Tracking After Each Commit** - Mark each task complete in PRD.md and PROGRESS.md immediately after committing.
-9. **Write the Implementation Log** - After all tasks, write results to the MILESTONE file's `## Implementation Log`.
-10. **Report Everything** - Out-of-scope issues, concerns, follow-ups. This is the correct path for good ideas.
-11. **Quality Over Speed** - A complete, working implementation beats a fast, broken one.
+8. **Update Tracking Before Commit** - Mark each task complete in PRD.md and PROGRESS.md (Step 4) before committing (Step 5), so tracking updates are included in the commit.
+9. **Always include `.belmont/` in commits** - Tracking updates from Steps 4/4b must be committed alongside code changes. Check `.belmont/` is not gitignored before staging.
+10. **Write the Implementation Log** - After all tasks, write results to the MILESTONE file's `## Implementation Log`.
+11. **Report Everything** - Out-of-scope issues, concerns, follow-ups. This is the correct path for good ideas.
+12. **Quality Over Speed** - A complete, working implementation beats a fast, broken one.

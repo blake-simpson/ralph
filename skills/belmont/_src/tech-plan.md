@@ -155,6 +155,8 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
+<!-- @include commit-belmont-changes.md commit_context="after technical planning" -->
+
 - Say: "Tech plan complete."
 - STOP. Do not continue. Do not implement anything.
 - Final: Prompt user to "/clear" and "/belmont:implement"

@@ -74,6 +74,9 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 [If `{base}/NOTES.md` exists, copy its contents here under "#### Feature Notes".]
 [If neither exists, write "No previous learnings found."]
 
+### Additional User Instructions
+[If the user provided extra context or instructions when invoking this skill, copy it here verbatim. Otherwise write "None."]
+
 ## Codebase Analysis
 [Written by codebase-agent — stack, patterns, conventions, related code, utilities]
 
@@ -213,6 +216,8 @@ If you created a team:
 3. Call `TeamDelete` to remove team resources
 
 Skip this if you used Approach B or C.
+
+<!-- @include commit-belmont-changes.md commit_context="after milestone implementation" -->
 
 ## Step 7: Final Actions
 

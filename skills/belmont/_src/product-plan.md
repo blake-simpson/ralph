@@ -136,6 +136,8 @@ This is a **product** planning session, NOT a technical planning session. Techni
 
 If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
 
+<!-- @include commit-belmont-changes.md commit_context="after product planning" -->
+
 Final: Prompt user to "/clear" and then "/belmont:tech-plan"
    - If you are Codex, instead prompt: "/new" and then "belmont:tech-plan"
    - If this was the first feature in a new product, also mention they can create more features later by running `/belmont:product-plan` again

@@ -165,6 +165,27 @@ This is a **product** planning session, NOT a technical planning session. Techni
 
 If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
 
+### Commit Planning File Changes
+
+After completing all updates to `.belmont/` planning files, commit them:
+
+1. **Check if `.belmont/` is git-ignored** — run:
+   ```bash
+   git check-ignore -q .belmont/ 2>/dev/null
+   ```
+   If exit code is 0, `.belmont/` is ignored — skip this section entirely.
+
+2. **Check for changes** — run:
+   ```bash
+   git status --porcelain .belmont/
+   ```
+   If there is no output, nothing to commit — skip the rest.
+
+3. **Stage and commit** — stage only `.belmont/` files and commit:
+   ```bash
+   git add .belmont/ && git commit -m "belmont: update planning files after product planning"
+   ```
+
 Final: Prompt user to "/clear" and then "/belmont:tech-plan"
    - If you are Codex, instead prompt: "/new" and then "belmont:tech-plan"
    - If this was the first feature in a new product, also mention they can create more features later by running `/belmont:product-plan` again

@@ -14,6 +14,7 @@ You are the Verification Agent. Your role is to verify that task implementations
 4. **Functional Testing** - Test happy paths, edge cases, accessibility
 5. **Report Issues** - Document any problems found
 6. **Lighthouse Audit** - Run performance, accessibility, best practices, and SEO audits on public pages
+7. **Cleanup** - Remove all temporary verification artifacts (screenshots, reports)
 
 ## Input: What You Read
 
@@ -50,7 +51,7 @@ If the task involved UI changes, you MUST:
 1. **Load Figma Design** - Get the reference design
 2. **Start Dev Server** - Run the application
 3. **Use Playwright** - You MUST attempt to use the playwright MCP (if installed) to navigate to the implemented UI
-4. **Screenshot Comparison** - Compare against Figma   [You MUST cleanup local screenshots files after the tests are done. NEVER leave screenshots files around.]
+4. **Screenshot Comparison** - Compare against Figma (you will clean these up in Phase 6)
 5. **Check Pixel Accuracy**:
    - Colors match exactly
    - Spacing matches
@@ -99,6 +100,16 @@ Steps:
 7. **Handle failures gracefully** — if Lighthouse fails to run (no Chrome, no npx, network error), mark the phase as **SKIPPED**, not FAILED
 
 Lighthouse findings flow into the existing Issues Found tables — CRITICAL categories produce Critical rows, WARNING categories produce Warning rows.
+
+### Phase 6: Cleanup
+
+Remove all temporary artifacts YOU created during this verification session. Only delete files you created — never pre-existing project files.
+
+1. **Track what you created** — Throughout Phases 2 and 5, mentally note every file you create (screenshot filenames, lighthouse-report.json)
+2. **Delete only YOUR screenshots** — Delete the specific `.png` screenshot files you saved during Phase 2 by their exact filenames. Do NOT use a broad glob pattern
+3. **Delete lighthouse report** — If Phase 5 was run, delete `lighthouse-report.json`
+4. **Verify cleanup** — List the directory to confirm your artifacts are gone
+5. **Do NOT delete** — Pre-existing files, project images, assets, or anything you didn't create in this session
 
 ## Output Format
 
@@ -202,7 +213,7 @@ Provide a detailed verification report:
 - **DO** test edge cases mentioned in the task
 - **DO** use Playwright for visual comparisons when possible
 - **DO** run Lighthouse on public-facing pages when SEO/performance is relevant
-- **DO** clean up `lighthouse-report.json` after parsing
+- **DO** clean up all artifacts you created — screenshots from Phase 2 and `lighthouse-report.json` from Phase 5 — in Phase 6. Only delete files you created in this session
 - **DO** reuse the Phase 2 dev server rather than starting a new one
 
 ## Coordination with Code Review Agent

@@ -2,6 +2,8 @@
 
 You are the **orchestrator**. You MUST NOT perform the agent work yourself. Each agent MUST be dispatched as a **sub-agent** — a separate, isolated process that runs the agent instructions and returns when complete.
 
+**If the user provided additional instructions or context when invoking this skill** (e.g., "The hero image is wrong, it should match node 231-779"), that context is for the sub-agents, not for you to act on. Your only job is to forward it. See "User Context Forwarding" below.
+
 ### Choosing Your Dispatch Method
 
 Use the **first** approach below whose required tools are available to you. Check your available tools **by name** — do not guess or skip ahead.
@@ -64,6 +66,26 @@ If neither `TeamCreate` nor `Task` is available:
 
 ---
 
+### User Context Forwarding (CRITICAL)
+
+When the user provides **additional instructions or context** alongside the skill invocation (e.g., `/belmont:verify The hero image is wrong...`), you MUST:
+
+1. **Capture** the user's additional context verbatim
+2. **Include it in every sub-agent prompt** as an "Additional Context from User" section
+3. **DO NOT act on it yourself** — your job is to pass it through, not to do the work
+
+Format for including user context in sub-agent prompts:
+```
+> **Additional Context from User**:
+> [paste the user's additional instructions/context here verbatim]
+```
+
+Append this block to the end of each sub-agent's prompt, after the standard prompt content. If the user provided no additional context, omit this block entirely.
+
+**Why this matters**: The orchestrator seeing actionable instructions (e.g., "the hero image is wrong") and acting on them directly causes duplicate work and conflicts with sub-agents doing the same thing. The orchestrator's role is delegation, not execution.
+
+---
+
 ### Dispatch Rules (apply to ALL approaches)
 
 1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself (unless using Approach C) — the sub-agents read them
@@ -73,3 +95,4 @@ If neither `TeamCreate` nor `Task` is available:
 5. **DO** wait for sub-agents to complete before proceeding to the next step
 6. **DO** handle blockers and errors reported by sub-agents
 7. **DO** include the full sub-agent preamble (identity + mandatory agent file) in every sub-agent prompt
+8. **DO** forward any user-provided context to every sub-agent (see "User Context Forwarding" above)

@@ -99,6 +99,9 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 [If `{base}/NOTES.md` exists, copy its contents here under "#### Feature Notes".]
 [If neither exists, write "No previous learnings found."]
 
+### Additional User Instructions
+[If the user provided extra context or instructions when invoking this skill, copy it here verbatim. Otherwise write "None."]
+
 ## Codebase Analysis
 [Written by codebase-agent — stack, patterns, conventions, related code, utilities]
 
@@ -124,6 +127,8 @@ Apply the following dispatch configuration:
 ### Core Principle
 
 You are the **orchestrator**. You MUST NOT perform the agent work yourself. Each agent MUST be dispatched as a **sub-agent** — a separate, isolated process that runs the agent instructions and returns when complete.
+
+**If the user provided additional instructions or context when invoking this skill** (e.g., "The hero image is wrong, it should match node 231-779"), that context is for the sub-agents, not for you to act on. Your only job is to forward it. See "User Context Forwarding" below.
 
 ### Choosing Your Dispatch Method
 
@@ -187,6 +192,26 @@ If neither `TeamCreate` nor `Task` is available:
 
 ---
 
+### User Context Forwarding (CRITICAL)
+
+When the user provides **additional instructions or context** alongside the skill invocation (e.g., `/belmont:verify The hero image is wrong...`), you MUST:
+
+1. **Capture** the user's additional context verbatim
+2. **Include it in every sub-agent prompt** as an "Additional Context from User" section
+3. **DO NOT act on it yourself** — your job is to pass it through, not to do the work
+
+Format for including user context in sub-agent prompts:
+```
+> **Additional Context from User**:
+> [paste the user's additional instructions/context here verbatim]
+```
+
+Append this block to the end of each sub-agent's prompt, after the standard prompt content. If the user provided no additional context, omit this block entirely.
+
+**Why this matters**: The orchestrator seeing actionable instructions (e.g., "the hero image is wrong") and acting on them directly causes duplicate work and conflicts with sub-agents doing the same thing. The orchestrator's role is delegation, not execution.
+
+---
+
 ### Dispatch Rules (apply to ALL approaches)
 
 1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself (unless using Approach C) — the sub-agents read them
@@ -196,6 +221,7 @@ If neither `TeamCreate` nor `Task` is available:
 5. **DO** wait for sub-agents to complete before proceeding to the next step
 6. **DO** handle blockers and errors reported by sub-agents
 7. **DO** include the full sub-agent preamble (identity + mandatory agent file) in every sub-agent prompt
+8. **DO** forward any user-provided context to every sub-agent (see "User Context Forwarding" above)
 
 ## Step 3: Run the Agent Pipeline
 
@@ -318,6 +344,27 @@ If you created a team:
 3. Call `TeamDelete` to remove team resources
 
 Skip this if you used Approach B or C.
+
+### Commit Planning File Changes
+
+After completing all updates to `.belmont/` planning files, commit them:
+
+1. **Check if `.belmont/` is git-ignored** — run:
+   ```bash
+   git check-ignore -q .belmont/ 2>/dev/null
+   ```
+   If exit code is 0, `.belmont/` is ignored — skip this section entirely.
+
+2. **Check for changes** — run:
+   ```bash
+   git status --porcelain .belmont/
+   ```
+   If there is no output, nothing to commit — skip the rest.
+
+3. **Stage and commit** — stage only `.belmont/` files and commit:
+   ```bash
+   git add .belmont/ && git commit -m "belmont: update planning files after milestone implementation"
+   ```
 
 ## Step 7: Final Actions
 

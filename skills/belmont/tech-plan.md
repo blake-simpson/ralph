@@ -184,6 +184,27 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
+### Commit Planning File Changes
+
+After completing all updates to `.belmont/` planning files, commit them:
+
+1. **Check if `.belmont/` is git-ignored** — run:
+   ```bash
+   git check-ignore -q .belmont/ 2>/dev/null
+   ```
+   If exit code is 0, `.belmont/` is ignored — skip this section entirely.
+
+2. **Check for changes** — run:
+   ```bash
+   git status --porcelain .belmont/
+   ```
+   If there is no output, nothing to commit — skip the rest.
+
+3. **Stage and commit** — stage only `.belmont/` files and commit:
+   ```bash
+   git add .belmont/ && git commit -m "belmont: update planning files after technical planning"
+   ```
+
 - Say: "Tech plan complete."
 - STOP. Do not continue. Do not implement anything.
 - Final: Prompt user to "/clear" and "/belmont:implement"
