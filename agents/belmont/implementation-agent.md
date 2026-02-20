@@ -127,6 +127,7 @@ Use the detected package manager (referred to as `<pkg>` below) for ALL commands
 1. Stage all relevant changes for THIS task
 2. Write a clear commit message following project conventions
 3. Do NOT commit planning files if `.belmont` is in gitignore
+4. DO commit `.belmont/` directory if it IS in source control (not in the .gitignore)
 
 Commit message format:
 ```
