@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.4
+
+**Released:** 2026-02-20
+
+### Changes since v0.4.3
+
+- Auto-cleanup verification screenshots and auto-commit .belmont/ files
+- Allow Belmont to commit it's changed plans automatically after implementation
+
+
+
 ## v0.4.3
 
 **Released:** 2026-02-19
