@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.0
+
+**Released:** 2026-02-23
+
+### Changes since v0.4.4
+
+- Redesign debug skill to use agent-dispatched pipeline
+
+
+
 ## v0.4.4
 
 **Released:** 2026-02-20
