@@ -76,17 +76,17 @@ Belmont breaks coding work into **phases**, each driven by a specialized agent. 
                                       │ (parallel)│           │ (read-only)│
                                       └─────┬─────┘           └────────────┘
                                             │
-                              ┌─────────────┤
-                              ▼             ▼
-                        ┌───────────┐ ┌───────────┐
-                        │  Next     │ │  Review   │
-                        │ (1 task)  │ │ (drift)   │
-                        └───────────┘ └─────┬─────┘
-                                            │
-                                            ▼
-                                     Updates PRDs,
-                                     Tech Plans,
-                                     PROGRESS
+                         ┌──────────────────┼──────────────┐
+                         ▼                  ▼              ▼
+                   ┌───────────┐     ┌───────────┐  ┌───────────┐
+                   │  Debug    │     │  Next     │  │  Review   │
+                   │ (fix bug) │     │ (1 task)  │  │ (drift)   │
+                   └───────────┘     └───────────┘  └─────┬─────┘
+                                                          │
+                                                          ▼
+                                                   Updates PRDs,
+                                                   Tech Plans,
+                                                   PROGRESS
 ```
 
 ### MILESTONE File Architecture
@@ -440,6 +440,7 @@ Skills become native slash commands:
 /belmont:implement      Implement next milestone (full pipeline)
 /belmont:next           Implement next single task (lightweight)
 /belmont:verify         Run verification and code review
+/belmont:debug          Targeted debug loop for quick fixes
 /belmont:status         View progress
 /belmont:review         Review document alignment and detect drift
 /belmont:reset          Reset state and start fresh
@@ -564,6 +565,22 @@ Runs verification and code review on all completed tasks.
 - Categorizes issues: Critical / Warnings / Suggestions
 - Creates follow-up tasks in PRD.md and PROGRESS.md for anything that needs fixing
 - Produces a combined summary report
+
+### `debug`
+
+Targeted debug loop for investigating and fixing specific issues using agent-dispatched pipeline.
+
+- Uses the **agent-dispatch model** — each agent (implementation, verification, optionally design) runs in its own context window via `DEBUG.md` as shared context
+- Tight investigate-fix-verify loop with max 3 iterations
+- Dispatches design-agent on iteration 1 if Figma URLs are present in the PRD
+- Reverts immediately on regression (`git checkout -- [files]`)
+- User checkpoint after iteration 2 before continuing
+- Single atomic commit with `debug:` prefix after user confirms the fix
+- Ephemeral `DEBUG.md` — created at start, deleted when session ends
+- Optional PRD integration: can mark FWLUP tasks complete if relevant
+
+**Best for**: Bugs found by `/belmont:verify`, small regressions, targeted fixes.
+**Use `/belmont:next` or `/belmont:implement` instead for**: New features, large multi-file changes.
 
 ### `review`
 
@@ -808,6 +825,7 @@ Other:        Load skills/belmont/status.md as context
 
 After implementing a milestone:
 - Run `/belmont:verify` to catch issues
+- Run `/belmont:debug` for targeted fixes on specific issues found by verification
 - Run `/belmont:next` to quickly fix follow-up tasks from verification
 - Run `/belmont:review` to check alignment between plans and codebase
 - Run `/belmont:implement` again for the next milestone
@@ -855,6 +873,7 @@ belmont/
 │       ├── next.md              # Next task skill (generated)
 │       ├── verify.md            # Verification skill (generated)
 │       ├── working-backwards.md  # Working backwards skill (generated)
+│       ├── debug.md             # Debug skill (generated)
 │       ├── status.md            # Status skill
 │       ├── review.md            # Alignment review skill
 │       └── reset.md             # Reset state skill
@@ -899,6 +918,7 @@ your-project/
 │           ├── implement.md
 │           ├── next.md
 │           ├── verify.md
+│           ├── debug.md
 │           ├── status.md
 │           ├── review.md
 │           └── reset.md
