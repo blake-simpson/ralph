@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.5.1
+
+**Released:** 2026-02-24
+
+### Changes since v0.5.0
+
+- Split debug skill into auto and manual sub-workflows
+
+
+
 ## v0.5.0
 
 **Released:** 2026-02-23
