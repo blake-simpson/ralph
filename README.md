@@ -440,7 +440,9 @@ Skills become native slash commands:
 /belmont:implement      Implement next milestone (full pipeline)
 /belmont:next           Implement next single task (lightweight)
 /belmont:verify         Run verification and code review
-/belmont:debug          Targeted debug loop for quick fixes
+/belmont:debug          Debug router (choose auto or manual)
+/belmont:debug-auto    Auto debug loop (agent-verified)
+/belmont:debug-manual  Manual debug loop (user-verified, faster)
 /belmont:status         View progress
 /belmont:review         Review document alignment and detect drift
 /belmont:reset          Reset state and start fresh
@@ -568,7 +570,11 @@ Runs verification and code review on all completed tasks.
 
 ### `debug`
 
-Targeted debug loop for investigating and fixing specific issues using agent-dispatched pipeline.
+Router that directs to the appropriate debug sub-workflow. Detects mode from user's invocation text or asks the user to choose.
+
+### `debug-auto`
+
+Auto debug loop — dispatches a verification agent to check each fix attempt.
 
 - Uses the **agent-dispatch model** — each agent (implementation, verification, optionally design) runs in its own context window via `DEBUG.md` as shared context
 - Tight investigate-fix-verify loop with max 3 iterations
@@ -579,7 +585,20 @@ Targeted debug loop for investigating and fixing specific issues using agent-dis
 - Ephemeral `DEBUG.md` — created at start, deleted when session ends
 - Optional PRD integration: can mark FWLUP tasks complete if relevant
 
-**Best for**: Bugs found by `/belmont:verify`, small regressions, targeted fixes.
+**Best for**: Complex logic bugs, race conditions, issues needing automated test verification.
+
+### `debug-manual`
+
+Manual debug loop — the user verifies each fix instead of dispatching a verification agent. Faster iteration.
+
+- Same agent-dispatch model as auto, but **no verification agent** — user checks each fix
+- Implementation agent adds strategic `[BELMONT-DEBUG]` logging (5-15 log points per iteration)
+- After each fix, presents summary and asks user to verify with debug log output
+- All `[BELMONT-DEBUG]` log lines are automatically cleaned up before committing
+- Same max 3 iterations, regression handling, and user checkpoint as auto mode
+
+**Best for**: UI bugs, visual issues, known reproduction steps, anything the user can quickly verify.
+**Use `debug-auto` instead for**: Complex logic bugs, race conditions, issues requiring automated testing.
 **Use `/belmont:next` or `/belmont:implement` instead for**: New features, large multi-file changes.
 
 ### `review`
@@ -825,7 +844,7 @@ Other:        Load skills/belmont/status.md as context
 
 After implementing a milestone:
 - Run `/belmont:verify` to catch issues
-- Run `/belmont:debug` for targeted fixes on specific issues found by verification
+- Run `/belmont:debug` for targeted fixes on specific issues found by verification (routes to auto or manual mode)
 - Run `/belmont:next` to quickly fix follow-up tasks from verification
 - Run `/belmont:review` to check alignment between plans and codebase
 - Run `/belmont:implement` again for the next milestone
@@ -873,7 +892,9 @@ belmont/
 │       ├── next.md              # Next task skill (generated)
 │       ├── verify.md            # Verification skill (generated)
 │       ├── working-backwards.md  # Working backwards skill (generated)
-│       ├── debug.md             # Debug skill (generated)
+│       ├── debug.md             # Debug router (generated)
+│       ├── debug-auto.md       # Auto debug loop (generated)
+│       ├── debug-manual.md     # Manual debug loop (generated)
 │       ├── status.md            # Status skill
 │       ├── review.md            # Alignment review skill
 │       └── reset.md             # Reset state skill
@@ -919,6 +940,8 @@ your-project/
 │           ├── next.md
 │           ├── verify.md
 │           ├── debug.md
+│           ├── debug-auto.md
+│           ├── debug-manual.md
 │           ├── status.md
 │           ├── review.md
 │           └── reset.md

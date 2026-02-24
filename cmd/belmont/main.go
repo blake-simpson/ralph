@@ -1209,7 +1209,7 @@ func runInstall(args []string) error {
 			case "claude":
 				fmt.Println("  Claude Code  .claude/agents/belmont -> ../../.agents/belmont")
 				fmt.Println("              .claude/commands/belmont (copied from .agents/skills/belmont)")
-				fmt.Println("    Use: /belmont:working-backwards, /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:debug, /belmont:status")
+				fmt.Println("    Use: /belmont:working-backwards, /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:debug, /belmont:debug-auto, /belmont:debug-manual, /belmont:status")
 			case "codex":
 				fmt.Println("  Codex        .codex/belmont (copied from .agents/skills/belmont)")
 				fmt.Println("    Use: AGENTS.md includes Belmont skill routing for belmont:<skill> prompts")
@@ -1954,7 +1954,7 @@ func codexAgentsGuidanceSection() string {
 		"- Belmont skills are local markdown files in `.agents/skills/belmont/` (and mirrored in `.codex/belmont/`).",
 		"- If the user says `belmont:<skill>` or \"Use the belmont:<skill> skill\", treat it as a skill reference, not a shell command.",
 		"- Load `.agents/skills/belmont/<skill>.md` first (fallback to `.codex/belmont/<skill>.md`) and follow that workflow.",
-		"- Known Belmont skills: `working-backwards`, `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `debug`, `status`, `reset`, `note`.",
+		"- Known Belmont skills: `working-backwards`, `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `debug`, `debug-auto`, `debug-manual`, `status`, `reset`, `note`.",
 		"- If a requested skill file is missing, list available files in those directories and continue with the closest matching Belmont skill.",
 		codexAgentsGuidanceEnd,
 	}
