@@ -43,10 +43,10 @@ Then use the skills in your AI tool of choice. For example, in Claude Code:
 Belmont breaks coding work into **phases**, each driven by a specialized agent. The user interacts through **skills** (markdown files loaded as slash commands or rules) that orchestrate these agents.
 
 ```
-┌──────────────┐     ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  PR/FAQ      │ ──▶ │  Plan       │ ──▶ │  Tech Plan   │ ──▶ │  Implement   │
-│ (optional)   │     │  (PRD.md)   │     │ (TECH_PLAN)  │     │  (milestone) │
-└──────────────┘     └─────────────┘     └──────────────┘     └──────┬───────┘
+┌──────────────┐     ┌─────────────┐     ┌────────────────┐     ┌─────────────────┐
+│  PR/FAQ      │ ──▶ │  Plan       │ ──▶ │  Tech Plan     │ ──▶ │  Implement      │
+│ (optional)   │     │  (PRD.md)   │     │ (TECH_PLAN.md) │     │  (MILESTONE.md) │
+└──────────────┘     └─────────────┘     └────────────────┘     └─────────────────┘
                                                                       │
                                            ┌──────────────────────────┤
                                            ▼                          ▼
@@ -167,13 +167,13 @@ Traditional product development often starts with solutions and works forward to
 The PR/FAQ is an optional but recommended first step in Belmont's workflow:
 
 ```
-/belmont:working-backwards  →  .belmont/PR_FAQ.md  (strategic vision)
+/belmont:working-backwards  →  .belmont/PR_FAQ.md    (strategic vision)
         ↓
-/belmont:product-plan       →  .belmont/PRD.md     (feature catalog + detailed PRDs)
+/belmont:product-plan       →  .belmont/PRD.md       (feature catalog + detailed PRDs)
         ↓
-/belmont:tech-plan          →  TECH_PLAN.md        (master + feature implementation specs)
+/belmont:tech-plan          →  .belmont/TECH_PLAN.md (master + feature implementation specs)
         ↓
-/belmont:implement          →  Code                (agent pipeline)
+/belmont:implement          →  Code                  (agent pipeline)
 ```
 
 The PR/FAQ feeds into product planning — when you run `/belmont:product-plan`, it reads the PR/FAQ for strategic context, ensuring your features align with the customer promise.
@@ -274,20 +274,20 @@ go run ./cmd/belmont install --source . --project /tmp/test-project --no-prompt
 
 ## Skills
 
-| Skill | Description |
-|-------|-------------|
-| `working-backwards` | Amazon-style PR/FAQ document creation |
-| `product-plan` | Interactive PRD and PROGRESS creation |
-| `tech-plan` | Technical implementation plan |
-| `implement` | Full milestone implementation pipeline (3 agents) |
-| `next` | Implement a single task (lightweight) |
-| `verify` | Verification and code review |
-| `debug` | Debug router (auto or manual) |
-| `debug-auto` | Auto debug loop with agent verification |
-| `debug-manual` | Manual debug loop with user verification |
-| `review` | Document alignment and drift detection |
-| `status` | Read-only progress report |
-| `reset` | Reset state and start fresh |
+| Skill               | Description                                       |
+|---------------------|---------------------------------------------------|
+| `working-backwards` | Amazon-style PR/FAQ document creation             |
+| `product-plan`      | Interactive PRD and PROGRESS creation             |
+| `tech-plan`         | Technical implementation plan                     |
+| `implement`         | Full milestone implementation pipeline (3 agents) |
+| `next`              | Implement a single task (lightweight)             |
+| `verify`            | Verification and code review                      |
+| `debug`             | Debug router (auto or manual)                     |
+| `debug-auto`        | Auto debug loop with agent verification           |
+| `debug-manual`      | Manual debug loop with user verification          |
+| `review`            | Document alignment and drift detection            |
+| `status`            | Read-only progress report                         |
+| `reset`             | Reset state and start fresh                       |
 
 See [Skills Reference](docs/skills-reference.md) for detailed descriptions of each skill.
 
@@ -295,15 +295,15 @@ See [Skills Reference](docs/skills-reference.md) for detailed descriptions of ea
 
 ## Supported Tools
 
-| Tool               | How Skills Are Wired | How to Use |
-|--------------------|---------------------|------------|
-| **Claude Code**    | Symlinked agents + copied commands | `/belmont:product-plan`, `/belmont:implement`, etc. |
-| **Codex**          | Copied to `.codex/belmont` + `AGENTS.md` routing | `belmont:implement` in prompt |
-| **Cursor**         | Per-file `.mdc` symlinks in `.cursor/rules/` | Toggle in Settings > Rules |
-| **Windsurf**       | Directory symlink in `.windsurf/rules/` | Reference in Cascade |
-| **Gemini**         | Directory symlink in `.gemini/rules/` | Reference in Gemini |
-| **GitHub Copilot** | Directory symlink in `.copilot/` | Reference in Copilot Chat |
-| **Any other tool** | Plain markdown in `.agents/skills/belmont/` | Point your tool at the files |
+| Tool               | How Skills Are Wired                             | How to Use                                          |
+|--------------------|--------------------------------------------------|-----------------------------------------------------|
+| **Claude Code**    | Symlinked agents + copied commands               | `/belmont:product-plan`, `/belmont:implement`, etc. |
+| **Codex**          | Copied to `.codex/belmont` + `AGENTS.md` routing | `belmont:implement` in prompt                       |
+| **Cursor**         | Per-file `.mdc` symlinks in `.cursor/rules/`     | Toggle in Settings > Rules                          |
+| **Windsurf**       | Directory symlink in `.windsurf/rules/`          | Reference in Cascade                                |
+| **Gemini**         | Directory symlink in `.gemini/rules/`            | Reference in Gemini                                 |
+| **GitHub Copilot** | Directory symlink in `.copilot/`                 | Reference in Copilot Chat                           |
+| **Any other tool** | Plain markdown in `.agents/skills/belmont/`      | Point your tool at the files                        |
 
 See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instructions.
 
@@ -311,17 +311,17 @@ See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instr
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [CLI Commands](docs/cli-commands.md) | Full CLI usage, flags, and examples |
-| [Supported Tools](docs/supported-tools.md) | Detailed per-tool setup (Claude Code, Codex, Cursor, etc.) |
-| [Skills Reference](docs/skills-reference.md) | Detailed description of each skill |
-| [Full Workflow](docs/workflow.md) | Step-by-step walkthrough from vision to iteration |
-| [Directory Structure](docs/directory-structure.md) | Repository and installed project layouts |
-| [PRD & Progress Format](docs/prd-format.md) | PRD task format, states, priorities, and PROGRESS structure |
-| [Agent Pipeline Details](docs/agent-pipeline.md) | How the 3-phase agent pipeline works internally |
-| [Updating Belmont](docs/updating.md) | Self-update, re-install, and developer updates |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| Document                                           | Description                                                 |
+|----------------------------------------------------|-------------------------------------------------------------|
+| [CLI Commands](docs/cli-commands.md)               | Full CLI usage, flags, and examples                         |
+| [Supported Tools](docs/supported-tools.md)         | Detailed per-tool setup (Claude Code, Codex, Cursor, etc.)  |
+| [Skills Reference](docs/skills-reference.md)       | Detailed description of each skill                          |
+| [Full Workflow](docs/workflow.md)                  | Step-by-step walkthrough from vision to iteration           |
+| [Directory Structure](docs/directory-structure.md) | Repository and installed project layouts                    |
+| [PRD & Progress Format](docs/prd-format.md)        | PRD task format, states, priorities, and PROGRESS structure |
+| [Agent Pipeline Details](docs/agent-pipeline.md)   | How the 3-phase agent pipeline works internally             |
+| [Updating Belmont](docs/updating.md)               | Self-update, re-install, and developer updates              |
+| [Troubleshooting](docs/troubleshooting.md)         | Common issues and fixes                                     |
 
 ---
 
