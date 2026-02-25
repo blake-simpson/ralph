@@ -3,7 +3,10 @@
 This file provides guidance to Ai Agents when working with code in this repository.
 
 ## Notes
-- When updating code, always ensure the README is up to date with the new changes/paths etc.
+- When updating code, always ensure the README and docs/ are up to date with the new changes/paths etc.
+  - The README covers the high-level overview, quick start, how it works, installation, and brief tables for skills/tools.
+  - Detailed reference content lives in `docs/` (cli-commands, supported-tools, skills-reference, workflow, directory-structure, prd-format, agent-pipeline, updating, troubleshooting).
+  - If a change affects both the README summary and a docs page, update both.
 - When changing the Go code, always run the compiler after to test + rebuild the file
 
 ## Verify
@@ -87,6 +90,7 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 - `.github/workflows/release.yml` — GitHub Actions: cross-compile on tag push, create GitHub Release with binaries.
 - `install.sh` (root) — Public curl-pipe-sh installer for end users.
 - `bin/install.sh` / `bin/install.ps1` — Developer bootstrap scripts that build from source.
+- `docs/` — Reference documentation (cli-commands, supported-tools, skills-reference, workflow, directory-structure, prd-format, agent-pipeline, updating, troubleshooting).
 
 ### How the installer works
 
