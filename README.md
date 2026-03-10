@@ -309,6 +309,37 @@ See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instr
 
 ---
 
+## Feature Loop
+
+Belmont includes a built-in loop orchestrator (`belmont loop`) that takes a planned feature (with PRD + TECH_PLAN) and executes it end-to-end: implementing milestones, verifying, fixing follow-up issues, and continuing until the feature is complete. Pure Go, no Node.js required.
+
+```bash
+# Run the loop for a feature
+belmont loop --feature my-feature
+
+# Run specific milestones
+belmont loop --feature my-feature --from M2 --to M6
+
+# Use a specific AI tool
+belmont loop --feature my-feature --tool codex
+
+# Control checkpoint policy
+belmont loop --feature my-feature --policy milestone
+```
+
+The loop auto-detects which AI tool CLI you have installed (Claude Code, Codex, Gemini, Copilot, Cursor) and shells out to it in headless mode. Override with `--tool`.
+
+The loop uses a hybrid decision system: smart deterministic rules handle ~80% of cases (using git diff classification and per-milestone tracking), with AI called only for ambiguous situations like repeated verification failures. The AI receives rich context including work type, failure history, and verification state. Falls back to deterministic rules automatically if the AI call fails.
+
+Three checkpoint policies control human involvement:
+- `autonomous` (default) — only pauses on blockers or errors
+- `milestone` — pauses before each new milestone
+- `every_action` — human approves each step
+
+See [Feature Loop](docs/feature-loop.md) for full documentation.
+
+---
+
 ## Documentation
 
 | Document                                           | Description                                                 |
@@ -316,6 +347,7 @@ See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instr
 | [CLI Commands](docs/cli-commands.md)               | Full CLI usage, flags, and examples                         |
 | [Supported Tools](docs/supported-tools.md)         | Detailed per-tool setup (Claude Code, Codex, Cursor, etc.)  |
 | [Skills Reference](docs/skills-reference.md)       | Detailed description of each skill                          |
+| [Feature Loop](docs/feature-loop.md)               | Automated loop orchestrator for end-to-end feature execution|
 | [Full Workflow](docs/workflow.md)                  | Step-by-step walkthrough from vision to iteration           |
 | [Directory Structure](docs/directory-structure.md) | Repository and installed project layouts                    |
 | [PRD & Progress Format](docs/prd-format.md)        | PRD task format, states, priorities, and PROGRESS structure |

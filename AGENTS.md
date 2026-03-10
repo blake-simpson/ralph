@@ -108,4 +108,4 @@ Source resolution order (source mode only): `--source` flag > `BELMONT_SOURCE` e
 
 ### CLI commands
 
-The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `tree`, `find`, `search`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. The `update` command self-updates by downloading the latest release from GitHub.
+The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `loop`, `tree`, `find`, `search`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. The `loop` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. The `update` command self-updates by downloading the latest release from GitHub.

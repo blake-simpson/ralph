@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -106,6 +107,97 @@ type config struct {
 	Source string `json:"source"`
 }
 
+// Loop types
+type loopActionType string
+
+const (
+	actionImplementMilestone loopActionType = "IMPLEMENT_MILESTONE"
+	actionImplementNext      loopActionType = "IMPLEMENT_NEXT"
+	actionVerify             loopActionType = "VERIFY"
+	actionPause              loopActionType = "PAUSE"
+	actionComplete           loopActionType = "COMPLETE"
+	actionError              loopActionType = "ERROR"
+	actionReplan             loopActionType = "REPLAN"
+	actionSkipMilestone      loopActionType = "SKIP_MILESTONE"
+	actionDebug              loopActionType = "DEBUG"
+)
+
+type loopAction struct {
+	Type        loopActionType
+	Reason      string
+	MilestoneID string
+}
+
+type executionResult struct {
+	Success    bool
+	Output     string
+	Error      string
+	DurationMs int64
+}
+
+type workType string
+
+const (
+	workFrontend workType = "frontend" // .tsx, .jsx, .css, .scss, .html, .vue, .svelte
+	workBackend  workType = "backend"  // .go, .py, .rs, .java, etc.
+	workConfig   workType = "config"   // .yml, .yaml, .json, .toml, CI files
+	workDocs     workType = "docs"     // .md, .txt
+	workMixed    workType = "mixed"
+	workMinimal  workType = "minimal"  // < 3 files changed
+	workUnknown  workType = "unknown"
+)
+
+type historyEntry struct {
+	Action       loopAction
+	Result       *executionResult
+	TasksDone    int
+	TasksTotal   int
+	MsDone       int
+	MsTotal      int
+	BlockerCount int
+	HasFwlup     bool
+	Iteration    int
+	WorkType     workType
+	FilesChanged int
+	GitSHA       string
+}
+
+type milestoneLoopState struct {
+	ID           string
+	Name         string
+	Done         bool
+	Implemented  bool
+	Verified     bool
+	VerifyFailed int
+	WorkType     workType
+	FilesChanged int
+}
+
+type checkpointPolicy string
+
+const (
+	policyAutonomous  checkpointPolicy = "autonomous"
+	policyMilestone   checkpointPolicy = "milestone"
+	policyEveryAction checkpointPolicy = "every_action"
+)
+
+type loopConfig struct {
+	Feature       string
+	Root          string
+	Tool          string
+	From          string
+	To            string
+	Policy        checkpointPolicy
+	MaxIterations int
+	MaxFailures   int
+}
+
+type aiDecision struct {
+	Action      string `json:"action"`
+	Reason      string `json:"reason"`
+	MilestoneID string `json:"milestone_id,omitempty"`
+}
+
 func main() {
 	// Clean up old binary on Windows after self-update
 	if runtime.GOOS == "windows" {
@@ -131,6 +223,8 @@ func main() {
 		must(runFind(os.Args[2:]))
 	case "search":
 		must(runSearch(os.Args[2:]))
+	case "loop":
+		must(runLoopCmd(os.Args[2:]))
 	case "install":
 		must(runInstall(os.Args[2:]))
 	case "update":
@@ -157,6 +251,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont tree [--root PATH] [--max-depth N] [--max-entries N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont find --name QUERY [--root PATH] [--regex] [--type file|dir|any] [--limit N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont search --pattern REGEX [--root PATH] [--limit N] [--format text|json]")
+	fmt.Fprintln(w, "  belmont loop --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--root PATH]")
 	fmt.Fprintln(w, "  belmont version")
 }
 
@@ -2381,3 +2476,1291 @@ func isNewer(remote, local string) bool {
 	}
 	return rPat > lPat
 }
+
+// ── Loop command ──
+
+func runLoopCmd(args []string) error {
+	fs := flag.NewFlagSet("loop", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	var cfg loopConfig
+	var policyStr string
+	fs.StringVar(&cfg.Feature, "feature", "", "feature slug (required)")
+	fs.StringVar(&cfg.From, "from", "", "start milestone (e.g. M1)")
+	fs.StringVar(&cfg.To, "to", "", "end milestone (e.g. M5)")
+	fs.StringVar(&cfg.Tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor)")
+	fs.StringVar(&policyStr, "policy", "autonomous", "checkpoint policy (autonomous|milestone|every_action)")
+	fs.IntVar(&cfg.MaxIterations, "max-iterations", 20, "maximum loop iterations")
+	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
+	fs.StringVar(&cfg.Root, "root", ".", "project root")
+
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("loop: %w", err)
+	}
+
+	if cfg.Feature == "" {
+		return fmt.Errorf("loop: --feature is required")
+	}
+
+	switch checkpointPolicy(policyStr) {
+	case policyAutonomous, policyMilestone, policyEveryAction:
+		cfg.Policy = checkpointPolicy(policyStr)
+	default:
+		return fmt.Errorf("loop: invalid --policy %q (use autonomous, milestone, or every_action)", policyStr)
+	}
+
+	absRoot, err := filepath.Abs(cfg.Root)
+	if err != nil {
+		return err
+	}
+	cfg.Root = absRoot
+
+	// Verify feature directory exists
+	featureDir := filepath.Join(absRoot, ".belmont", "features", cfg.Feature)
+	if !dirExists(featureDir) {
+		return fmt.Errorf("loop: feature %q not found at %s", cfg.Feature, featureDir)
+	}
+
+	// Auto-detect tool if not specified
+	if cfg.Tool == "" {
+		detected := detectTool()
+		if detected == "" {
+			return fmt.Errorf("loop: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+		}
+		cfg.Tool = detected
+	} else {
+		// Validate tool name
+		switch cfg.Tool {
+		case "claude", "codex", "gemini", "copilot", "cursor":
+			// ok
+		default:
+			return fmt.Errorf("loop: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", cfg.Tool)
+		}
+	}
+
+	return runLoop(cfg)
+}
+
+func detectTool() string {
+	for _, tool := range []string{"claude", "codex", "gemini", "copilot", "cursor"} {
+		if _, err := exec.LookPath(tool); err == nil {
+			return tool
+		}
+	}
+	return ""
+}
+
+func runLoop(cfg loopConfig) error {
+	startTime := time.Now()
+	var history []historyEntry
+	var lastOutput string
+
+	fmt.Fprintf(os.Stderr, "\033[1mBelmont Loop — %s\033[0m\n", cfg.Feature)
+	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Policy: %s | Max iterations: %d\033[0m\n", cfg.Tool, cfg.Policy, cfg.MaxIterations)
+	if cfg.From != "" || cfg.To != "" {
+		fromStr := cfg.From
+		if fromStr == "" {
+			fromStr = "start"
+		}
+		toStr := cfg.To
+		if toStr == "" {
+			toStr = "end"
+		}
+		fmt.Fprintf(os.Stderr, "\033[2mRange: %s → %s\033[0m\n", fromStr, toStr)
+	}
+	fmt.Fprintln(os.Stderr)
+
+	for i := 1; i <= cfg.MaxIterations; i++ {
+		// 1. Read current state
+		report, err := buildStatus(cfg.Root, 55, cfg.Feature)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\033[31mFailed to read state: %s\033[0m\n", err)
+			return fmt.Errorf("loop: state read failed: %w", err)
+		}
+
+		// 2. Derive extra signals
+		hasFwlup := detectFwlupTasks(cfg.Root, cfg.Feature, report)
+		msStates := buildMilestoneLoopStates(history, report.Milestones)
+
+		// Print state summary
+		printLoopState(report, hasFwlup)
+
+		// 3. Check hard guardrails first
+		action := checkHardGuardrails(report, history, cfg)
+
+		// 4. If no guardrail triggered, try smart rules first
+		if action == nil {
+			action = decideLoopActionSmart(report, history, cfg, hasFwlup, msStates)
+		}
+
+		// 5. If smart rules returned nil, use AI decisions (with rules fallback)
+		if action == nil {
+			aiAction, err := decideLoopActionAI(report, history, cfg, hasFwlup, lastOutput, msStates)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "\033[33m  AI decision failed: %s — falling back to rules\033[0m\n", err)
+				decided := decideLoopAction(report, history, cfg, hasFwlup)
+				action = &decided
+			} else {
+				action = aiAction
+			}
+		}
+
+		label := describeMilestone(action, report)
+		actionLabel := shortActionLabel(action.Type)
+		if label != "" {
+			fmt.Fprintf(os.Stderr, "\n\033[1m━━ [%d] %s ━━ %s ━━\033[0m\n", i, actionLabel, label)
+		} else {
+			fmt.Fprintf(os.Stderr, "\n\033[1m━━ [%d] %s ━━\033[0m\n", i, actionLabel)
+		}
+		fmt.Fprintf(os.Stderr, "\033[2m  %s\033[0m\n\n", action.Reason)
+
+		// 5. Terminal actions
+		if action.Type == actionComplete {
+			fmt.Fprintf(os.Stderr, "\n\033[32m✓ Complete\033[0m — %s (%.1fs total)\n", action.Reason, time.Since(startTime).Seconds())
+			return nil
+		}
+		if action.Type == actionError {
+			fmt.Fprintf(os.Stderr, "\n\033[31m✗ Error\033[0m — %s\n", action.Reason)
+			return fmt.Errorf("loop: %s", action.Reason)
+		}
+		if action.Type == actionPause {
+			fmt.Fprintf(os.Stderr, "\n\033[33m⏸ Paused\033[0m — %s\n", action.Reason)
+			fmt.Fprintf(os.Stderr, "Resume with: belmont loop --feature %s", cfg.Feature)
+			if cfg.From != "" {
+				fmt.Fprintf(os.Stderr, " --from %s", cfg.From)
+			}
+			if cfg.To != "" {
+				fmt.Fprintf(os.Stderr, " --to %s", cfg.To)
+			}
+			fmt.Fprintln(os.Stderr)
+			return nil
+		}
+
+		// 6. Handle SKIP_MILESTONE (state mutation, no tool call)
+		if action.Type == actionSkipMilestone {
+			skipErr := skipMilestoneInProgress(cfg.Root, cfg.Feature, action.MilestoneID)
+			if skipErr != nil {
+				fmt.Fprintf(os.Stderr, "\033[31m  ✗ Failed to skip milestone: %s\033[0m\n\n", skipErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "\033[32m  ✓ Skipped milestone %s\033[0m\n\n", action.MilestoneID)
+			}
+			entry := historyEntry{
+				Action:       *action,
+				Result:       &executionResult{Success: skipErr == nil, DurationMs: 0},
+				TasksDone:    report.TaskCounts["done"],
+				TasksTotal:   report.TaskCounts["total"],
+				MsDone:       countDoneMilestones(report.Milestones),
+				MsTotal:      len(report.Milestones),
+				BlockerCount: len(report.Blockers),
+				HasFwlup:     hasFwlup,
+				Iteration:    i,
+			}
+			history = append(history, entry)
+			continue
+		}
+
+		// 7. Checkpoint policy check
+		if shouldLoopCheckpoint(*action, cfg.Policy, lastActionType(history)) {
+			fmt.Fprintf(os.Stderr, "\n\033[33m⏸ Checkpoint\033[0m — %s\n", action.Reason)
+			fmt.Fprintf(os.Stderr, "Resume with: belmont loop --feature %s", cfg.Feature)
+			if cfg.From != "" {
+				fmt.Fprintf(os.Stderr, " --from %s", cfg.From)
+			}
+			if cfg.To != "" {
+				fmt.Fprintf(os.Stderr, " --to %s", cfg.To)
+			}
+			fmt.Fprintln(os.Stderr)
+			return nil
+		}
+
+		// 8. Capture pre-action SHA
+		preSHA := captureGitSHA(cfg.Root)
+
+		// 9. Execute action
+		result := executeLoopAction(*action, cfg)
+		lastOutput = truncateTail(result.Output, 1500)
+
+		// 10. Post-action classification
+		wt, fc := classifyChanges(cfg.Root, preSHA)
+
+		// 11. Record in history
+		entry := historyEntry{
+			Action:       *action,
+			Result:       &result,
+			TasksDone:    report.TaskCounts["done"],
+			TasksTotal:   report.TaskCounts["total"],
+			MsDone:       countDoneMilestones(report.Milestones),
+			MsTotal:      len(report.Milestones),
+			BlockerCount: len(report.Blockers),
+			HasFwlup:     hasFwlup,
+			Iteration:    i,
+			WorkType:     wt,
+			FilesChanged: fc,
+			GitSHA:       preSHA,
+		}
+		history = append(history, entry)
+
+		// 12. Print result
+		if result.Success {
+			fmt.Fprintf(os.Stderr, "\n\033[32m  ✓ %.1fs\033[0m\n", float64(result.DurationMs)/1000)
+		} else {
+			fmt.Fprintf(os.Stderr, "\n\033[31m  ✗ %s (%.1fs)\033[0m\n", result.Error, float64(result.DurationMs)/1000)
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "\n\033[33m⏸ Max iterations reached (%d)\033[0m\n", cfg.MaxIterations)
+	return nil
+}
+
+func printLoopState(report statusReport, hasFwlup bool) {
+	done := report.TaskCounts["done"]
+	total := report.TaskCounts["total"]
+	msDone := countDoneMilestones(report.Milestones)
+	msTotal := len(report.Milestones)
+
+	// Progress bar
+	barWidth := 20
+	filled := 0
+	if total > 0 {
+		filled = (done * barWidth) / total
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	fmt.Fprintf(os.Stderr, "  [%s] %d/%d tasks, %d/%d milestones", bar, done, total, msDone, msTotal)
+
+	if hasFwlup {
+		fmt.Fprintf(os.Stderr, " \033[33m(FWLUP)\033[0m")
+	}
+	if len(report.Blockers) > 0 {
+		fmt.Fprintf(os.Stderr, " \033[31m(%d blockers)\033[0m", len(report.Blockers))
+	}
+	fmt.Fprintln(os.Stderr)
+}
+
+func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool) loopAction {
+	last := lastActionType(history)
+
+	// Rule 1: Blockers → PAUSE
+	if len(report.Blockers) > 0 {
+		return loopAction{Type: actionPause, Reason: fmt.Sprintf("Blockers detected: %s", strings.Join(report.Blockers, ", "))}
+	}
+
+	// Rule 2: Consecutive failures >= maxFailures → ERROR
+	if consecutiveFailures(history) >= cfg.MaxFailures {
+		return loopAction{Type: actionError, Reason: fmt.Sprintf("%d consecutive failures", cfg.MaxFailures)}
+	}
+
+	// Rule 3: Stuck detection
+	if isLoopStuck(history) {
+		return loopAction{Type: actionPause, Reason: "Loop appears stuck — no state change after 2 iterations"}
+	}
+
+	// Rule 4: FWLUP tasks after VERIFY → IMPLEMENT_NEXT
+	if hasFwlup && last == actionImplementNext {
+		// After implementing next (follow-up fix), re-verify
+		return loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
+	}
+
+	if hasFwlup && last == actionVerify {
+		return loopAction{Type: actionImplementNext, Reason: "Follow-up tasks detected after verification"}
+	}
+
+	// Rule 5: After IMPLEMENT_NEXT → VERIFY
+	if last == actionImplementNext {
+		return loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
+	}
+
+	// Rule 6: After IMPLEMENT_MILESTONE → VERIFY
+	if last == actionImplementMilestone {
+		return loopAction{Type: actionVerify, Reason: "Verifying completed milestone"}
+	}
+
+	// Rule 7-10: Check milestones in range
+	inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+	allDone := true
+	for _, m := range inRange {
+		if !m.Done {
+			allDone = false
+			break
+		}
+	}
+
+	// Rule 7: All done + no FWLUP → COMPLETE
+	if allDone && !hasFwlup {
+		return loopAction{Type: actionComplete, Reason: "All milestones in range completed"}
+	}
+
+	// Rule 8: All done but FWLUP remaining → IMPLEMENT_NEXT
+	if allDone && hasFwlup {
+		return loopAction{Type: actionImplementNext, Reason: "Follow-up tasks remaining after all milestones complete"}
+	}
+
+	// Rule 10: Next milestone in range → IMPLEMENT_MILESTONE
+	for _, m := range inRange {
+		if !m.Done {
+			return loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Implementing milestone %s", m.ID), MilestoneID: m.ID}
+		}
+	}
+
+	// Fallback
+	return loopAction{Type: actionComplete, Reason: "No actionable milestones found"}
+}
+
+func milestonesInRange(milestones []milestone, from, to string) []milestone {
+	if from == "" && to == "" {
+		return milestones
+	}
+
+	fromNum := parseMilestoneNum(from)
+	toNum := parseMilestoneNum(to)
+
+	var result []milestone
+	for _, m := range milestones {
+		num := parseMilestoneNum(m.ID)
+		if num < 0 {
+			continue
+		}
+		if fromNum >= 0 && num < fromNum {
+			continue
+		}
+		if toNum >= 0 && num > toNum {
+			continue
+		}
+		result = append(result, m)
+	}
+	return result
+}
+
+func parseMilestoneNum(id string) int {
+	if id == "" {
+		return -1
+	}
+	re := regexp.MustCompile(`(?i)M(\d+)`)
+	match := re.FindStringSubmatch(id)
+	if len(match) < 2 {
+		return -1
+	}
+	n, err := strconv.Atoi(match[1])
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// tailWriter writes all data to an underlying writer and keeps a rolling
+// buffer of the last `size` bytes for later retrieval.
+type tailWriter struct {
+	out  io.Writer
+	buf  []byte
+	size int
+}
+
+func newTailWriter(out io.Writer, size int) *tailWriter {
+	return &tailWriter{out: out, buf: make([]byte, 0, size), size: size}
+}
+
+func (tw *tailWriter) Write(p []byte) (int, error) {
+	n, err := tw.out.Write(p)
+	if n > 0 {
+		tw.buf = append(tw.buf, p[:n]...)
+		if len(tw.buf) > tw.size {
+			tw.buf = tw.buf[len(tw.buf)-tw.size:]
+		}
+	}
+	return n, err
+}
+
+func (tw *tailWriter) String() string {
+	return string(tw.buf)
+}
+
+// claudeStreamWriter wraps a tailWriter and parses Claude stream-json NDJSON,
+// extracting only human-readable content (assistant text + tool use indicators).
+type claudeStreamWriter struct {
+	tw      *tailWriter
+	partial []byte
+}
+
+type streamLine struct {
+	Type    string        `json:"type"`
+	Message streamMessage `json:"message"`
+}
+
+type streamMessage struct {
+	Content []streamContent `json:"content"`
+}
+
+type streamContent struct {
+	Type  string                 `json:"type"`
+	Text  string                 `json:"text"`
+	Name  string                 `json:"name"`
+	Input map[string]interface{} `json:"input"`
+}
+
+func (c *claudeStreamWriter) Write(p []byte) (int, error) {
+	c.partial = append(c.partial, p...)
+	for {
+		idx := bytes.IndexByte(c.partial, '\n')
+		if idx < 0 {
+			break
+		}
+		line := c.partial[:idx]
+		c.partial = c.partial[idx+1:]
+		if len(line) == 0 {
+			continue
+		}
+		var sl streamLine
+		if err := json.Unmarshal(line, &sl); err != nil {
+			continue
+		}
+		if sl.Type != "assistant" {
+			continue
+		}
+		for _, item := range sl.Message.Content {
+			switch item.Type {
+			case "text":
+				if item.Text != "" {
+					c.tw.Write([]byte("  " + item.Text + "\n"))
+				}
+			case "tool_use":
+				if item.Name != "" {
+					c.tw.Write([]byte("  → " + toolSummary(item.Name, item.Input) + "\n"))
+				}
+			}
+		}
+	}
+	return len(p), nil
+}
+
+func toolSummary(name string, input map[string]interface{}) string {
+	switch name {
+	case "Read", "Write", "Edit":
+		if fp, ok := input["file_path"].(string); ok {
+			return name + " " + filepath.Base(fp)
+		}
+	case "Bash":
+		if cmd, ok := input["command"].(string); ok {
+			if len(cmd) > 60 {
+				cmd = cmd[:60] + "…"
+			}
+			return name + " " + cmd
+		}
+	case "Grep":
+		if pat, ok := input["pattern"].(string); ok {
+			return name + " " + strconv.Quote(pat)
+		}
+	case "Glob":
+		if pat, ok := input["pattern"].(string); ok {
+			return name + " " + pat
+		}
+	case "Agent":
+		if desc, ok := input["description"].(string); ok {
+			if len(desc) > 60 {
+				desc = desc[:60] + "…"
+			}
+			return name + " " + desc
+		}
+	case "Skill":
+		if sk, ok := input["skill"].(string); ok {
+			return name + " " + sk
+		}
+	}
+	return name
+}
+
+func shortActionLabel(t loopActionType) string {
+	switch t {
+	case actionImplementMilestone:
+		return "IMPLEMENT"
+	case actionImplementNext:
+		return "FIX"
+	case actionVerify:
+		return "VERIFY"
+	case actionReplan:
+		return "REPLAN"
+	case actionSkipMilestone:
+		return "SKIP"
+	case actionDebug:
+		return "DEBUG"
+	default:
+		return string(t)
+	}
+}
+
+func describeMilestone(action *loopAction, report statusReport) string {
+	if action.MilestoneID != "" {
+		for _, m := range report.Milestones {
+			if m.ID == action.MilestoneID {
+				return m.ID + ": " + m.Name
+			}
+		}
+	}
+	if action.Type == actionVerify || action.Type == actionImplementNext {
+		if report.NextMilestone != nil {
+			return report.NextMilestone.ID + ": " + report.NextMilestone.Name
+		}
+	}
+	return ""
+}
+
+func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
+	prompt := buildLoopPrompt(action, cfg.Feature)
+
+	var cmd *exec.Cmd
+	switch cfg.Tool {
+	case "claude":
+		cmd = exec.Command("claude", "-p", prompt,
+			"--permission-mode", "bypassPermissions",
+			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill",
+			"--output-format", "stream-json", "--verbose")
+	case "codex":
+		cmd = exec.Command("codex", "exec", prompt,
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--json", "-C", cfg.Root)
+	case "gemini":
+		cmd = exec.Command("gemini", prompt,
+			"--yolo", "--output-format", "json")
+	case "copilot":
+		cmd = exec.Command("copilot", "-p", prompt, "--yolo")
+	case "cursor":
+		cmd = exec.Command("cursor", "agent", "-p", prompt,
+			"--force", "--output-format", "json")
+	default:
+		return executionResult{Success: false, Error: fmt.Sprintf("unsupported tool: %s", cfg.Tool)}
+	}
+
+	cmd.Dir = cfg.Root
+
+	tw := newTailWriter(os.Stderr, 1500)
+	if cfg.Tool == "claude" {
+		cmd.Stdout = &claudeStreamWriter{tw: tw}
+	} else {
+		cmd.Stdout = tw
+	}
+	cmd.Stderr = tw
+
+	var stopTimer chan struct{}
+	if cfg.Tool != "claude" {
+		stopTimer = make(chan struct{})
+		go func() {
+			start := time.Now()
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					fmt.Fprintf(os.Stderr, "\r\033[2m  ⏱ %s\033[0m", time.Since(start).Truncate(time.Second))
+				case <-stopTimer:
+					fmt.Fprintf(os.Stderr, "\r\033[K")
+					return
+				}
+			}
+		}()
+	}
+
+	start := time.Now()
+	err := cmd.Run()
+	if stopTimer != nil {
+		close(stopTimer)
+	}
+	durationMs := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return executionResult{
+			Success:    false,
+			Output:     tw.String(),
+			Error:      err.Error(),
+			DurationMs: durationMs,
+		}
+	}
+
+	return executionResult{
+		Success:    true,
+		Output:     tw.String(),
+		DurationMs: durationMs,
+	}
+}
+
+func buildLoopPrompt(action loopAction, feature string) string {
+	switch action.Type {
+	case actionImplementMilestone:
+		return fmt.Sprintf("/belmont:implement --feature %s", feature)
+	case actionImplementNext:
+		return fmt.Sprintf("/belmont:next --feature %s", feature)
+	case actionVerify:
+		return fmt.Sprintf("/belmont:verify --feature %s", feature)
+	case actionReplan:
+		return fmt.Sprintf("/belmont:tech-plan --feature %s", feature)
+	case actionDebug:
+		return fmt.Sprintf("/belmont:debug-auto --feature %s", feature)
+	default:
+		return ""
+	}
+}
+
+func shouldLoopCheckpoint(action loopAction, policy checkpointPolicy, last loopActionType) bool {
+	// Terminal actions handled elsewhere
+	if action.Type == actionPause || action.Type == actionError || action.Type == actionComplete {
+		return false
+	}
+
+	switch policy {
+	case policyAutonomous:
+		return false
+	case policyMilestone:
+		if action.Type == actionImplementMilestone {
+			return true
+		}
+		// Significant changes warrant a checkpoint
+		if action.Type == actionReplan || action.Type == actionSkipMilestone {
+			return true
+		}
+		// Auto-verify after implement
+		if action.Type == actionVerify && last == actionImplementMilestone {
+			return false
+		}
+		// Pause after verify results
+		if last == actionVerify {
+			return true
+		}
+		return false
+	case policyEveryAction:
+		return true
+	}
+	return false
+}
+
+func lastActionType(history []historyEntry) loopActionType {
+	if len(history) == 0 {
+		return ""
+	}
+	return history[len(history)-1].Action.Type
+}
+
+func consecutiveFailures(history []historyEntry) int {
+	count := 0
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Result != nil && !history[i].Result.Success {
+			count++
+		} else {
+			break
+		}
+	}
+	return count
+}
+
+func isLoopStuck(history []historyEntry) bool {
+	if len(history) < 2 {
+		return false
+	}
+	recent := history[len(history)-2:]
+	// Both must have succeeded
+	for _, e := range recent {
+		if e.Result == nil || !e.Result.Success {
+			return false
+		}
+	}
+	// Compare state fingerprints
+	fp0 := loopFingerprint(recent[0])
+	fp1 := loopFingerprint(recent[1])
+	return fp0 == fp1
+}
+
+func loopFingerprint(e historyEntry) string {
+	return fmt.Sprintf("%d/%d|%d/%d|%d|%v", e.TasksDone, e.TasksTotal, e.MsDone, e.MsTotal, e.BlockerCount, e.HasFwlup)
+}
+
+func countDoneMilestones(milestones []milestone) int {
+	count := 0
+	for _, m := range milestones {
+		if m.Done {
+			count++
+		}
+	}
+	return count
+}
+
+// captureGitSHA returns the current HEAD SHA, or "" on error.
+func captureGitSHA(root string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// classifyChanges runs git diff between preSHA and HEAD and classifies the work type.
+func classifyChanges(root, preSHA string) (workType, int) {
+	if preSHA == "" {
+		return workUnknown, 0
+	}
+	cmd := exec.Command("git", "diff", "--name-only", preSHA+"..HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return workUnknown, 0
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var files []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			files = append(files, l)
+		}
+	}
+	if len(files) == 0 {
+		return workMinimal, 0
+	}
+	if len(files) < 3 {
+		return workMinimal, len(files)
+	}
+
+	frontendExts := map[string]bool{
+		".tsx": true, ".jsx": true, ".css": true, ".scss": true,
+		".html": true, ".vue": true, ".svelte": true, ".less": true,
+	}
+	backendExts := map[string]bool{
+		".go": true, ".py": true, ".rs": true, ".java": true,
+		".rb": true, ".php": true, ".cs": true, ".kt": true,
+		".scala": true, ".ex": true, ".exs": true,
+	}
+	configExts := map[string]bool{
+		".yml": true, ".yaml": true, ".json": true, ".toml": true,
+		".ini": true, ".env": true,
+	}
+	docExts := map[string]bool{
+		".md": true, ".txt": true, ".rst": true,
+	}
+
+	var feCount, beCount, cfgCount, docCount int
+	for _, f := range files {
+		ext := strings.ToLower(filepath.Ext(f))
+		switch {
+		case frontendExts[ext]:
+			feCount++
+		case backendExts[ext]:
+			beCount++
+		case configExts[ext]:
+			cfgCount++
+		case docExts[ext]:
+			docCount++
+		}
+	}
+
+	total := len(files)
+	if docCount == total {
+		return workDocs, total
+	}
+	if cfgCount == total {
+		return workConfig, total
+	}
+	if feCount*2 > total {
+		return workFrontend, total
+	}
+	if beCount*2 > total {
+		return workBackend, total
+	}
+	if feCount > 0 && beCount > 0 {
+		return workMixed, total
+	}
+	if feCount > 0 {
+		return workFrontend, total
+	}
+	if beCount > 0 {
+		return workBackend, total
+	}
+	return workMixed, total
+}
+
+// isCriticalConfig returns true if changed files include runtime-affecting config.
+func isCriticalConfig(files []string) bool {
+	for _, f := range files {
+		base := strings.ToLower(filepath.Base(f))
+		ext := strings.ToLower(filepath.Ext(f))
+		if ext == ".css" || ext == ".scss" || ext == ".less" {
+			return true
+		}
+		if strings.Contains(base, ".env") || strings.Contains(base, "styles") {
+			return true
+		}
+		if base == "tailwind.config.js" || base == "tailwind.config.ts" ||
+			base == "postcss.config.js" || base == "vite.config.ts" ||
+			base == "next.config.js" || base == "next.config.mjs" {
+			return true
+		}
+	}
+	return false
+}
+
+// buildMilestoneLoopStates derives per-milestone state from the loop history.
+func buildMilestoneLoopStates(history []historyEntry, milestones []milestone) map[string]*milestoneLoopState {
+	states := make(map[string]*milestoneLoopState)
+	for _, m := range milestones {
+		states[m.ID] = &milestoneLoopState{
+			ID:   m.ID,
+			Name: m.Name,
+			Done: m.Done,
+		}
+	}
+
+	var lastImplementedMS string
+	for _, h := range history {
+		switch h.Action.Type {
+		case actionImplementMilestone:
+			msID := h.Action.MilestoneID
+			if msID != "" {
+				if s, ok := states[msID]; ok && h.Result != nil && h.Result.Success {
+					s.Implemented = true
+					s.WorkType = h.WorkType
+					s.FilesChanged = h.FilesChanged
+					lastImplementedMS = msID
+				}
+			}
+		case actionVerify:
+			// Attribute verification to the most recently implemented milestone
+			if lastImplementedMS != "" {
+				if s, ok := states[lastImplementedMS]; ok {
+					if h.Result != nil {
+						if h.Result.Success {
+							s.Verified = true
+						} else {
+							s.VerifyFailed++
+						}
+					}
+				}
+			}
+		}
+	}
+	return states
+}
+
+// decideLoopActionSmart applies deterministic rules for ~80% of cases.
+// Returns nil for ambiguous cases that should fall through to AI.
+func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, msStates map[string]*milestoneLoopState) *loopAction {
+	if len(history) == 0 {
+		// First iteration: implement first undone milestone in range
+		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+		for _, m := range inRange {
+			if !m.Done {
+				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("First iteration — implementing %s", m.ID), MilestoneID: m.ID}
+			}
+		}
+		// All done already
+		if !hasFwlup {
+			return &loopAction{Type: actionComplete, Reason: "All milestones already complete"}
+		}
+		return &loopAction{Type: actionImplementNext, Reason: "All milestones done but follow-up tasks remain"}
+	}
+
+	last := history[len(history)-1]
+	lastType := last.Action.Type
+	lastSuccess := last.Result != nil && last.Result.Success
+
+	// Rule 1: After IMPLEMENT_MILESTONE success → almost always VERIFY
+	if lastType == actionImplementMilestone && lastSuccess {
+		wt := last.WorkType
+		fc := last.FilesChanged
+		// Skip verify only for: 0 files changed, pure docs, or non-critical config ≤2 files
+		if fc == 0 {
+			return &loopAction{Type: actionImplementNext, Reason: "No files changed — skipping verification"}
+		}
+		if wt == workDocs {
+			// Docs-only: skip verification, move to next milestone
+			inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+			for _, m := range inRange {
+				if !m.Done {
+					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Docs-only milestone — moving to %s", m.ID), MilestoneID: m.ID}
+				}
+			}
+			if !hasFwlup {
+				return &loopAction{Type: actionComplete, Reason: "All milestones complete (last was docs-only)"}
+			}
+			return &loopAction{Type: actionImplementNext, Reason: "Docs-only milestone done, fixing follow-ups"}
+		}
+		// Everything else: verify
+		return &loopAction{Type: actionVerify, Reason: "Verifying completed milestone"}
+	}
+
+	// Rule 2: After VERIFY success + no follow-ups → next undone milestone or COMPLETE
+	if lastType == actionVerify && lastSuccess && !hasFwlup {
+		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+		for _, m := range inRange {
+			if !m.Done {
+				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Verification passed — implementing %s", m.ID), MilestoneID: m.ID}
+			}
+		}
+		return &loopAction{Type: actionComplete, Reason: "All milestones verified and complete"}
+	}
+
+	// Rule 3: After VERIFY success + follow-ups exist → IMPLEMENT_NEXT
+	if lastType == actionVerify && lastSuccess && hasFwlup {
+		return &loopAction{Type: actionImplementNext, Reason: "Follow-up tasks detected after verification"}
+	}
+
+	// Rule 4: After IMPLEMENT_NEXT success → VERIFY (re-verify)
+	if lastType == actionImplementNext && lastSuccess {
+		return &loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
+	}
+
+	// Rule 5: After VERIFY failure — check verify failure count
+	if lastType == actionVerify && !lastSuccess {
+		// Find the milestone being verified
+		var verifyFailCount int
+		var targetMS string
+		// Walk history backward to find which milestone we're verifying
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].Action.Type == actionImplementMilestone && history[i].Action.MilestoneID != "" {
+				targetMS = history[i].Action.MilestoneID
+				break
+			}
+		}
+		if targetMS != "" {
+			if s, ok := msStates[targetMS]; ok {
+				verifyFailCount = s.VerifyFailed
+			}
+		}
+
+		if verifyFailCount >= 2 {
+			// Delegate to AI for REPLAN/DEBUG decision
+			return nil
+		}
+		// First failure: try fixing
+		return &loopAction{Type: actionImplementNext, Reason: "Verification failed — fixing issues"}
+	}
+
+	// Rule 6: After DEBUG success → VERIFY
+	if lastType == actionDebug && lastSuccess {
+		return &loopAction{Type: actionVerify, Reason: "Re-verifying after debug"}
+	}
+
+	// Rule 7: All milestones done + verified + no follow-ups → COMPLETE
+	inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+	allDone := true
+	allVerified := true
+	for _, m := range inRange {
+		if !m.Done {
+			allDone = false
+			break
+		}
+		if s, ok := msStates[m.ID]; ok {
+			if !s.Verified {
+				allVerified = false
+			}
+		}
+	}
+	if allDone && allVerified && !hasFwlup {
+		return &loopAction{Type: actionComplete, Reason: "All milestones implemented, verified, and no follow-ups"}
+	}
+
+	// Rule 8: All done but not all verified → VERIFY
+	if allDone && !allVerified && !hasFwlup {
+		return &loopAction{Type: actionVerify, Reason: "All milestones done but not all verified"}
+	}
+
+	// Rule 9: All done but follow-ups remain → IMPLEMENT_NEXT
+	if allDone && hasFwlup {
+		return &loopAction{Type: actionImplementNext, Reason: "Follow-up tasks remaining after all milestones complete"}
+	}
+
+	// Rule 10: Next undone milestone
+	for _, m := range inRange {
+		if !m.Done {
+			return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Implementing milestone %s", m.ID), MilestoneID: m.ID}
+		}
+	}
+
+	// Ambiguous — let AI decide
+	return nil
+}
+
+// checkHardGuardrails runs safety checks that always apply before AI decisions.
+// Returns nil if no guardrail triggers, otherwise a loopAction to take.
+func checkHardGuardrails(report statusReport, history []historyEntry, cfg loopConfig) *loopAction {
+	// Blockers → PAUSE
+	if len(report.Blockers) > 0 {
+		return &loopAction{Type: actionPause, Reason: fmt.Sprintf("Blockers detected: %s", strings.Join(report.Blockers, ", "))}
+	}
+
+	// Consecutive failures >= maxFailures → ERROR
+	if consecutiveFailures(history) >= cfg.MaxFailures {
+		return &loopAction{Type: actionError, Reason: fmt.Sprintf("%d consecutive failures", cfg.MaxFailures)}
+	}
+
+	// Stuck detection
+	if isLoopStuck(history) {
+		return &loopAction{Type: actionPause, Reason: "Loop appears stuck — no state change after 2 iterations"}
+	}
+
+	return nil
+}
+
+// decideLoopActionAI shells out to the configured tool to make a strategic decision.
+// Only called for ambiguous cases that decideLoopActionSmart couldn't handle.
+func decideLoopActionAI(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, lastOutput string, msStates map[string]*milestoneLoopState) (*loopAction, error) {
+	// Build rich milestone state JSON
+	inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+	type msStateJSON struct {
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		Done           bool   `json:"done"`
+		Implemented    bool   `json:"implemented"`
+		Verified       bool   `json:"verified"`
+		VerifyFailures int    `json:"verify_failures,omitempty"`
+		WorkType       string `json:"work_type,omitempty"`
+		FilesChanged   int    `json:"files_changed,omitempty"`
+	}
+	var milestones []msStateJSON
+	for _, m := range inRange {
+		ms := msStateJSON{ID: m.ID, Name: m.Name, Done: m.Done}
+		if s, ok := msStates[m.ID]; ok {
+			ms.Implemented = s.Implemented
+			ms.Verified = s.Verified
+			ms.VerifyFailures = s.VerifyFailed
+			ms.WorkType = string(s.WorkType)
+			ms.FilesChanged = s.FilesChanged
+		}
+		milestones = append(milestones, ms)
+	}
+
+	// Build recent history (last 5)
+	type histItem struct {
+		Action    string `json:"action"`
+		Milestone string `json:"milestone,omitempty"`
+		Success   bool   `json:"success"`
+		WorkType  string `json:"work_type,omitempty"`
+		Output    string `json:"output,omitempty"`
+	}
+	var recentHistory []histItem
+	start := len(history) - 5
+	if start < 0 {
+		start = 0
+	}
+	for _, h := range history[start:] {
+		item := histItem{
+			Action:    string(h.Action.Type),
+			Milestone: h.Action.MilestoneID,
+			WorkType:  string(h.WorkType),
+		}
+		if h.Result != nil {
+			item.Success = h.Result.Success
+			item.Output = truncateTail(h.Result.Output, 500)
+		}
+		recentHistory = append(recentHistory, item)
+	}
+
+	// Determine why we're asking the AI (ambiguity reason)
+	ambiguityReason := "Smart rules could not determine the next action"
+	if len(history) > 0 {
+		last := history[len(history)-1]
+		if last.Action.Type == actionVerify && last.Result != nil && !last.Result.Success {
+			// Find which milestone
+			var targetMS string
+			for i := len(history) - 1; i >= 0; i-- {
+				if history[i].Action.Type == actionImplementMilestone && history[i].Action.MilestoneID != "" {
+					targetMS = history[i].Action.MilestoneID
+					break
+				}
+			}
+			if targetMS != "" {
+				if s, ok := msStates[targetMS]; ok && s.VerifyFailed >= 2 {
+					ambiguityReason = fmt.Sprintf("%s failed verification %d times — consider REPLAN or DEBUG", targetMS, s.VerifyFailed)
+				}
+			}
+		}
+	}
+
+	state := map[string]interface{}{
+		"tasks_done":       report.TaskCounts["done"],
+		"tasks_total":      report.TaskCounts["total"],
+		"milestone_states": milestones,
+		"has_followup":     hasFwlup,
+		"blocker_count":    len(report.Blockers),
+		"last_5_actions":   recentHistory,
+		"ambiguity_reason": ambiguityReason,
+	}
+	if cfg.From != "" {
+		state["milestone_from"] = cfg.From
+	}
+	if cfg.To != "" {
+		state["milestone_to"] = cfg.To
+	}
+	if lastOutput != "" {
+		state["previous_output"] = truncateTail(lastOutput, 1500)
+	}
+
+	stateJSON, err := json.Marshal(state)
+	if err != nil {
+		return nil, fmt.Errorf("marshal state: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`You are a loop controller for an automated feature implementation system.
+You are ONLY called for ambiguous cases — simple decisions are already handled by deterministic rules.
+
+STATE:
+%s
+
+AVAILABLE ACTIONS:
+- IMPLEMENT_MILESTONE: Implement next incomplete milestone (set milestone_id)
+- IMPLEMENT_NEXT: Fix follow-up tasks or issues found during verification
+- VERIFY: Run verification on completed milestones
+- REPLAN: Re-run tech planning when current approach has systemic issues
+- DEBUG: Run automated debugging when verification keeps failing on recurring issues
+- SKIP_MILESTONE: Skip a blocked milestone (set milestone_id)
+- COMPLETE: All work in scope is done and verified
+- PAUSE: Stop for human intervention
+
+HARD RULES:
+1. You are ONLY called for ambiguous cases — simple decisions are already handled.
+2. Never skip verification for frontend/UI milestones.
+3. If verification failed 2+ times on the SAME issue, choose REPLAN or DEBUG.
+4. If verification failed on DIFFERENT issues each time, one more VERIFY is reasonable.
+5. If a milestone has recurring failures across multiple cycles, use DEBUG.
+6. Use SKIP_MILESTONE only when a milestone truly cannot proceed due to external blockers.
+7. If all milestones in range are done+verified with no follow-ups, COMPLETE.
+
+Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"..."}`, string(stateJSON))
+
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("tool execution: %w (output: %s)", err, truncateTail(string(output), 200))
+	}
+
+	decisionJSON, err := extractDecisionJSON(string(output), cfg.Tool)
+	if err != nil {
+		return nil, fmt.Errorf("parse response: %w", err)
+	}
+
+	var decision aiDecision
+	if err := json.Unmarshal([]byte(decisionJSON), &decision); err != nil {
+		return nil, fmt.Errorf("unmarshal decision: %w", err)
+	}
+
+	// Validate action type
+	actionType := loopActionType(decision.Action)
+	switch actionType {
+	case actionImplementMilestone, actionImplementNext, actionVerify,
+		actionReplan, actionSkipMilestone, actionComplete, actionPause, actionDebug:
+		// valid
+	default:
+		return nil, fmt.Errorf("unknown action %q from AI", decision.Action)
+	}
+
+	// Validate milestone_id required for certain actions
+	if (actionType == actionImplementMilestone || actionType == actionSkipMilestone) && decision.MilestoneID == "" {
+		return nil, fmt.Errorf("action %s requires milestone_id", actionType)
+	}
+
+	return &loopAction{
+		Type:        actionType,
+		Reason:      decision.Reason,
+		MilestoneID: decision.MilestoneID,
+	}, nil
+}
+
+// buildToolCommand creates an exec.Cmd for the given tool with a prompt.
+// Used by both AI decision calls and action execution.
+func buildToolCommand(tool, prompt, root string) *exec.Cmd {
+	var cmd *exec.Cmd
+	switch tool {
+	case "claude":
+		cmd = exec.Command("claude", "-p", prompt,
+			"--permission-mode", "bypassPermissions",
+			"--output-format", "json")
+	case "codex":
+		cmd = exec.Command("codex", "exec", prompt,
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--json", "-C", root)
+	case "gemini":
+		cmd = exec.Command("gemini", prompt,
+			"--yolo", "--output-format", "json")
+	case "copilot":
+		cmd = exec.Command("copilot", "-p", prompt, "--yolo")
+	case "cursor":
+		cmd = exec.Command("cursor", "agent", "-p", prompt,
+			"--force", "--output-format", "json")
+	default:
+		cmd = exec.Command("echo", "unsupported tool")
+	}
+	cmd.Dir = root
+	return cmd
+}
+
+// extractDecisionJSON finds the JSON object in tool output.
+// Tools may wrap output in their own JSON structure.
+func extractDecisionJSON(output, tool string) (string, error) {
+	// For tools that return JSON wrapper (claude, codex, gemini, cursor),
+	// try to extract the text content first
+	text := output
+
+	// Try to extract result text from claude's JSON wrapper
+	if tool == "claude" || tool == "codex" || tool == "gemini" || tool == "cursor" {
+		var wrapper struct {
+			Result string `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(output), &wrapper); err == nil && wrapper.Result != "" {
+			text = wrapper.Result
+		}
+	}
+
+	// Find the JSON object with action field
+	re := regexp.MustCompile(`\{[^{}]*"action"\s*:\s*"[^"]+?"[^{}]*\}`)
+	match := re.FindString(text)
+	if match == "" {
+		return "", fmt.Errorf("no decision JSON found in output: %s", truncateTail(text, 200))
+	}
+	return match, nil
+}
+
+// truncateTail returns the last maxLen characters of s.
+func truncateTail(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[len(s)-maxLen:]
+}
+
+// skipMilestoneInProgress marks a milestone as done in PROGRESS.md.
+func skipMilestoneInProgress(root, feature, milestoneID string) error {
+	progressPath := filepath.Join(root, ".belmont", "features", feature, "PROGRESS.md")
+	content, err := os.ReadFile(progressPath)
+	if err != nil {
+		return fmt.Errorf("read PROGRESS.md: %w", err)
+	}
+
+	// Replace [ ] with [x] for the matching milestone line
+	re := regexp.MustCompile(`(?im)(^- \[ \]\s+` + regexp.QuoteMeta(milestoneID) + `\b.*)`)
+	updated := re.ReplaceAllString(string(content), "- [x] "+milestoneID+" (skipped)")
+
+	if updated == string(content) {
+		return fmt.Errorf("milestone %s not found or already done", milestoneID)
+	}
+
+	return os.WriteFile(progressPath, []byte(updated), 0644)
+}
+
+func detectFwlupTasks(root, feature string, report statusReport) bool {
+	prdPath := filepath.Join(root, ".belmont", "features", feature, "PRD.md")
+	prdContent, err := os.ReadFile(prdPath)
+	if err != nil {
+		return false
+	}
+
+	prd := string(prdContent)
+	fwlupRe := regexp.MustCompile(`(?i)FWLUP`)
+	if !fwlupRe.MatchString(prd) {
+		return false
+	}
+
+	// Check if any pending/in_progress tasks have FWLUP in their ID or name
+	for _, t := range report.Tasks {
+		if t.Status == taskPending || t.Status == taskInProgress {
+			if fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+

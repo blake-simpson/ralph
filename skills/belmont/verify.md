@@ -240,10 +240,15 @@ After both agents complete:
    - **Suggestions** - Nice to have improvements
 
 ### Create Follow-up Tasks
+
+> **⚠️ FOLLOW-UP PLACEMENT RULE — READ THIS BEFORE MODIFYING PROGRESS.md:**
+>
+> Follow-up tasks go into their **source milestone** (the milestone where the issue was found). You MUST NOT create new milestones. Even if existing PROGRESS.md shows a pattern of follow-up milestones (e.g., "M19: Follow-ups"), that pattern is WRONG — do not replicate it. Insert follow-ups directly into the original milestone and revert its ✅ to ⬜.
+
 If any issues were found by either agent:
-1. Add new tasks to `{base}/PRD.md` for each critical or warning issue:
+1. Add new tasks to `{base}/PRD.md` for each critical or warning issue. Use the **source milestone's ID** in the task ID (e.g., if the issue was found in M17, use `P1-M17-FWLUP-X`):
    ```markdown
-   ### P0-X-FWLUP: [Issue Description] 🔵
+   ### P1-M17-FWLUP-1: [Issue Description] 🔵
    **Severity**: [Based on issue category]
    **Source**: [verification-agent / code-review-agent]
 
@@ -256,12 +261,15 @@ If any issues were found by either agent:
    **Verification**:
    1. [Steps to verify the fix]
    ```
-2. Add the follow-up tasks to a milestone in `{base}/PROGRESS.md`:
-   - If a **pending** (⬜) milestone exists, add them to the last pending milestone
-   - If **all milestones are complete** (✅), create a **new milestone** with the next sequential number (e.g., if M9 is the last, create `### ⬜ M10: Follow-ups`) and add them there
+2. Add follow-up tasks to `{base}/PROGRESS.md`. **Placement rules (mandatory, no exceptions):**
+   - Determine which milestone each issue belongs to based on the tasks/code that were verified
+   - Insert each follow-up task under its **source milestone** (e.g., M17 issue → add under M17's task list)
+   - Change that milestone's status from `✅` to `⬜` (e.g., `### ✅ M17:` becomes `### ⬜ M17:`)
+   - When verifying multiple milestones (e.g., M17+M18+M19), distribute follow-ups to their respective milestones — do NOT group them together
+   - **DO NOT create any new milestone headings** — no "M20: Follow-ups", no "MX: Verification Fixes", no "MX: Design Fidelity Fixes". This is forbidden because it causes automated loop controllers to enter infinite cycles
+   - If the source milestone is truly ambiguous, add to the last pending (⬜) milestone that already exists
    - Follow-up tasks MUST live inside a milestone heading — never in a freestanding section outside the milestones structure
 3. If critical issues were found, update the overall status to reflect this
-4. If a new milestone was created, revert the overall status from `✅ Complete` to `🟡 In Progress`
 5. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
    ```
    # Progress: [Product Name from .belmont/PRD.md]
