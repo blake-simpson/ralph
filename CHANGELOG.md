@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.6.0
+
+**Released:** 2026-03-10
+
+### Changes since v0.5.1
+
+- Add smart rules engine to loop decision system
+- Align README style
+- Reorganize README into focused overview with docs/ reference pages
+
+
+
 ## v0.5.1
 
 **Released:** 2026-02-24
