@@ -78,13 +78,14 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 ### Key directories
 
 - `cmd/belmont/main.go` — Single-file Go CLI. All logic lives here (status parsing, tree/find/search, installer, updater). No external dependencies.
-- `cmd/belmont/embed.go` — `//go:embed` directives for release builds (build tag: `embed`). Embeds `skills/` and `agents/` into the binary.
+- `cmd/belmont/embed.go` — `//go:embed` directives for release builds (build tag: `embed`). Embeds `skills/`, `agents/`, and `prompts/` into the binary.
 - `cmd/belmont/embed_dev.go` — Empty embed vars for dev builds (build tag: `!embed`). Allows `go run` without embedded content.
 - `skills/belmont/` — Skill markdown files (product-plan, tech-plan, implement, next, verify, status, reset). These are the source-of-truth copied/linked into target projects.
 - `skills/belmont/_partials/` — Shared content blocks used by skill templates (identity-preamble, forbidden-actions, progress-template, dispatch-strategy).
 - `skills/belmont/_src/` — Skill template files with `@include` directives. Processed by `generate-skills.sh` to produce `skills/belmont/*.md`.
-- `agents/belmont/` — Agent instruction markdown files (codebase-agent, design-agent, implementation-agent, verification-agent, code-review-agent). Copied into target projects.
-- `scripts/build.sh` — Regenerates skills from templates, copies skills/agents into `cmd/belmont/`, builds with `-tags embed` and ldflags version injection, then cleans up.
+- `agents/belmont/` — Agent instruction markdown files (codebase-agent, design-agent, implementation-agent, verification-agent, code-review-agent, reconciliation-agent). Copied into target projects.
+- `prompts/belmont/` — AI prompt templates used by the CLI (e.g. `ai-decision.md`). Loaded via Go `text/template` with dynamic context injection. Embedded in release builds.
+- `scripts/build.sh` — Regenerates skills from templates, copies skills/agents/prompts into `cmd/belmont/`, builds with `-tags embed` and ldflags version injection, then cleans up.
 - `scripts/release.sh` — Regenerates skills, verifies build, generates CHANGELOG entry, commits, creates annotated git tag.
 - `scripts/generate-skills.sh` — Generates skill files from `_src/` templates + `_partials/`. Supports `--check` to verify files are up to date.
 - `.github/workflows/release.yml` — GitHub Actions: cross-compile on tag push, create GitHub Release with binaries.
@@ -108,4 +109,4 @@ Source resolution order (source mode only): `--source` flag > `BELMONT_SOURCE` e
 
 ### CLI commands
 
-The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `loop`, `tree`, `find`, `search`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. The `loop` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. The `update` command self-updates by downloading the latest release from GitHub.
+The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `auto` (alias: `loop`), `tree`, `find`, `search`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. The `auto` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. It supports milestone dependencies with `(depends: M1)` syntax in PROGRESS.md, enabling parallel execution via git worktrees when milestones are independent. The `update` command self-updates by downloading the latest release from GitHub.

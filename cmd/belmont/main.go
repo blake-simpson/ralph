@@ -13,12 +13,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
+	"text/template"
 	"time"
 )
 
@@ -47,6 +51,7 @@ type milestone struct {
 	ID   string
 	Name string
 	Done bool
+	Deps []string // e.g. ["M1", "M3"] — nil for no explicit deps
 }
 
 type featureSummary struct {
@@ -190,12 +195,25 @@ type loopConfig struct {
 	Policy        checkpointPolicy
 	MaxIterations int
 	MaxFailures   int
+	MaxParallel   int
 }
 
 type aiDecision struct {
 	Action      string `json:"action"`
 	Reason      string `json:"reason"`
 	MilestoneID string `json:"milestone_id,omitempty"`
+}
+
+type reconciliationFile struct {
+	File            string `json:"file"`
+	Confidence      string `json:"confidence"`
+	Reason          string `json:"reason"`
+	ConflictSummary string `json:"conflict_summary"`
+	ResolvedContent string `json:"resolved_content"`
+}
+
+type reconciliationReport struct {
+	Files []reconciliationFile `json:"files"`
 }
 
 func main() {
@@ -223,8 +241,8 @@ func main() {
 		must(runFind(os.Args[2:]))
 	case "search":
 		must(runSearch(os.Args[2:]))
-	case "loop":
-		must(runLoopCmd(os.Args[2:]))
+	case "auto", "loop":
+		must(runAutoCmd(os.Args[2:]))
 	case "install":
 		must(runInstall(os.Args[2:]))
 	case "update":
@@ -251,7 +269,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont tree [--root PATH] [--max-depth N] [--max-entries N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont find --name QUERY [--root PATH] [--regex] [--type file|dir|any] [--limit N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont search --pattern REGEX [--root PATH] [--limit N] [--format text|json]")
-	fmt.Fprintln(w, "  belmont loop --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--root PATH]")
+	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--root PATH]")
+	fmt.Fprintln(w, "    (alias: belmont loop)")
 	fmt.Fprintln(w, "  belmont version")
 }
 
@@ -615,6 +634,7 @@ func lastCompletedTask(tasks []task) *task {
 
 func parseMilestones(progress string) []milestone {
 	re := regexp.MustCompile(`(?m)^###\s+([✅⬜🔄🚫])?\s*M(\d+):\s*(.+)$`)
+	depsRe := regexp.MustCompile(`\(depends:\s*(M[\d]+(?:\s*,\s*M[\d]+)*)\)\s*$`)
 	matches := re.FindAllStringSubmatch(progress, -1)
 	milestones := make([]milestone, 0, len(matches))
 	for _, match := range matches {
@@ -625,7 +645,17 @@ func parseMilestones(progress string) []milestone {
 		id := "M" + strings.TrimSpace(match[2])
 		name := strings.TrimSpace(match[3])
 		done := marker == "✅"
-		milestones = append(milestones, milestone{ID: id, Name: name, Done: done})
+
+		// Extract dependency annotations from name
+		var deps []string
+		if depsMatch := depsRe.FindStringSubmatch(name); len(depsMatch) >= 2 {
+			name = strings.TrimSpace(depsRe.ReplaceAllString(name, ""))
+			for _, d := range strings.Split(depsMatch[1], ",") {
+				deps = append(deps, strings.TrimSpace(d))
+			}
+		}
+
+		milestones = append(milestones, milestone{ID: id, Name: name, Done: done, Deps: deps})
 	}
 	return milestones
 }
@@ -2479,8 +2509,8 @@ func isNewer(remote, local string) bool {
 
 // ── Loop command ──
 
-func runLoopCmd(args []string) error {
-	fs := flag.NewFlagSet("loop", flag.ContinueOnError)
+func runAutoCmd(args []string) error {
+	fs := flag.NewFlagSet("auto", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 
 	var cfg loopConfig
@@ -2492,21 +2522,22 @@ func runLoopCmd(args []string) error {
 	fs.StringVar(&policyStr, "policy", "autonomous", "checkpoint policy (autonomous|milestone|every_action)")
 	fs.IntVar(&cfg.MaxIterations, "max-iterations", 20, "maximum loop iterations")
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
+	fs.IntVar(&cfg.MaxParallel, "max-parallel", 3, "max concurrent milestone goroutines for parallel execution")
 	fs.StringVar(&cfg.Root, "root", ".", "project root")
 
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("loop: %w", err)
+		return fmt.Errorf("auto: %w", err)
 	}
 
 	if cfg.Feature == "" {
-		return fmt.Errorf("loop: --feature is required")
+		return fmt.Errorf("auto: --feature is required")
 	}
 
 	switch checkpointPolicy(policyStr) {
 	case policyAutonomous, policyMilestone, policyEveryAction:
 		cfg.Policy = checkpointPolicy(policyStr)
 	default:
-		return fmt.Errorf("loop: invalid --policy %q (use autonomous, milestone, or every_action)", policyStr)
+		return fmt.Errorf("auto: invalid --policy %q (use autonomous, milestone, or every_action)", policyStr)
 	}
 
 	absRoot, err := filepath.Abs(cfg.Root)
@@ -2518,14 +2549,14 @@ func runLoopCmd(args []string) error {
 	// Verify feature directory exists
 	featureDir := filepath.Join(absRoot, ".belmont", "features", cfg.Feature)
 	if !dirExists(featureDir) {
-		return fmt.Errorf("loop: feature %q not found at %s", cfg.Feature, featureDir)
+		return fmt.Errorf("auto: feature %q not found at %s", cfg.Feature, featureDir)
 	}
 
 	// Auto-detect tool if not specified
 	if cfg.Tool == "" {
 		detected := detectTool()
 		if detected == "" {
-			return fmt.Errorf("loop: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+			return fmt.Errorf("auto: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
 		}
 		cfg.Tool = detected
 	} else {
@@ -2534,8 +2565,40 @@ func runLoopCmd(args []string) error {
 		case "claude", "codex", "gemini", "copilot", "cursor":
 			// ok
 		default:
-			return fmt.Errorf("loop: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", cfg.Tool)
+			return fmt.Errorf("auto: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", cfg.Tool)
 		}
+	}
+
+	// Read milestones and check for dependency syntax
+	progressPath := filepath.Join(absRoot, ".belmont", "features", cfg.Feature, "PROGRESS.md")
+	progressContent, err := os.ReadFile(progressPath)
+	if err != nil {
+		return fmt.Errorf("auto: failed to read PROGRESS.md: %w", err)
+	}
+	milestones := parseMilestones(string(progressContent))
+	inRange := milestonesInRange(milestones, cfg.From, cfg.To)
+
+	// Interactive milestone selection when stdin is a terminal and no --from/--to
+	if cfg.From == "" && cfg.To == "" && isTerminal(os.Stdin) {
+		selectedFrom, selectedTo, err := interactiveMilestoneSelect(inRange)
+		if err != nil {
+			return err
+		}
+		cfg.From = selectedFrom
+		cfg.To = selectedTo
+	}
+
+	// Check if any milestones have explicit dependencies
+	hasExplicitDeps := false
+	for _, m := range inRange {
+		if len(m.Deps) > 0 {
+			hasExplicitDeps = true
+			break
+		}
+	}
+
+	if hasExplicitDeps {
+		return runAutoParallel(cfg, inRange)
 	}
 
 	return runLoop(cfg)
@@ -2555,7 +2618,7 @@ func runLoop(cfg loopConfig) error {
 	var history []historyEntry
 	var lastOutput string
 
-	fmt.Fprintf(os.Stderr, "\033[1mBelmont Loop — %s\033[0m\n", cfg.Feature)
+	fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto — %s\033[0m\n", cfg.Feature)
 	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Policy: %s | Max iterations: %d\033[0m\n", cfg.Tool, cfg.Policy, cfg.MaxIterations)
 	if cfg.From != "" || cfg.To != "" {
 		fromStr := cfg.From
@@ -2575,7 +2638,7 @@ func runLoop(cfg loopConfig) error {
 		report, err := buildStatus(cfg.Root, 55, cfg.Feature)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\033[31mFailed to read state: %s\033[0m\n", err)
-			return fmt.Errorf("loop: state read failed: %w", err)
+			return fmt.Errorf("auto: state read failed: %w", err)
 		}
 
 		// 2. Derive extra signals
@@ -2621,11 +2684,11 @@ func runLoop(cfg loopConfig) error {
 		}
 		if action.Type == actionError {
 			fmt.Fprintf(os.Stderr, "\n\033[31m✗ Error\033[0m — %s\n", action.Reason)
-			return fmt.Errorf("loop: %s", action.Reason)
+			return fmt.Errorf("auto: %s", action.Reason)
 		}
 		if action.Type == actionPause {
 			fmt.Fprintf(os.Stderr, "\n\033[33m⏸ Paused\033[0m — %s\n", action.Reason)
-			fmt.Fprintf(os.Stderr, "Resume with: belmont loop --feature %s", cfg.Feature)
+			fmt.Fprintf(os.Stderr, "Resume with: belmont auto --feature %s", cfg.Feature)
 			if cfg.From != "" {
 				fmt.Fprintf(os.Stderr, " --from %s", cfg.From)
 			}
@@ -2662,7 +2725,7 @@ func runLoop(cfg loopConfig) error {
 		// 7. Checkpoint policy check
 		if shouldLoopCheckpoint(*action, cfg.Policy, lastActionType(history)) {
 			fmt.Fprintf(os.Stderr, "\n\033[33m⏸ Checkpoint\033[0m — %s\n", action.Reason)
-			fmt.Fprintf(os.Stderr, "Resume with: belmont loop --feature %s", cfg.Feature)
+			fmt.Fprintf(os.Stderr, "Resume with: belmont auto --feature %s", cfg.Feature)
 			if cfg.From != "" {
 				fmt.Fprintf(os.Stderr, " --from %s", cfg.From)
 			}
@@ -3594,7 +3657,12 @@ func decideLoopActionAI(report statusReport, history []historyEntry, cfg loopCon
 		return nil, fmt.Errorf("marshal state: %w", err)
 	}
 
-	prompt := fmt.Sprintf(`You are a loop controller for an automated feature implementation system.
+	// Load prompt template
+	tmpl, tmplErr := loadPromptTemplate("ai-decision")
+	var prompt string
+	if tmplErr != nil {
+		// Fallback to inline prompt if template not found
+		prompt = fmt.Sprintf(`You are a loop controller for an automated feature implementation system.
 You are ONLY called for ambiguous cases — simple decisions are already handled by deterministic rules.
 
 STATE:
@@ -3620,6 +3688,13 @@ HARD RULES:
 7. If all milestones in range are done+verified with no follow-ups, COMPLETE.
 
 Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"..."}`, string(stateJSON))
+	} else {
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, map[string]string{"StateJSON": string(stateJSON)}); err != nil {
+			return nil, fmt.Errorf("execute prompt template: %w", err)
+		}
+		prompt = buf.String()
+	}
 
 	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
 	output, err := cmd.CombinedOutput()
@@ -3762,5 +3837,876 @@ func detectFwlupTasks(root, feature string, report statusReport) bool {
 		}
 	}
 	return false
+}
+
+// loadPromptTemplate loads a prompt template from embedded FS or source filesystem.
+func loadPromptTemplate(name string) (*template.Template, error) {
+	filename := name + ".md"
+
+	// Try embedded first
+	if hasEmbeddedFiles {
+		data, err := fs.ReadFile(embeddedPrompts, filepath.Join("prompts", "belmont", filename))
+		if err == nil {
+			return template.New(name).Parse(string(data))
+		}
+	}
+
+	// Try source resolution
+	sourceRoot := resolveSourceForPrompts()
+	if sourceRoot == "" {
+		return nil, fmt.Errorf("prompt %q: no embedded files and no source directory found", name)
+	}
+
+	data, err := os.ReadFile(filepath.Join(sourceRoot, "prompts", "belmont", filename))
+	if err != nil {
+		return nil, fmt.Errorf("prompt %q: %w", name, err)
+	}
+	return template.New(name).Parse(string(data))
+}
+
+// resolveSourceForPrompts returns the belmont source directory path, or "" if not found.
+func resolveSourceForPrompts() string {
+	if src := os.Getenv("BELMONT_SOURCE"); src != "" {
+		return src
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err == nil {
+		configPath := filepath.Join(configDir, "belmont", "config.json")
+		if data, err := os.ReadFile(configPath); err == nil {
+			var cfg config
+			if json.Unmarshal(data, &cfg) == nil && cfg.Source != "" {
+				return cfg.Source
+			}
+		}
+	}
+
+	// Walk up from binary location
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Dir(exe)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "prompts", "belmont")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
+}
+
+// isTerminal returns true if the given file is a terminal.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// interactiveMilestoneSelect shows milestones and lets user pick a range.
+func interactiveMilestoneSelect(milestones []milestone) (from, to string, err error) {
+	if len(milestones) == 0 {
+		return "", "", nil
+	}
+
+	fmt.Fprintf(os.Stderr, "\033[1mMilestones:\033[0m\n")
+	firstUndone := ""
+	for _, m := range milestones {
+		marker := "⬜"
+		if m.Done {
+			marker = "✅"
+		}
+		if !m.Done && firstUndone == "" {
+			firstUndone = m.ID
+		}
+		depStr := ""
+		if len(m.Deps) > 0 {
+			depStr = fmt.Sprintf(" \033[2m(depends: %s)\033[0m", strings.Join(m.Deps, ", "))
+		}
+		fmt.Fprintf(os.Stderr, "  %s %s: %s%s\n", marker, m.ID, m.Name, depStr)
+	}
+
+	lastID := milestones[len(milestones)-1].ID
+	defaultRange := ""
+	if firstUndone != "" {
+		defaultRange = fmt.Sprintf("%s → %s", firstUndone, lastID)
+	}
+
+	fmt.Fprintf(os.Stderr, "\n\033[2mDefault range: %s\033[0m\n", defaultRange)
+	fmt.Fprintf(os.Stderr, "Press Enter to accept, 'q' to quit, or enter range (e.g. M2 M5): ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return "", "", fmt.Errorf("auto: no input")
+	}
+	input := strings.TrimSpace(scanner.Text())
+
+	if input == "q" || input == "quit" || input == "exit" {
+		return "", "", fmt.Errorf("auto: cancelled by user")
+	}
+
+	if input == "" {
+		// Accept defaults
+		return "", "", nil
+	}
+
+	// Parse custom range
+	parts := strings.Fields(input)
+	if len(parts) == 1 {
+		return parts[0], parts[0], nil
+	}
+	if len(parts) == 2 {
+		return parts[0], parts[1], nil
+	}
+
+	return "", "", fmt.Errorf("auto: invalid range %q — use 'M2 M5' format", input)
+}
+
+// wave represents a group of milestones that can execute in parallel.
+type wave struct {
+	Index      int
+	Milestones []milestone
+}
+
+// computeWaves groups milestones into waves using Kahn's algorithm for topological sort.
+// Milestones in the same wave have all deps satisfied by prior waves.
+// Already-done milestones satisfy deps but don't execute.
+func computeWaves(milestones []milestone) ([]wave, error) {
+	if len(milestones) == 0 {
+		return nil, nil
+	}
+
+	// Build ID -> milestone map
+	byID := make(map[string]milestone)
+	for _, m := range milestones {
+		byID[m.ID] = m
+	}
+
+	// Compute in-degree for each undone milestone
+	inDegree := make(map[string]int)
+	for _, m := range milestones {
+		if m.Done {
+			continue
+		}
+		count := 0
+		for _, dep := range m.Deps {
+			if dm, ok := byID[dep]; ok && !dm.Done {
+				count++
+			}
+		}
+		inDegree[m.ID] = count
+	}
+
+	var waves []wave
+	remaining := len(inDegree)
+	waveIdx := 0
+
+	for remaining > 0 {
+		// Find all milestones with zero in-degree
+		var ready []milestone
+		for id, deg := range inDegree {
+			if deg == 0 {
+				ready = append(ready, byID[id])
+			}
+		}
+
+		if len(ready) == 0 {
+			// Cycle detected
+			var cycleIDs []string
+			for id := range inDegree {
+				cycleIDs = append(cycleIDs, id)
+			}
+			sort.Strings(cycleIDs)
+			return nil, fmt.Errorf("dependency cycle detected among milestones: %s", strings.Join(cycleIDs, ", "))
+		}
+
+		// Sort ready milestones by ID for deterministic ordering
+		sort.Slice(ready, func(i, j int) bool {
+			return parseMilestoneNum(ready[i].ID) < parseMilestoneNum(ready[j].ID)
+		})
+
+		waves = append(waves, wave{Index: waveIdx, Milestones: ready})
+		waveIdx++
+
+		// Remove completed milestones and update in-degrees
+		for _, m := range ready {
+			delete(inDegree, m.ID)
+			remaining--
+		}
+		for id, deg := range inDegree {
+			m := byID[id]
+			newDeg := deg
+			for _, dep := range m.Deps {
+				for _, completed := range ready {
+					if dep == completed.ID {
+						newDeg--
+					}
+				}
+			}
+			inDegree[id] = newDeg
+		}
+	}
+
+	return waves, nil
+}
+
+// runAutoParallel executes milestones with dependency-aware parallel waves using worktrees.
+func runAutoParallel(cfg loopConfig, milestones []milestone) error {
+	startTime := time.Now()
+
+	// Ensure .belmont/worktrees/ is in .gitignore
+	ensureWorktreesGitignore(cfg.Root)
+
+	fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (parallel) — %s\033[0m\n", cfg.Feature)
+	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Max parallel: %d\033[0m\n", cfg.Tool, cfg.MaxParallel)
+
+	waves, err := computeWaves(milestones)
+	if err != nil {
+		return fmt.Errorf("auto: %w", err)
+	}
+
+	if len(waves) == 0 {
+		fmt.Fprintf(os.Stderr, "\n\033[32m✓ Complete\033[0m — all milestones already done\n")
+		return nil
+	}
+
+	// Print wave plan
+	fmt.Fprintf(os.Stderr, "\n\033[1mExecution plan:\033[0m\n")
+	for _, w := range waves {
+		var ids []string
+		for _, m := range w.Milestones {
+			ids = append(ids, m.ID)
+		}
+		parallel := ""
+		if len(w.Milestones) > 1 {
+			parallel = " (parallel)"
+		}
+		fmt.Fprintf(os.Stderr, "  Wave %d: %s%s\n", w.Index+1, strings.Join(ids, ", "), parallel)
+	}
+	fmt.Fprintln(os.Stderr)
+
+	// Set up signal handler for cleanup
+	activeWorktrees := &worktreeTracker{paths: make(map[string]string)}
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — cleaning up worktrees...\033[0m\n")
+		activeWorktrees.cleanupAll(cfg.Root)
+		os.Exit(1)
+	}()
+
+	for _, w := range waves {
+		fmt.Fprintf(os.Stderr, "\033[1m━━ Wave %d ━━\033[0m\n", w.Index+1)
+
+		if len(w.Milestones) == 1 {
+			// Single milestone: run directly in main tree
+			m := w.Milestones[0]
+			fmt.Fprintf(os.Stderr, "  Running %s: %s\n", m.ID, m.Name)
+			mCfg := cfg
+			mCfg.From = m.ID
+			mCfg.To = m.ID
+			if err := runLoop(mCfg); err != nil {
+				return fmt.Errorf("auto: wave %d, %s failed: %w", w.Index+1, m.ID, err)
+			}
+		} else {
+			// Multiple milestones: run in parallel via worktrees
+			if err := runWaveParallel(cfg, w, activeWorktrees); err != nil {
+				return err
+			}
+		}
+
+		fmt.Fprintf(os.Stderr, "\033[32m  ✓ Wave %d complete\033[0m\n\n", w.Index+1)
+	}
+
+	fmt.Fprintf(os.Stderr, "\n\033[32m✓ All waves complete\033[0m (%.1fs total)\n", time.Since(startTime).Seconds())
+	return nil
+}
+
+// worktreeTracker keeps track of active worktrees for cleanup on interrupt.
+type worktreeTracker struct {
+	mu    sync.Mutex
+	paths map[string]string // milestone ID -> worktree path
+}
+
+func (wt *worktreeTracker) add(milestoneID, path string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	wt.paths[milestoneID] = path
+}
+
+func (wt *worktreeTracker) remove(milestoneID string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	delete(wt.paths, milestoneID)
+}
+
+func (wt *worktreeTracker) cleanupAll(root string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	for mid, wtPath := range wt.paths {
+		fmt.Fprintf(os.Stderr, "  Cleaning up worktree for %s...\n", mid)
+		removeWorktree(root, wtPath, mid)
+	}
+	wt.paths = make(map[string]string)
+}
+
+// runWaveParallel runs multiple milestones in parallel using git worktrees.
+func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
+	semaphore := make(chan struct{}, cfg.MaxParallel)
+	var wg sync.WaitGroup
+
+	type result struct {
+		MilestoneID  string
+		Branch       string
+		WorktreePath string
+		Err          error
+	}
+	results := make(chan result, len(w.Milestones))
+
+	for _, m := range w.Milestones {
+		wg.Add(1)
+		go func(ms milestone) {
+			defer wg.Done()
+			semaphore <- struct{}{}        // acquire
+			defer func() { <-semaphore }() // release
+
+			branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(ms.ID))
+			wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(ms.ID)))
+
+			tracker.add(ms.ID, wtPath)
+
+			fmt.Fprintf(os.Stderr, "  \033[36m▶ %s: %s\033[0m (worktree)\n", ms.ID, ms.Name)
+
+			err := runMilestoneInWorktree(cfg, ms, branch, wtPath)
+			results <- result{
+				MilestoneID:  ms.ID,
+				Branch:       branch,
+				WorktreePath: wtPath,
+				Err:          err,
+			}
+		}(m)
+	}
+
+	// Wait for all goroutines then close results
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	var successes []result
+	var failures []result
+	for r := range results {
+		if r.Err != nil {
+			fmt.Fprintf(os.Stderr, "  \033[31m✗ %s failed: %s\033[0m\n", r.MilestoneID, r.Err)
+			failures = append(failures, r)
+		} else {
+			fmt.Fprintf(os.Stderr, "  \033[32m✓ %s complete\033[0m\n", r.MilestoneID)
+			successes = append(successes, r)
+		}
+	}
+
+	// Merge successful branches in milestone ID order
+	sort.Slice(successes, func(i, j int) bool {
+		return parseMilestoneNum(successes[i].MilestoneID) < parseMilestoneNum(successes[j].MilestoneID)
+	})
+
+	for _, s := range successes {
+		if err := mergeWorktreeBranch(cfg, s.MilestoneID, s.Branch, s.WorktreePath, tracker); err != nil {
+			return fmt.Errorf("auto: merge failed for %s: %w", s.MilestoneID, err)
+		}
+	}
+
+	// Clean up failed worktrees (preserve for manual intervention)
+	if len(failures) > 0 {
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ %d milestone(s) failed in wave %d:\033[0m\n", len(failures), w.Index+1)
+		for _, f := range failures {
+			fmt.Fprintf(os.Stderr, "  %s: worktree preserved at %s\n", f.MilestoneID, f.WorktreePath)
+			fmt.Fprintf(os.Stderr, "    Resume: cd %s && belmont auto --feature %s --from %s --to %s\n", f.WorktreePath, cfg.Feature, f.MilestoneID, f.MilestoneID)
+		}
+		return fmt.Errorf("auto: wave %d had %d failure(s)", w.Index+1, len(failures))
+	}
+
+	return nil
+}
+
+// runMilestoneInWorktree creates a worktree, installs belmont, copies state, and runs the loop.
+func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string) error {
+	// Create worktree directory
+	wtDir := filepath.Dir(wtPath)
+	if err := os.MkdirAll(wtDir, 0755); err != nil {
+		return fmt.Errorf("create worktree dir: %w", err)
+	}
+
+	// Create git worktree
+	cmd := exec.Command("git", "worktree", "add", "-b", branch, wtPath, "HEAD")
+	cmd.Dir = cfg.Root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+
+	// Copy .belmont/features/<slug>/ state to worktree
+	srcFeatureDir := filepath.Join(cfg.Root, ".belmont", "features", cfg.Feature)
+	dstFeatureDir := filepath.Join(wtPath, ".belmont", "features", cfg.Feature)
+	if err := os.MkdirAll(dstFeatureDir, 0755); err != nil {
+		return fmt.Errorf("create feature dir in worktree: %w", err)
+	}
+	if err := copyDir(srcFeatureDir, dstFeatureDir); err != nil {
+		return fmt.Errorf("copy feature state: %w", err)
+	}
+
+	// Run belmont install in the worktree (shell out to self)
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find executable: %w", err)
+	}
+	installCmd := exec.Command(exePath, "install", "--project", wtPath, "--no-prompt")
+	installCmd.Dir = wtPath
+	if out, err := installCmd.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "    \033[33mInstall warning for %s: %s\033[0m\n", ms.ID, strings.TrimSpace(string(out)))
+	}
+
+	// Run loop for this single milestone
+	mCfg := cfg
+	mCfg.Root = wtPath
+	mCfg.From = ms.ID
+	mCfg.To = ms.ID
+
+	return runLoop(mCfg)
+}
+
+// mergeWorktreeBranch merges a milestone branch back and cleans up the worktree.
+func mergeWorktreeBranch(cfg loopConfig, milestoneID, branch, wtPath string, tracker *worktreeTracker) error {
+	// Find the milestone name for the commit message
+	var msName string
+	progressPath := filepath.Join(cfg.Root, ".belmont", "features", cfg.Feature, "PROGRESS.md")
+	if data, err := os.ReadFile(progressPath); err == nil {
+		for _, m := range parseMilestones(string(data)) {
+			if m.ID == milestoneID {
+				msName = m.Name
+				break
+			}
+		}
+	}
+
+	commitMsg := fmt.Sprintf("belmont: merge %s (%s)", milestoneID, msName)
+	cmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
+	cmd.Dir = cfg.Root
+	out, err := cmd.CombinedOutput()
+
+	if err != nil {
+		// Merge conflict — try reconciliation agent
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Merge conflict for %s — invoking reconciliation agent...\033[0m\n", milestoneID)
+
+		reconcileErr := runReconciliationAgent(cfg, milestoneID, branch)
+		if reconcileErr != nil {
+			// Abort merge and preserve worktree
+			abortCmd := exec.Command("git", "merge", "--abort")
+			abortCmd.Dir = cfg.Root
+			abortCmd.Run()
+
+			fmt.Fprintf(os.Stderr, "  \033[31m✗ Reconciliation failed for %s\033[0m\n", milestoneID)
+			fmt.Fprintf(os.Stderr, "    Worktree preserved at: %s\n", wtPath)
+			fmt.Fprintf(os.Stderr, "    Branch: %s\n", branch)
+			fmt.Fprintf(os.Stderr, "    Resolve manually and run: git merge --no-ff %s\n", branch)
+			return fmt.Errorf("merge conflict resolution failed for %s: %w", milestoneID, reconcileErr)
+		}
+
+		// Reconciliation succeeded — commit the merge
+		commitCmd := exec.Command("git", "commit", "-m", commitMsg)
+		commitCmd.Dir = cfg.Root
+		if _, commitErr := commitCmd.CombinedOutput(); commitErr != nil {
+			return fmt.Errorf("commit after reconciliation for %s: %w", milestoneID, commitErr)
+		}
+
+		fmt.Fprintf(os.Stderr, "  \033[32m✓ Reconciliation resolved merge conflict for %s\033[0m\n", milestoneID)
+	} else {
+		_ = out // merge succeeded
+	}
+
+	// Clean up reconciliation report if it exists
+	os.Remove(filepath.Join(cfg.Root, ".belmont", "reconciliation-report.json"))
+
+	// Clean up worktree and branch
+	removeWorktree(cfg.Root, wtPath, milestoneID)
+	tracker.remove(milestoneID)
+
+	// Delete the branch
+	delCmd := exec.Command("git", "branch", "-d", branch)
+	delCmd.Dir = cfg.Root
+	delCmd.Run() // best-effort
+
+	return nil
+}
+
+// runReconciliationAgent orchestrates two-pass merge conflict resolution.
+// Pass 1: AI analyzes conflicts and writes a structured report.
+// Pass 2: Go auto-applies high-confidence resolutions and prompts for low-confidence ones.
+// Falls back to legacy full-resolve if the report is invalid.
+func runReconciliationAgent(cfg loopConfig, milestoneID, branch string) error {
+	// Get list of conflicted files
+	conflictCmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	conflictCmd.Dir = cfg.Root
+	conflictOut, err := conflictCmd.Output()
+	if err != nil {
+		return fmt.Errorf("list conflicts: %w", err)
+	}
+
+	conflictedFiles := strings.TrimSpace(string(conflictOut))
+	if conflictedFiles == "" {
+		return fmt.Errorf("no conflicted files found")
+	}
+
+	reportPath := filepath.Join(cfg.Root, ".belmont", "reconciliation-report.json")
+
+	// Pass 1: AI analysis — writes structured report to disk
+	if err := runReconciliationAnalysis(cfg, milestoneID, branch, conflictedFiles, reportPath); err != nil {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Analysis failed, falling back to legacy resolve...\033[0m\n")
+		return runLegacyReconciliation(cfg, milestoneID, branch, conflictedFiles)
+	}
+
+	// Read and parse the report
+	report, err := parseReconciliationReport(reportPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Invalid report (%v), falling back to legacy resolve...\033[0m\n", err)
+		os.Remove(reportPath)
+		return runLegacyReconciliation(cfg, milestoneID, branch, conflictedFiles)
+	}
+
+	// Pass 2: Apply resolutions
+	if err := applyReconciliationReport(cfg, report); err != nil {
+		os.Remove(reportPath)
+		return err
+	}
+
+	// Verify no conflict markers remain
+	var resolvedFiles []string
+	for _, f := range report.Files {
+		resolvedFiles = append(resolvedFiles, f.File)
+	}
+	if err := verifyNoConflictMarkers(cfg.Root, resolvedFiles); err != nil {
+		os.Remove(reportPath)
+		return err
+	}
+
+	// Clean up report file
+	os.Remove(reportPath)
+	return nil
+}
+
+// runReconciliationAnalysis invokes the AI to analyze conflicts and write a JSON report.
+func runReconciliationAnalysis(cfg loopConfig, milestoneID, branch, conflictedFiles, reportPath string) error {
+	prompt := fmt.Sprintf(`You are a merge conflict analysis agent. Analyze all merge conflicts and write a structured JSON report.
+
+Conflicted files:
+%s
+
+Milestone: %s
+Branch: %s
+
+TASK: For each conflicted file, read it, analyze the conflict, and classify your confidence in resolving it.
+
+CONFIDENCE CRITERIA:
+- "high": Import merges, non-overlapping function additions, additive changes to different sections, formatting/comment changes
+- "low": Same function body modified by both sides, conflicting config values, structural changes to same type/interface, changes with potential semantic interaction
+
+Write a JSON file to: %s
+
+The JSON must have this exact structure:
+{
+  "files": [
+    {
+      "file": "path/to/file",
+      "confidence": "high" or "low",
+      "reason": "Why this confidence level",
+      "conflict_summary": "Brief: what Side A did vs what Side B did",
+      "resolved_content": "The complete resolved file content (no conflict markers)"
+    }
+  ]
+}
+
+RULES:
+1. Combine both sides — never choose one side over the other
+2. Include all imports from both sides (remove duplicates)
+3. Never delete functionality from either side
+4. The resolved_content must be the COMPLETE file with conflicts resolved
+5. Do NOT modify any files on disk — only write the JSON report
+6. Do NOT run git add — only write the report
+7. Include ALL conflicted files in the report`, conflictedFiles, milestoneID, branch, reportPath)
+
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// parseReconciliationReport reads and validates the JSON report file.
+func parseReconciliationReport(reportPath string) (reconciliationReport, error) {
+	var report reconciliationReport
+
+	data, err := os.ReadFile(reportPath)
+	if err != nil {
+		return report, fmt.Errorf("read report: %w", err)
+	}
+
+	if err := json.Unmarshal(data, &report); err != nil {
+		return report, fmt.Errorf("parse report: %w", err)
+	}
+
+	if len(report.Files) == 0 {
+		return report, fmt.Errorf("report contains no files")
+	}
+
+	// Validate each file entry
+	for i, f := range report.Files {
+		if f.File == "" {
+			return report, fmt.Errorf("file entry %d missing file path", i)
+		}
+		if f.Confidence != "high" && f.Confidence != "low" {
+			return report, fmt.Errorf("file %q has invalid confidence %q", f.File, f.Confidence)
+		}
+		if f.ResolvedContent == "" {
+			return report, fmt.Errorf("file %q has empty resolved_content", f.File)
+		}
+	}
+
+	return report, nil
+}
+
+// applyReconciliationReport applies resolved content from the report.
+// High-confidence files are auto-applied. Low-confidence files are shown
+// to the user interactively (if terminal) or auto-applied (if non-interactive).
+func applyReconciliationReport(cfg loopConfig, report reconciliationReport) error {
+	interactive := isTerminal(os.Stdin)
+	autoAll := false
+
+	var highCount, lowCount int
+	for _, f := range report.Files {
+		if f.Confidence == "high" {
+			highCount++
+		} else {
+			lowCount++
+		}
+	}
+
+	if highCount > 0 {
+		fmt.Fprintf(os.Stderr, "  \033[32m✓ Auto-applying %d high-confidence resolution(s)\033[0m\n", highCount)
+	}
+	if lowCount > 0 && interactive {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ %d file(s) need review\033[0m\n", lowCount)
+	}
+
+	for _, f := range report.Files {
+		filePath := filepath.Join(cfg.Root, f.File)
+
+		if f.Confidence == "high" || !interactive || autoAll {
+			// Auto-apply
+			if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+				return fmt.Errorf("write %s: %w", f.File, err)
+			}
+			addCmd := exec.Command("git", "add", f.File)
+			addCmd.Dir = cfg.Root
+			if err := addCmd.Run(); err != nil {
+				return fmt.Errorf("git add %s: %w", f.File, err)
+			}
+			continue
+		}
+
+		// Low confidence + interactive: prompt user
+		choice, err := reviewConflict(cfg.Root, f)
+		if err != nil {
+			return err
+		}
+
+		switch choice {
+		case "auto":
+			autoAll = true
+			// Apply this file and all remaining
+			if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+				return fmt.Errorf("write %s: %w", f.File, err)
+			}
+			addCmd := exec.Command("git", "add", f.File)
+			addCmd.Dir = cfg.Root
+			if err := addCmd.Run(); err != nil {
+				return fmt.Errorf("git add %s: %w", f.File, err)
+			}
+		case "accept", "edited":
+			// File already written by reviewConflict for "edited", write for "accept"
+			if choice == "accept" {
+				if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+					return fmt.Errorf("write %s: %w", f.File, err)
+				}
+			}
+			addCmd := exec.Command("git", "add", f.File)
+			addCmd.Dir = cfg.Root
+			if err := addCmd.Run(); err != nil {
+				return fmt.Errorf("git add %s: %w", f.File, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// reviewConflict prompts the user to review a low-confidence conflict resolution.
+func reviewConflict(root string, f reconciliationFile) (string, error) {
+	scanner := bufio.NewScanner(os.Stdin)
+
+	for {
+		fmt.Fprintf(os.Stderr, "\n  \033[1;33m⚠ Uncertain conflict in %s\033[0m\n", f.File)
+		fmt.Fprintf(os.Stderr, "    %s\n\n", f.Reason)
+		fmt.Fprintf(os.Stderr, "    %s\n\n", f.ConflictSummary)
+		fmt.Fprintf(os.Stderr, "    [a] Accept AI's resolution  [v] View proposed resolution\n")
+		fmt.Fprintf(os.Stderr, "    [e] Edit in $EDITOR         [s] Auto-resolve all remaining  [q] Abort\n\n")
+		fmt.Fprintf(os.Stderr, "    Choice [a]: ")
+
+		if !scanner.Scan() {
+			return "", fmt.Errorf("reconciliation: no input")
+		}
+		input := strings.TrimSpace(strings.ToLower(scanner.Text()))
+
+		if input == "" || input == "a" {
+			return "accept", nil
+		}
+
+		switch input {
+		case "v":
+			// Show resolved content with line numbers
+			fmt.Fprintf(os.Stderr, "\n    \033[2m--- Proposed resolution for %s ---\033[0m\n", f.File)
+			lines := strings.Split(f.ResolvedContent, "\n")
+			for i, line := range lines {
+				fmt.Fprintf(os.Stderr, "    \033[2m%4d\033[0m  %s\n", i+1, line)
+			}
+			fmt.Fprintf(os.Stderr, "    \033[2m--- End ---\033[0m\n")
+			// Re-prompt
+			continue
+
+		case "e":
+			// Write proposed resolution to file for editing
+			filePath := filepath.Join(root, f.File)
+			if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+				return "", fmt.Errorf("write for edit %s: %w", f.File, err)
+			}
+			editor := os.Getenv("EDITOR")
+			if editor == "" {
+				editor = "vi"
+			}
+			editorCmd := exec.Command(editor, filePath)
+			editorCmd.Stdin = os.Stdin
+			editorCmd.Stdout = os.Stdout
+			editorCmd.Stderr = os.Stderr
+			if err := editorCmd.Run(); err != nil {
+				return "", fmt.Errorf("editor for %s: %w", f.File, err)
+			}
+			return "edited", nil
+
+		case "s":
+			return "auto", nil
+
+		case "q":
+			return "", fmt.Errorf("reconciliation: aborted by user")
+
+		default:
+			fmt.Fprintf(os.Stderr, "    Invalid choice. Try again.\n")
+		}
+	}
+}
+
+// verifyNoConflictMarkers scans resolved files for leftover conflict markers.
+func verifyNoConflictMarkers(root string, files []string) error {
+	markers := []string{"<<<<<<<", "=======", ">>>>>>>"}
+	var badFiles []string
+
+	for _, file := range files {
+		data, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		for _, marker := range markers {
+			if strings.Contains(content, marker) {
+				badFiles = append(badFiles, file)
+				break
+			}
+		}
+	}
+
+	if len(badFiles) > 0 {
+		return fmt.Errorf("conflict markers remain in: %s", strings.Join(badFiles, ", "))
+	}
+	return nil
+}
+
+// runLegacyReconciliation is the fallback: AI resolves everything directly on disk.
+func runLegacyReconciliation(cfg loopConfig, milestoneID, branch, conflictedFiles string) error {
+	prompt := fmt.Sprintf(`You are a merge conflict reconciliation agent. Resolve all merge conflicts in the following files:
+
+Conflicted files:
+%s
+
+Milestone: %s
+Branch: %s
+
+Rules:
+1. Combine both sides — never choose one side over the other
+2. Include all imports from both sides (remove duplicates)
+3. Never delete functionality from either side
+4. Only modify conflicted files
+5. After resolving each file, run "git add <file>"
+6. Do NOT commit — the caller handles the commit
+
+Read each conflicted file, resolve the conflict markers, write the resolved version, and git add it.`, conflictedFiles, milestoneID, branch)
+
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// removeWorktree removes a git worktree and its directory.
+func removeWorktree(root, wtPath, _ string) {
+	cmd := exec.Command("git", "worktree", "remove", "--force", wtPath)
+	cmd.Dir = root
+	if err := cmd.Run(); err != nil {
+		// Try manual cleanup
+		os.RemoveAll(wtPath)
+		pruneCmd := exec.Command("git", "worktree", "prune")
+		pruneCmd.Dir = root
+		pruneCmd.Run()
+	}
+}
+
+// ensureWorktreesGitignore adds .belmont/worktrees/ to .gitignore if not present.
+func ensureWorktreesGitignore(root string) {
+	gitignorePath := filepath.Join(root, ".gitignore")
+	entry := ".belmont/worktrees/"
+
+	content, err := os.ReadFile(gitignorePath)
+	if err == nil {
+		if strings.Contains(string(content), entry) {
+			return // already present
+		}
+	}
+
+	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	// Add newline before if file doesn't end with one
+	if len(content) > 0 && content[len(content)-1] != '\n' {
+		f.WriteString("\n")
+	}
+	f.WriteString(entry + "\n")
 }
 

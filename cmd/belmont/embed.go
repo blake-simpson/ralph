@@ -10,4 +10,7 @@ var embeddedSkills embed.FS
 //go:embed all:agents
 var embeddedAgents embed.FS
 
+//go:embed all:prompts
+var embeddedPrompts embed.FS
+
 var hasEmbeddedFiles = true

@@ -128,6 +128,22 @@ For each feature with both a PRD and PROGRESS file:
    - Blockers listed in PROGRESS that reference completed tasks → **Stale**
    - Tasks marked as in-progress but no recent session history entries → **Stale** (potentially abandoned)
 
+4. **Milestone dependencies**
+
+   PROGRESS files may include dependency annotations on milestone headings: `### ⬜ M3: Feature X (depends: M1)`. When any milestone has `(depends: ...)`, the file uses **explicit dependency mode** — `belmont auto` will run independent milestones in parallel via git worktrees. Validate:
+
+   - **Dangling references** — `(depends: M5)` but M5 doesn't exist in the PROGRESS file → **Conflict**. Suggest removing the reference or adding the missing milestone.
+   - **Circular dependencies** — M2 depends on M3 and M3 depends on M2 (direct or transitive cycles) → **Conflict**. List the cycle and suggest which dependency to remove based on the milestone descriptions and natural ordering.
+   - **Over-constrained chains** — every milestone depends on the previous one in a strict serial chain (M1 → M2 → M3 → M4 → ...) when some could plausibly run in parallel → **Drift** (from optimal parallelism). Compare milestone descriptions: if two milestones touch independent areas (e.g., separate features, backend vs frontend, different pages), suggest removing the dependency between them to enable parallel execution.
+   - **Under-constrained dependencies** — milestones that clearly share resources or build on each other's output but have no declared dependency → **Gap**. For example, if M3's tasks reference files or APIs created in M2 but M3 doesn't declare `(depends: M2)`, flag it. Suggest adding the dependency.
+   - **Completed milestone still depended on** — a milestone marked ✅ that is listed as a dependency is fine (done milestones satisfy deps). But if a milestone is marked 🚫 (blocked/skipped) and other milestones depend on it → **Conflict**. The dependents can never proceed. Suggest either unblocking the dependency or removing it from dependents.
+   - **Mixed mode inconsistency** — some milestones have `(depends: ...)` and others don't. Milestones without explicit deps go into wave 1 (run first). Flag if a milestone without deps clearly should depend on another milestone → **Gap**. Conversely, flag if the only milestone with deps is the final one and the rest would all run in parallel (likely under-specified).
+
+   When suggesting fixes, provide the exact corrected milestone heading. For example:
+   - Remove dangling: `### ⬜ M3: Feature X` (drop the invalid dep)
+   - Add missing: `### ⬜ M3: Feature X (depends: M1, M2)` (add the dep)
+   - Break serial chain: `### ⬜ M3: Dashboard (depends: M1)` (change from M2 to M1 since M2 and M3 are independent)
+
 For each finding, present interactively. If no findings: report "Layer 3: Tasks and milestones are consistent ✅"
 
 ## Step 5: Layer 4 Review — Codebase ↔ Plans

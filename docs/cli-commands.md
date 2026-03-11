@@ -14,10 +14,11 @@ belmont status --feature auth           # Feature-specific status
 belmont tree --max-depth 3              # Project tree
 belmont find --name PRD --type file     # Find files
 belmont search --pattern "TECH_PLAN"    # Search file contents
-belmont loop --feature auth              # Run feature loop (auto-detect tool)
-belmont loop --feature auth --tool codex # Use specific tool
-belmont loop --feature auth --from M2 --to M4  # Milestone range
+belmont auto --feature auth              # Run feature auto (auto-detect tool)
+belmont auto --feature auth --tool codex # Use specific tool
+belmont auto --feature auth --from M2 --to M4  # Milestone range
 belmont version                         # Show version, commit, build date
+# Note: "belmont loop" still works as an alias for "belmont auto"
 ```
 
 ## How Skills Use the CLI

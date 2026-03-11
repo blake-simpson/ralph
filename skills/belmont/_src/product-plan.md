@@ -150,6 +150,7 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 - It is critical that agents get every piece of information they need
 - List in the plan the relevant available skills the agent should load when implementing
 - When creating milestones, consider the work involved. For example: If design/UI work is required, group it with other design/UI work. This allows the design context to be loaded once and shared amongst that milestones tasks. By the same logic, group backend heavy tasks together and try to skip UI work for that milestone. Some tasks will need both but try your best to split where possible.
+- When milestones can be implemented independently (e.g., separate features that only share a common foundation), add dependency annotations: `### ⬜ M3: Feature X (depends: M1)`. This enables `belmont auto` to run independent milestones in parallel via git worktrees. If a milestone has no dependency on another, it can run in the same wave. Only add `(depends: ...)` when there's a real dependency — don't over-constrain.
 
 ## PRD Format
 
