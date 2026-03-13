@@ -192,6 +192,8 @@ Output a combined summary:
 [Any overall recommendations for the project]
 ```
 
+<!-- @include state-reconciliation.md -->
+
 <!-- @include commit-belmont-changes.md commit_context="after verification" -->
 
 ## Step 4: Clean Up Team (Approach A only)

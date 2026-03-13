@@ -148,6 +148,8 @@ Archive the MILESTONE file: `{base}/MILESTONE.md` → `{base}/MILESTONE-[TaskID]
 
 This prevents stale context from bleeding into the next run.
 
+<!-- @include state-reconciliation.md -->
+
 <!-- @include commit-belmont-changes.md commit_context="after task completion" -->
 
 ## Step 6: Report

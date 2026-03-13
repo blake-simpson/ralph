@@ -203,7 +203,20 @@ Milestones without a `(depends: ...)` declaration are treated as having no depen
 1. **Create**: A git worktree is created for each parallel milestone at `.belmont/worktrees/<feature>-<milestone>/`
 2. **Execute**: The AI tool runs the implement and verify cycle in the worktree
 3. **Merge**: On successful verification, changes are merged back to the main branch
-4. **Clean up**: The worktree is removed after merge
+4. **Clean up**: The worktree and branch are removed after merge
+
+### Interrupted Run Recovery
+
+If `belmont auto` is interrupted (e.g., Ctrl+C) and restarted, stale branches or worktrees may remain from the previous run. The auto command detects this and handles it gracefully:
+
+**Interactive mode** (terminal): You'll be prompted to choose:
+- **Resume** (`r`) — Continue from where the previous run left off, reusing the existing branch and worktree
+- **Start fresh** (`s`) — Delete the stale branch/worktree and restart from scratch
+- **Quit** (`q`) — Exit without making changes
+
+**Non-interactive mode** (CI/piped stdin): Stale state is automatically cleaned up and the run starts fresh.
+
+On interrupt, the signal handler now cleans up both worktree directories and their associated git branches, preventing the "branch already exists" error on restart.
 
 ### Merge Conflict Reconciliation
 
@@ -246,19 +259,70 @@ Interactive prompt options for low-confidence conflicts:
 - **Consecutive failures**: 3 failures in a row → stop
 - **Stuck detection**: Same state after 2 successful iterations → pause
 
+## Multi-Feature Parallel Execution
+
+Run multiple features in parallel, each in its own git worktree. Milestones within each feature run sequentially, but features execute concurrently.
+
+### Usage
+
+```bash
+# Run specific features in parallel
+belmont auto --features feat-a,feat-b,feat-c
+
+# Run all pending (non-complete) features
+belmont auto --all
+
+# Cap concurrent features (default: 3)
+belmont auto --features feat-a,feat-b,feat-c --max-parallel 2
+```
+
+### How It Works
+
+```
+belmont auto --features feat-a,feat-b,feat-c --max-parallel 2
+
+  [feat-a worktree]    [feat-b worktree]     (2 concurrent)
+    M1 → M2 → M3        M1 → M2
+         ↓                    ↓
+      merge feat-a        merge feat-b
+
+  [feat-c worktree]                           (next slot opens)
+    M1 → M2
+         ↓
+      merge feat-c (reconcile if needed)
+```
+
+1. Each feature gets its own git worktree at `.belmont/worktrees/<slug>/` on branch `belmont/auto/<slug>`
+2. Feature state (`.belmont/features/<slug>/`) is copied into the worktree
+3. `belmont install` runs in the worktree to set up the AI tool
+4. The full auto loop runs for each feature (sequential milestones)
+5. As features complete, they merge back to main in completion order
+6. The reconciliation agent handles cross-feature merge conflicts
+
+### Constraints
+
+- `--feature` and `--features`/`--all` are mutually exclusive
+- `--from`/`--to` are not supported with `--features`/`--all`
+- `--all` skips features with status "Complete"
+- Failed features preserve their worktrees for manual intervention
+
 ## CLI Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--feature <slug>` | (required) | Feature slug to implement |
-| `--from <milestone>` | | Start from milestone (e.g. M2) |
-| `--to <milestone>` | | End at milestone (e.g. M6) |
+| `--feature <slug>` | (required*) | Feature slug to implement (single-feature mode) |
+| `--features <a,b,c>` | | Comma-separated feature slugs for parallel execution |
+| `--all` | `false` | Run all pending features in parallel |
+| `--from <milestone>` | | Start from milestone (single-feature only) |
+| `--to <milestone>` | | End at milestone (single-feature only) |
 | `--tool <name>` | auto-detect | CLI tool: claude, codex, gemini, copilot, cursor |
 | `--policy <policy>` | `autonomous` | Checkpoint policy |
-| `--max-iterations <n>` | `20` | Maximum loop iterations |
+| `--max-iterations <n>` | `20` | Maximum loop iterations per feature |
 | `--max-failures <n>` | `3` | Consecutive failures before stopping |
-| `--max-parallel <n>` | `3` | Maximum milestones to execute in parallel via worktrees |
+| `--max-parallel <n>` | `3` | Maximum concurrent features or milestones |
 | `--root <path>` | `.` | Project root directory |
+
+*Required in single-feature mode. Use `--features` or `--all` for multi-feature mode.
 
 ## Architecture
 

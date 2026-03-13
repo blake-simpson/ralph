@@ -217,6 +217,8 @@ If you created a team:
 
 Skip this if you used Approach B or C.
 
+<!-- @include state-reconciliation.md -->
+
 <!-- @include commit-belmont-changes.md commit_context="after milestone implementation" -->
 
 ## Step 7: Final Actions

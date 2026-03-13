@@ -311,7 +311,7 @@ See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instr
 
 ## Feature Auto
 
-Belmont includes a built-in auto orchestrator (`belmont auto`) that takes a planned feature (with PRD + TECH_PLAN) and executes it end-to-end: implementing milestones, verifying, fixing follow-up issues, and continuing until the feature is complete. Independent milestones can run in parallel via git worktrees. Pure Go, no Node.js required.
+Belmont includes a built-in auto orchestrator (`belmont auto`) that takes a planned feature (with PRD + TECH_PLAN) and executes it end-to-end: implementing milestones, verifying, fixing follow-up issues, and continuing until the feature is complete. Independent milestones can run in parallel via git worktrees, and multiple features can execute in parallel across worktrees. Pure Go, no Node.js required.
 
 > **Alias**: `belmont loop` still works as an alias for `belmont auto`.
 
@@ -325,18 +325,24 @@ belmont auto --feature my-feature --from M2 --to M6
 # Use a specific AI tool
 belmont auto --feature my-feature --tool codex
 
+# Run multiple features in parallel
+belmont auto --features feat-a,feat-b,feat-c
+
+# Run all pending features
+belmont auto --all
+
 # Control checkpoint policy
 belmont auto --feature my-feature --policy milestone
 
-# Execute independent milestones in parallel
-belmont auto --feature my-feature --max-parallel 3
+# Cap concurrent features or milestones
+belmont auto --all --max-parallel 2
 ```
 
 The auto command auto-detects which AI tool CLI you have installed (Claude Code, Codex, Gemini, Copilot, Cursor) and shells out to it in headless mode. Override with `--tool`.
 
 It uses a hybrid decision system: smart deterministic rules handle ~80% of cases (using git diff classification and per-milestone tracking), with AI called only for ambiguous situations like repeated verification failures. The AI receives rich context including work type, failure history, and verification state. Falls back to deterministic rules automatically if the AI call fails.
 
-Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 3).
+Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 3). Multiple features can also run in parallel with `--features` or `--all`, each in its own worktree with automatic merge and conflict reconciliation.
 
 Three checkpoint policies control human involvement:
 - `autonomous` (default) — only pauses on blockers or errors
