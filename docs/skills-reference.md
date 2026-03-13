@@ -114,7 +114,7 @@ Manual debug loop — the user verifies each fix instead of dispatching a verifi
 **Use `debug-auto` instead for**: Complex logic bugs, race conditions, issues requiring automated testing.
 **Use `/belmont:next` or `/belmont:implement` instead for**: New features, large multi-file changes.
 
-## `review`
+## `review-plans`
 
 Reviews alignment between planning documents and the codebase. Detects drift, conflicts, and gaps across the entire document hierarchy.
 

@@ -3,7 +3,7 @@ description: "Review alignment between planning documents (PR/FAQ, PRDs, Tech Pl
 alwaysApply: false
 ---
 
-# Belmont: Review
+# Belmont: Review Plans
 
 You are reviewing the alignment between planning documents and the codebase. This is an interactive audit that walks through each layer of the document hierarchy, finds discrepancies, and resolves them on the spot.
 

@@ -24,7 +24,7 @@ belmont/
 │       ├── debug-auto.md       # Auto debug loop (generated)
 │       ├── debug-manual.md     # Manual debug loop (generated)
 │       ├── status.md            # Status skill
-│       ├── review.md            # Alignment review skill
+│       ├── review-plans.md      # Alignment review skill
 │       └── reset.md             # Reset state skill
 ├── agents/
 │   └── belmont/
@@ -72,7 +72,7 @@ your-project/
 │           ├── debug-auto.md
 │           ├── debug-manual.md
 │           ├── status.md
-│           ├── review.md
+│           ├── review-plans.md
 │           └── reset.md
 ├── .belmont/                    # Planning & state (commit to share with team)
 │   ├── PR_FAQ.md

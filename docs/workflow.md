@@ -122,9 +122,9 @@ Other:        Load skills/belmont/verify.md as context
 After implementing milestones or making significant changes, review the alignment between your plans and the codebase.
 
 ```
-Claude Code:  /belmont:review
-Cursor:       Enable the belmont review rule, then: "Review document alignment"
-Other:        Load skills/belmont/review.md as context
+Claude Code:  /belmont:review-plans
+Cursor:       Enable the belmont review-plans rule, then: "Review document alignment"
+Other:        Load skills/belmont/review-plans.md as context
 ```
 
 **What happens:**
@@ -153,7 +153,7 @@ After implementing a milestone:
 - Run `/belmont:verify` to catch issues
 - Run `/belmont:debug` for targeted fixes on specific issues found by verification (routes to auto or manual mode)
 - Run `/belmont:next` to quickly fix follow-up tasks from verification
-- Run `/belmont:review` to check alignment between plans and codebase
+- Run `/belmont:review-plans` to check alignment between plans and codebase
 - Run `/belmont:implement` again for the next milestone
 - Run `/belmont:status` to check progress
 - Continue until all milestones are complete

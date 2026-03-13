@@ -58,7 +58,7 @@ Belmont breaks coding work into **phases**, each driven by a specialized agent. 
                          ┌──────────────────┼──────────────┐
                          ▼                  ▼              ▼
                    ┌───────────┐     ┌───────────┐  ┌───────────┐
-                   │  Debug    │     │  Next     │  │  Review   │
+                   │  Debug    │     │  Next     │  │Plan Review│
                    │ (fix bug) │     │ (1 task)  │  │ (drift)   │
                    └───────────┘     └───────────┘  └─────┬─────┘
                                                           │
@@ -285,7 +285,7 @@ go run ./cmd/belmont install --source . --project /tmp/test-project --no-prompt
 | `debug`             | Debug router (auto or manual)                     |
 | `debug-auto`        | Auto debug loop with agent verification           |
 | `debug-manual`      | Manual debug loop with user verification          |
-| `review`            | Document alignment and drift detection            |
+| `review-plans`      | Document alignment and drift detection            |
 | `status`            | Read-only progress report                         |
 | `reset`             | Reset state and start fresh                       |
 

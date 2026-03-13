@@ -31,7 +31,7 @@ Skills become native slash commands:
 /belmont:debug-auto    Auto debug loop (agent-verified)
 /belmont:debug-manual  Manual debug loop (user-verified, faster)
 /belmont:status         View progress
-/belmont:review         Review document alignment and detect drift
+/belmont:review-plans   Review document alignment and detect drift
 /belmont:reset          Reset state and start fresh
 ```
 
