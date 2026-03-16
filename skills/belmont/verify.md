@@ -340,6 +340,11 @@ Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and 
    - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
    - All ⬜ → `## Status: 🔴 Not Started`
 
+5. **Feature dependency sync** (master PRD only) — In the `## Features` table of `.belmont/PRD.md`:
+   - Verify all dependency slugs reference existing feature slugs in the table
+   - If a feature row is removed, remove its slug from other features' Dependencies columns
+   - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
+
 Only fix actual discrepancies — if files already agree, make no changes.
 
 ### Commit Planning File Changes

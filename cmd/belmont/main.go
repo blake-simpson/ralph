@@ -66,6 +66,8 @@ type featureSummary struct {
 	NextTask        *task       `json:"next_task,omitempty"`
 	Blockers        []string    `json:"blockers,omitempty"`
 	Status          string      `json:"status"`
+	Deps            []string    `json:"deps,omitempty"`
+	Priority        string      `json:"priority,omitempty"`
 }
 
 type statusReport struct {
@@ -396,6 +398,7 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	if features == nil {
 		features = []featureSummary{}
 	}
+	populateFeatureDeps(features, root)
 	report.Features = features
 	report.Feature = extractProductName(filepath.Join(root, ".belmont", "PRD.md"))
 	report.TechPlanReady = techPlanReady(filepath.Join(root, ".belmont", "TECH_PLAN.md"))
@@ -521,6 +524,97 @@ func listFeatures(featuresDir string, maxName int) []featureSummary {
 		})
 	}
 	return features
+}
+
+// parseMasterPRDDeps reads the master PRD and extracts feature slug → dependency slugs mapping
+// from the ## Features table. Handles "None", empty, and comma-separated slugs.
+func parseMasterPRDDeps(root string) (deps map[string][]string, priorities map[string]string) {
+	deps = make(map[string][]string)
+	priorities = make(map[string]string)
+
+	prdPath := filepath.Join(root, ".belmont", "PRD.md")
+	content, err := os.ReadFile(prdPath)
+	if err != nil {
+		return
+	}
+
+	lines := strings.Split(string(content), "\n")
+	inTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Detect start of Features table
+		if strings.HasPrefix(trimmed, "## Features") {
+			inTable = true
+			continue
+		}
+
+		// Stop at next heading
+		if inTable && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+
+		if !inTable || !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+
+		// Skip header and separator rows
+		cols := strings.Split(trimmed, "|")
+		// Remove empty first/last from leading/trailing pipes
+		var cells []string
+		for _, c := range cols {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				cells = append(cells, c)
+			}
+		}
+
+		// Need at least 4 columns: Feature, Slug, Priority, Dependencies
+		if len(cells) < 4 {
+			continue
+		}
+
+		// Skip header row and separator
+		slug := strings.TrimSpace(cells[1])
+		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
+			continue
+		}
+
+		priority := strings.TrimSpace(cells[2])
+		depStr := strings.TrimSpace(cells[3])
+
+		priorities[slug] = priority
+
+		if depStr == "" || strings.EqualFold(depStr, "None") || depStr == "-" {
+			continue
+		}
+
+		// Parse comma-separated dependency slugs
+		var depSlugs []string
+		for _, d := range strings.Split(depStr, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" {
+				depSlugs = append(depSlugs, d)
+			}
+		}
+		if len(depSlugs) > 0 {
+			deps[slug] = depSlugs
+		}
+	}
+	return
+}
+
+// populateFeatureDeps enriches feature summaries with dependency and priority info from master PRD.
+func populateFeatureDeps(features []featureSummary, root string) {
+	deps, priorities := parseMasterPRDDeps(root)
+	for i := range features {
+		if d, ok := deps[features[i].Slug]; ok {
+			features[i].Deps = d
+		}
+		if p, ok := priorities[features[i].Slug]; ok {
+			features[i].Priority = p
+		}
+	}
 }
 
 func computeFeatureListStatus(features []featureSummary) string {
@@ -2678,17 +2772,180 @@ func resolveFeatureSlugs(root, featuresFlag string, allFlag bool) ([]string, err
 	return slugs, nil
 }
 
-// runAutoMultiFeature orchestrates parallel execution of multiple features.
+// featureWave represents a group of features that can execute in parallel.
+type featureWave struct {
+	Index    int
+	Features []featureSummary
+}
+
+// computeFeatureWaves groups features into waves using Kahn's algorithm for topological sort.
+// Features in the same wave have all deps satisfied by prior waves.
+// Already-complete features satisfy deps but don't execute.
+func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
+	if len(features) == 0 {
+		return nil, nil
+	}
+
+	// Build slug -> feature map
+	bySlug := make(map[string]featureSummary)
+	for _, f := range features {
+		bySlug[f.Slug] = f
+	}
+
+	// Compute in-degree for each non-complete feature
+	inDegree := make(map[string]int)
+	for _, f := range features {
+		if f.Status == "✅ Complete" {
+			continue
+		}
+		count := 0
+		for _, dep := range f.Deps {
+			if df, ok := bySlug[dep]; ok && df.Status != "✅ Complete" {
+				count++
+			}
+		}
+		inDegree[f.Slug] = count
+	}
+
+	var waves []featureWave
+	remaining := len(inDegree)
+	waveIdx := 0
+
+	for remaining > 0 {
+		// Find all features with zero in-degree
+		var ready []featureSummary
+		for slug, deg := range inDegree {
+			if deg == 0 {
+				ready = append(ready, bySlug[slug])
+			}
+		}
+
+		if len(ready) == 0 {
+			var cycleIDs []string
+			for slug := range inDegree {
+				cycleIDs = append(cycleIDs, slug)
+			}
+			sort.Strings(cycleIDs)
+			return nil, fmt.Errorf("dependency cycle detected among features: %s", strings.Join(cycleIDs, ", "))
+		}
+
+		// Sort ready features by slug for deterministic ordering
+		sort.Slice(ready, func(i, j int) bool {
+			return ready[i].Slug < ready[j].Slug
+		})
+
+		waves = append(waves, featureWave{Index: waveIdx, Features: ready})
+		waveIdx++
+
+		// Remove completed features and update in-degrees
+		for _, f := range ready {
+			delete(inDegree, f.Slug)
+			remaining--
+		}
+		for slug, deg := range inDegree {
+			f := bySlug[slug]
+			newDeg := deg
+			for _, dep := range f.Deps {
+				for _, completed := range ready {
+					if dep == completed.Slug {
+						newDeg--
+					}
+				}
+			}
+			inDegree[slug] = newDeg
+		}
+	}
+
+	return waves, nil
+}
+
+// validateFeatureDeps checks for dangling dependency references and cycles.
+func validateFeatureDeps(features []featureSummary) error {
+	slugSet := make(map[string]bool)
+	for _, f := range features {
+		slugSet[f.Slug] = true
+	}
+
+	// Check for dangling references
+	for _, f := range features {
+		for _, dep := range f.Deps {
+			if !slugSet[dep] {
+				return fmt.Errorf("feature %q depends on %q which does not exist", f.Slug, dep)
+			}
+		}
+	}
+
+	// Check for cycles by attempting wave computation
+	_, err := computeFeatureWaves(features)
+	return err
+}
+
+// runAutoMultiFeature orchestrates wave-based execution of multiple features.
+// Features with dependencies execute after their dependencies complete.
 func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	startTime := time.Now()
 
 	ensureWorktreesGitignore(cfg.Root)
 
-	fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (multi-feature) — %d features\033[0m\n", len(slugs))
+	// Build feature summaries with dependency info
+	featuresDir := filepath.Join(cfg.Root, ".belmont", "features")
+	allFeatures := listFeatures(featuresDir, 50)
+	populateFeatureDeps(allFeatures, cfg.Root)
+
+	// Filter to requested slugs
+	slugSet := make(map[string]bool)
+	for _, s := range slugs {
+		slugSet[s] = true
+	}
+	var features []featureSummary
+	for _, f := range allFeatures {
+		if slugSet[f.Slug] {
+			features = append(features, f)
+		}
+	}
+
+	// Validate dependencies
+	if err := validateFeatureDeps(features); err != nil {
+		return fmt.Errorf("auto: %w", err)
+	}
+
+	// Check if any features have deps — if not, use flat parallel (original behavior)
+	hasAnyDeps := false
+	for _, f := range features {
+		if len(f.Deps) > 0 {
+			hasAnyDeps = true
+			break
+		}
+	}
+
+	// Compute waves
+	waves, err := computeFeatureWaves(features)
+	if err != nil {
+		return fmt.Errorf("auto: %w", err)
+	}
+
+	if !hasAnyDeps {
+		// No dependencies — single wave with all features (original behavior)
+		fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (multi-feature) — %d features\033[0m\n", len(slugs))
+	} else {
+		fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (multi-feature) — %d features in %d waves\033[0m\n", len(slugs), len(waves))
+	}
 	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Max parallel: %d\033[0m\n", cfg.Tool, cfg.MaxParallel)
+
+	// Print wave execution plan
 	fmt.Fprintf(os.Stderr, "\n\033[1mExecution plan:\033[0m\n")
-	for _, slug := range slugs {
-		fmt.Fprintf(os.Stderr, "  • %s\n", slug)
+	for _, w := range waves {
+		var names []string
+		for _, f := range w.Features {
+			names = append(names, f.Slug)
+		}
+		if len(waves) == 1 {
+			for _, n := range names {
+				fmt.Fprintf(os.Stderr, "  • %s\n", n)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "  Wave %d: [%s]\n", w.Index+1, strings.Join(names, ", "))
+		}
 	}
 	fmt.Fprintln(os.Stderr)
 
@@ -2703,75 +2960,116 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		os.Exit(1)
 	}()
 
-	semaphore := make(chan struct{}, cfg.MaxParallel)
-	var wg sync.WaitGroup
-
 	type featureResult struct {
 		Slug         string
 		Branch       string
 		WorktreePath string
 		Err          error
-		Order        int // completion order
 	}
-	results := make(chan featureResult, len(slugs))
 
-	for _, slug := range slugs {
-		wg.Add(1)
-		go func(slug string) {
-			defer wg.Done()
-			semaphore <- struct{}{}        // acquire
-			defer func() { <-semaphore }() // release
+	var allFailures []featureResult
+	failedSlugs := make(map[string]bool)
+	totalMerged := 0
 
-			branch := fmt.Sprintf("belmont/auto/%s", slug)
-			wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", slug)
-
-			activeWorktrees.add(slug, wtPath, branch)
-
-			fmt.Fprintf(os.Stderr, "\033[36m▶ %s\033[0m — starting in worktree\n", slug)
-
-			err := runFeatureInWorktree(cfg, slug, branch, wtPath)
-			results <- featureResult{
-				Slug:         slug,
-				Branch:       branch,
-				WorktreePath: wtPath,
-				Err:          err,
+	// Execute wave by wave
+	for _, w := range waves {
+		// Filter out features whose deps include a failed slug
+		var waveFeatures []featureSummary
+		var skippedFeatures []string
+		for _, f := range w.Features {
+			skip := false
+			for _, dep := range f.Deps {
+				if failedSlugs[dep] {
+					skip = true
+					break
+				}
 			}
-		}(slug)
-	}
-
-	// Wait for all goroutines then close results
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	// Collect results in completion order
-	var successes []featureResult
-	var failures []featureResult
-	for r := range results {
-		if r.Err != nil {
-			fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", r.Slug, r.Err)
-			failures = append(failures, r)
-		} else {
-			fmt.Fprintf(os.Stderr, "\033[32m✓ %s complete\033[0m — merging...\n", r.Slug)
-			successes = append(successes, r)
+			if skip {
+				skippedFeatures = append(skippedFeatures, f.Slug)
+				failedSlugs[f.Slug] = true
+			} else {
+				waveFeatures = append(waveFeatures, f)
+			}
 		}
-	}
 
-	// Merge successful features in completion order
-	for _, s := range successes {
-		if err := mergeFeatureBranch(cfg, s.Slug, s.Branch, s.WorktreePath, activeWorktrees); err != nil {
-			fmt.Fprintf(os.Stderr, "\033[31m✗ merge failed for %s: %s\033[0m\n", s.Slug, err)
-			fmt.Fprintf(os.Stderr, "  Worktree preserved at: %s\n", s.WorktreePath)
-			fmt.Fprintf(os.Stderr, "  Branch: %s\n", s.Branch)
-			failures = append(failures, featureResult{Slug: s.Slug, Err: err})
+		for _, slug := range skippedFeatures {
+			fmt.Fprintf(os.Stderr, "\033[33m⊘ %s skipped\033[0m — dependency failed\n", slug)
+			allFailures = append(allFailures, featureResult{Slug: slug, Err: fmt.Errorf("dependency failed")})
+		}
+
+		if len(waveFeatures) == 0 {
+			continue
+		}
+
+		if len(waves) > 1 {
+			fmt.Fprintf(os.Stderr, "\n\033[1m── Wave %d ──\033[0m\n", w.Index+1)
+		}
+
+		// Run this wave's features in parallel
+		semaphore := make(chan struct{}, cfg.MaxParallel)
+		var wg sync.WaitGroup
+		results := make(chan featureResult, len(waveFeatures))
+
+		for _, f := range waveFeatures {
+			wg.Add(1)
+			go func(slug string) {
+				defer wg.Done()
+				semaphore <- struct{}{}
+				defer func() { <-semaphore }()
+
+				branch := fmt.Sprintf("belmont/auto/%s", slug)
+				wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", slug)
+
+				activeWorktrees.add(slug, wtPath, branch)
+
+				fmt.Fprintf(os.Stderr, "\033[36m▶ %s\033[0m — starting in worktree\n", slug)
+
+				err := runFeatureInWorktree(cfg, slug, branch, wtPath)
+				results <- featureResult{
+					Slug:         slug,
+					Branch:       branch,
+					WorktreePath: wtPath,
+					Err:          err,
+				}
+			}(f.Slug)
+		}
+
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		// Collect wave results
+		var waveSuccesses []featureResult
+		for r := range results {
+			if r.Err != nil {
+				fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", r.Slug, r.Err)
+				allFailures = append(allFailures, r)
+				failedSlugs[r.Slug] = true
+			} else {
+				fmt.Fprintf(os.Stderr, "\033[32m✓ %s complete\033[0m — merging...\n", r.Slug)
+				waveSuccesses = append(waveSuccesses, r)
+			}
+		}
+
+		// Merge this wave's successes before proceeding to next wave
+		for _, s := range waveSuccesses {
+			if err := mergeFeatureBranch(cfg, s.Slug, s.Branch, s.WorktreePath, activeWorktrees); err != nil {
+				fmt.Fprintf(os.Stderr, "\033[31m✗ merge failed for %s: %s\033[0m\n", s.Slug, err)
+				fmt.Fprintf(os.Stderr, "  Worktree preserved at: %s\n", s.WorktreePath)
+				fmt.Fprintf(os.Stderr, "  Branch: %s\n", s.Branch)
+				allFailures = append(allFailures, featureResult{Slug: s.Slug, Err: err})
+				failedSlugs[s.Slug] = true
+			} else {
+				totalMerged++
+			}
 		}
 	}
 
 	// Report
-	if len(failures) > 0 {
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ %d feature(s) failed:\033[0m\n", len(failures))
-		for _, f := range failures {
+	if len(allFailures) > 0 {
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ %d feature(s) failed:\033[0m\n", len(allFailures))
+		for _, f := range allFailures {
 			fmt.Fprintf(os.Stderr, "  %s: %s\n", f.Slug, f.Err)
 			if f.WorktreePath != "" {
 				fmt.Fprintf(os.Stderr, "    Worktree: %s\n", f.WorktreePath)
@@ -2779,25 +3077,10 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		}
 	}
 
-	// Count successes that merged OK
-	mergedCount := 0
-	for _, s := range successes {
-		merged := true
-		for _, f := range failures {
-			if f.Slug == s.Slug {
-				merged = false
-				break
-			}
-		}
-		if merged {
-			mergedCount++
-		}
-	}
+	fmt.Fprintf(os.Stderr, "\n\033[32m✓ %d/%d features complete\033[0m (%.1fs total)\n", totalMerged, len(slugs), time.Since(startTime).Seconds())
 
-	fmt.Fprintf(os.Stderr, "\n\033[32m✓ %d/%d features complete\033[0m (%.1fs total)\n", mergedCount, len(slugs), time.Since(startTime).Seconds())
-
-	if len(failures) > 0 {
-		return fmt.Errorf("auto: %d feature(s) failed", len(failures))
+	if len(allFailures) > 0 {
+		return fmt.Errorf("auto: %d feature(s) failed", len(allFailures))
 	}
 	return nil
 }

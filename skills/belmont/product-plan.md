@@ -89,6 +89,8 @@ If `.belmont/PRD.md` is empty/default and no features exist yet, create the **ma
 | [Feature Name] | [feature-slug] | P1 | None | Not Started |
 ```
 
+**Dependencies format**: Use feature slugs, comma-separated (e.g. `setup, auth`). Use `None` for features with no dependencies. Features with dependencies execute after their dependencies complete when using `belmont auto --all`.
+
 Also create `.belmont/PROGRESS.md` (the master progress file) if it doesn't exist or still contains template/placeholder text:
 
 ```markdown
@@ -116,7 +118,7 @@ When the user selects or creates a feature:
 2. **Create directory**: `.belmont/features/<slug>/`
 3. **Write feature PRD**: `.belmont/features/<slug>/PRD.md` (using the PRD format below)
 4. **Write feature PROGRESS**: `.belmont/features/<slug>/PROGRESS.md` (using the PROGRESS format below)
-5. **Update master PRD**: Add/update the feature entry in `.belmont/PRD.md`'s features table
+5. **Update master PRD**: Add/update the feature entry in `.belmont/PRD.md`'s features table. Set Dependencies to slugs of features this one requires (data, APIs, infrastructure) — use `None` if independent.
 6. **Update master PROGRESS**: Add or update the feature's row in `.belmont/PROGRESS.md`'s `## Features` table with the feature name, slug, initial status, milestone/task counts, and blockers. Add a row to `## Recent Activity` noting the feature was created or updated.
 
 When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.

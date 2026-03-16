@@ -261,7 +261,7 @@ Interactive prompt options for low-confidence conflicts:
 
 ## Multi-Feature Parallel Execution
 
-Run multiple features in parallel, each in its own git worktree. Milestones within each feature run sequentially, but features execute concurrently.
+Run multiple features in parallel, each in its own git worktree. Milestones within each feature run sequentially, but features execute concurrently. Features with dependencies execute wave-by-wave — independent features run in parallel, dependent features wait for their dependencies to complete and merge first.
 
 ### Usage
 
@@ -276,28 +276,60 @@ belmont auto --all
 belmont auto --features feat-a,feat-b,feat-c --max-parallel 2
 ```
 
+### Feature Dependencies
+
+Dependencies are declared in the master PRD (`.belmont/PRD.md`) in the Features table's Dependencies column using comma-separated feature slugs:
+
+```markdown
+## Features
+
+| Feature | Slug | Priority | Dependencies | Status |
+|---------|------|----------|-------------|--------|
+| Database Setup | setup | P1 | None | Not Started |
+| User Auth | auth | P1 | setup | Not Started |
+| Payments | payments | P2 | setup, auth | Not Started |
+| Dashboard | dashboard | P2 | auth | Not Started |
+```
+
+When running `belmont auto --all`, features are grouped into waves:
+- **Wave 1**: `setup` (no dependencies)
+- **Wave 2**: `auth` (depends on `setup`)
+- **Wave 3**: `dashboard`, `payments` (both depend on earlier waves, run in parallel)
+
+If a feature fails, all features that depend on it (directly or transitively) are skipped.
+
+Features without any dependencies run in a single wave (original parallel behavior).
+
 ### How It Works
 
 ```
-belmont auto --features feat-a,feat-b,feat-c --max-parallel 2
+belmont auto --all (with dependencies)
 
-  [feat-a worktree]    [feat-b worktree]     (2 concurrent)
-    M1 → M2 → M3        M1 → M2
-         ↓                    ↓
-      merge feat-a        merge feat-b
-
-  [feat-c worktree]                           (next slot opens)
+  Wave 1:
+  [setup worktree]
     M1 → M2
          ↓
-      merge feat-c (reconcile if needed)
+      merge setup
+
+  Wave 2:
+  [auth worktree]
+    M1 → M2 → M3
+         ↓
+      merge auth
+
+  Wave 3:
+  [payments worktree]   [dashboard worktree]   (parallel)
+    M1 → M2               M1 → M2
+         ↓                      ↓
+      merge payments        merge dashboard
 ```
 
 1. Each feature gets its own git worktree at `.belmont/worktrees/<slug>/` on branch `belmont/auto/<slug>`
 2. Feature state (`.belmont/features/<slug>/`) is copied into the worktree
 3. `belmont install` runs in the worktree to set up the AI tool
 4. The full auto loop runs for each feature (sequential milestones)
-5. As features complete, they merge back to main in completion order
-6. The reconciliation agent handles cross-feature merge conflicts
+5. Each wave's features merge back to main before the next wave starts
+6. The reconciliation agent handles cross-feature merge conflicts within a wave
 
 ### Constraints
 
@@ -305,6 +337,8 @@ belmont auto --features feat-a,feat-b,feat-c --max-parallel 2
 - `--from`/`--to` are not supported with `--features`/`--all`
 - `--all` skips features with status "Complete"
 - Failed features preserve their worktrees for manual intervention
+- Dependency cycles are detected and reported as errors before execution starts
+- Dangling dependency references (slugs that don't exist) are detected and reported
 
 ## CLI Options
 
