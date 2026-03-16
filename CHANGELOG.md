@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.7.0
+
+**Released:** 2026-03-16
+
+### Changes since v0.6.0
+
+- Use wave based parallelisation, with consideration of feature dependencies
+- Rename `/belmont:review` to `/belmont:review-plans`
+- Move to new "auto" logic
+- V1 of parallel development. Working on multiple milestones within a git worktree.
+
+
+
 ## v0.6.0
 
 **Released:** 2026-03-10
