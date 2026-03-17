@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.2
+
+**Released:** 2026-03-17
+
+### Changes since v0.7.1
+
+- Add Apache 2.0 license to Belmont
+
+
+
 ## v0.7.1
 
 **Released:** 2026-03-17
