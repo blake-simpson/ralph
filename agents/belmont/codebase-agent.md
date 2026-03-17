@@ -43,7 +43,7 @@ Identify and report:
 - **Language**: TypeScript, JavaScript, etc.
 - **Styling**: Tailwind, CSS Modules, styled-components, etc.
 - **State Management**: React Query, Zustand, Redux, etc.
-- **Testing**: Jest, Vitest, Playwright, etc.
+- **Testing**: Jest, Vitest, Playwright, etc. (check for `playwright.config.ts`/`.js`)
 - **Build Tools**: Webpack, Vite, Turbopack, etc.
 - **Package Manager**: Detect by checking (in order):
   1. `pnpm-lock.yaml` exists → **pnpm**
@@ -63,6 +63,7 @@ Identify key directories:
 - Utilities/helpers directory
 - API/server directory
 - Tests directory
+- E2E tests directory
 - Config files location
 
 ### 3. Related Code Discovery
@@ -74,6 +75,7 @@ For ALL tasks described in the MILESTONE file's `## Orchestrator Context` sectio
 - **Type Definitions** - Find relevant interfaces and types
 - **API Routes** - Related API endpoints
 - **Tests** - Existing test patterns to follow
+- **E2E Tests** - Playwright config location, test directory structure, shared test utilities (page objects, fixtures, helpers)
 
 ### 4. Convention Analysis
 
@@ -162,6 +164,8 @@ Write using this format:
 // Test file structure
 [test pattern example]
 ```
+Include E2E test patterns (Playwright config, page objects, test structure) if Playwright is configured in the project.
+
 
 #### Error Handling Pattern
 ```typescript
@@ -193,7 +197,7 @@ Write using this format:
 2. **Check technical context** - Use the `### Relevant Technical Context` subsection to guide your scan (file structures, component specs)
 3. **Search by keywords** - Use task description keywords to find related code
 4. **Follow imports** - Trace import chains from target files
-5. **Check tests** - Find test files for related components
+5. **Check tests** - Find test files for related components, including unit tests and E2E tests.
 6. **Review types** - Find type definitions used by related code
 7. **Check config** - Review relevant configuration files
 
@@ -204,7 +208,7 @@ Write using this format:
 - **DO NOT** modify any section of the MILESTONE file other than `## Codebase Analysis`
 - **DO NOT** create, edit, or write to any file other than the MILESTONE file
 - **DO NOT** implement anything — you are a research agent, not an implementation agent
-- **DO** read CLAUDE.md if it exists - it's critical context
+- **DO** read CLAUDE.md or AGENTS.md if it exists - it's critical context
 - **DO** include actual code snippets showing patterns
 - **DO** flag if target files don't exist yet (new file creation needed)
 - **DO** note any inconsistencies in the codebase patterns

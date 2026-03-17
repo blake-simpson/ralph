@@ -38,7 +38,7 @@ Reads the complete MILESTONE file (all research phases' output):
 - Types/interfaces first, then utilities, then components
 - Follows project patterns from `## Codebase Analysis`
 - Uses design specifications from `## Design Specifications` for UI code
-- Writes unit tests
+- Writes unit tests and Playwright E2E tests (for web UI tasks)
 - Runs verification: `tsc`, `lint:fix`, `test`, `build`
 - Commits to git with structured commit message
 - Reports out-of-scope issues as follow-up tasks
@@ -62,7 +62,7 @@ Verifies implementations against requirements:
 
 Reviews code for quality and alignment:
 - Reads PRD, TECH_PLAN, and archived MILESTONE files for context
-- Runs build and test commands (auto-detects the project's package manager)
+- Runs build, test, and E2E test commands (auto-detects the project's package manager)
 - Checks pattern adherence and CLAUDE.md compliance
 - Verifies PRD/tech plan alignment
 - Security and performance review

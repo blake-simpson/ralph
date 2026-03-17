@@ -96,7 +96,7 @@ When you run the implement skill, the orchestrator creates a MILESTONE file, the
 |--------------------|------------------------|--------|----------------------|--------------------------------------|
 | 1. Codebase Scan   | `codebase-agent`       | Sonnet | MILESTONE + codebase | `## Codebase Analysis`               |
 | 2. Design Analysis | `design-agent`         | Sonnet | MILESTONE + Figma    | `## Design Specifications`           |
-| 3. Implementation  | `implementation-agent` | Opus   | MILESTONE (only)     | Code, tests, `## Implementation Log` |
+| 3. Implementation  | `implementation-agent` | Opus   | MILESTONE (only)     | Code, unit tests, E2E tests, `## Implementation Log` |
 
 After implementation, the MILESTONE file is archived (renamed to `MILESTONE-[ID].done.md`) to prevent stale context from bleeding into the next milestone.
 
@@ -107,7 +107,7 @@ When you run the verify skill, two agents run:
 | Agent                | Model  | What It Does                                                                                        |
 |----------------------|--------|-----------------------------------------------------------------------------------------------------|
 | `verification-agent` | Sonnet | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys              |
-| `code-review-agent`  | Sonnet | Runs build and test commands (auto-detects package manager), reviews code quality and PRD alignment |
+| `code-review-agent`  | Sonnet | Runs build, test, and E2E test commands (auto-detects package manager), reviews code quality and PRD alignment |
 
 Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context. Any issues found become follow-up tasks added to the PRD and PROGRESS files.
 
@@ -374,6 +374,7 @@ See [Feature Auto](docs/feature-auto.md) for full documentation.
 
 - An AI coding tool (Claude Code, Codex, Cursor, Windsurf, Gemini, Copilot, or any tool that reads markdown)
 - [figma-mcp](https://github.com/nichochar/figma-mcp) (recommended) -- enables Belmont to load Figma designs, extract design tokens, and perform visual verification
+- [playwright-mcp](https://github.com/microsoft/playwright-mcp) (recommended) -- enables agents to interact with browsers for visual verification and E2E test debugging
 - No Go required (pre-built binaries)
 - No Docker required
 - No Python required

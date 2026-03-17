@@ -89,10 +89,18 @@ Execute in this order:
    - Consider the target infrastructure of the project (cli builds, target environment, web hosting, database, etc.)
    - When considering SQL queries, ensure the execution order is optimised. Ensure no N+1 problems will exist.
 
-7. **Tests**
+7. **Unit Tests**
    - Write unit tests for new code
    - Follow existing test patterns from `## Codebase Analysis`
    - Aim for meaningful coverage, not 100%
+
+8. **E2E Tests** (web UI tasks only)
+   - Write Playwright E2E tests for browser UI flows, deriving test scenarios from PRD acceptance criteria (BDD Given/When/Then)
+   - Follow existing E2E patterns from `## Codebase Analysis` (page objects, fixtures, helpers)
+   - Cover cross-feature flows that touch the current task (auth, navigation, shared state)
+   - Include mobile viewport tests (`devices['iPhone 13']`, etc.) for responsive UI tasks
+   - Aim for meaningful coverage of critical user flows, not 100%
+   - Update existing E2E tests when your changes affect established flows
 
 #### Step 3: Verification
 
@@ -115,6 +123,9 @@ Use the detected package manager (referred to as `<pkg>` below) for ALL commands
 
 # Tests
 <pkg> run test
+
+# E2E tests (if Playwright is configured and task involves UI changes)
+<pkg> run test:e2e  # or: npx playwright test
 
 # Build (if quick)
 <pkg> run build
@@ -209,7 +220,7 @@ Once every task has been implemented (or marked as blocked), write the implement
 - Write unit tests for new logic
 - Follow test patterns from `## Codebase Analysis`
 - Test edge cases mentioned in the task definition in `## Orchestrator Context`
-- Do NOT write E2E tests unless explicitly required
+- Write Playwright E2E tests for web UI tasks, deriving flows from PRD acceptance criteria (BDD scenarios). Skip E2E for non-UI tasks (CLIs, APIs, libraries) unless the PRD explicitly requires them.
 
 ## Output: Write to MILESTONE File
 

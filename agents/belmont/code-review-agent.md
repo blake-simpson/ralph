@@ -41,7 +41,11 @@ Run comprehensive checks using the detected package manager (`<pkg>`):
 
 # All tests
 <pkg> run test
+
+# E2E tests (if playwright.config.ts/.js exists)
+<pkg> run test:e2e  # or: npx playwright test
 ```
+For E2E: only run if `playwright.config.ts`/`.js` exists. If no `test:e2e` script in `package.json`, try `npx playwright test`. Use Playwright MCP for browser interaction when debugging failures.
 
 Record all output - warnings matter too, not just errors.
 
@@ -63,6 +67,7 @@ Review each changed file for:
 - **State Management** - Follows established patterns?
 - **API Patterns** - Uses correct data access patterns?
 - **Testing Patterns** - Tests follow project conventions?
+- **E2E Coverage** - Are critical user flows covered by E2E tests? (web UI tasks only)
 - **Import Style** - Follows import conventions?
 
 #### Solution Alignment

@@ -154,6 +154,7 @@ This is a **technical** planning session. Product decisions were already made in
 - Asset strategy (placeholders vs real assets)
 - Performance requirements and constraints
 - Testing approach for this feature
+- Any cross-feature E2E flows to consider (auth, navigation, etc.)?
 - Edge cases and error states (technical handling)
 - Infrastructure and deployment concerns specific to this feature
 
@@ -262,6 +263,9 @@ Write to `.belmont/TECH_PLAN.md` with this structure:
 - **Unit**: [tool, scope, coverage target]
 - **Integration**: [tool, scope]
 - **E2E**: [tool, scope, critical paths]
+  - Test directory and config location
+  - Cross-feature flows (auth, navigation, shared state)
+  - Test script command (`test:e2e` or `npx playwright test`)
 
 ## Security Baseline
 [Auth approach, input validation, CSRF, CSP, etc.]
@@ -368,6 +372,11 @@ src/
 - [ ] Responsive: mobile, tablet, desktop
 - [ ] Accessibility: keyboard nav, screen reader
 - [ ] Loading/error/empty states implemented
+
+### E2E Tests (web UI features)
+- [ ] Flows to cover (derived from PRD BDD acceptance criteria)
+- [ ] Cross-feature dependencies (auth, navigation, shared state)
+- [ ] Mobile viewport tests for responsive UI
 
 ### Commands
 Use the project's package manager (detect via lockfile: `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb`/`bun.lock` → bun, `package-lock.json` → npm):

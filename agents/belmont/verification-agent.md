@@ -77,6 +77,8 @@ For the specific task:
 3. **Accessibility** - Keyboard navigation, focus management
 4. **Responsiveness** - Different viewport sizes (if UI)
 
+E2E test suite execution is handled by the Code Review Agent.
+
 ### Phase 5: Lighthouse Audit (if public page)
 
 Run this phase when **all** of the following are true:
