@@ -7,6 +7,8 @@ alwaysApply: false
 
 You are running an interactive planning session. You should not switch the agent to plan mode. Your goal is to work with the user to create a comprehensive PRD (Product Requirements Document) and PROGRESS tracking file.
 
+This session requires ultrathink-level reasoning — deeply consider product edge cases, user needs, and architectural implications before proposing structure.
+
 ## CRITICAL RULES
 
 1. This is ONLY a planning session. Do NOT implement anything.

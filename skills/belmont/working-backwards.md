@@ -9,6 +9,8 @@ You are running an interactive Working Backwards session. Your goal is to work w
 
 The output is a PR/FAQ: a one-page press release plus up to five pages of FAQs with an appendix. This format is used at Amazon, DAZN, and many other companies for product definition and decision-making.
 
+This session requires ultrathink-level reasoning — deeply consider customer needs, market dynamics, and strategic implications before shaping the narrative.
+
 ## CRITICAL RULES
 
 1. This is ONLY a strategic planning session. Do NOT implement anything.

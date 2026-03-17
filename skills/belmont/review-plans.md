@@ -7,6 +7,8 @@ alwaysApply: false
 
 You are reviewing the alignment between planning documents and the codebase. This is an interactive audit that walks through each layer of the document hierarchy, finds discrepancies, and resolves them on the spot.
 
+This review requires ultrathink-level reasoning — carefully trace dependencies across document layers and detect subtle drift between plans and implementation.
+
 ## Purpose
 
 Belmont's planning workflow creates a layered document hierarchy (PR/FAQ → Master PRD/Tech Plan → Feature PRDs/Tech Plans → Tasks/Milestones). Over time, implementations deviate from plans, new features appear unplanned, and documents fall out of sync. This review closes that gap.
