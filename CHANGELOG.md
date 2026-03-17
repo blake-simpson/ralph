@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.1
+
+**Released:** 2026-03-17
+
+### Changes since v0.7.0
+
+- Add Ultrathink to Belmont planning modes
+
+
+
 ## v0.7.0
 
 **Released:** 2026-03-16
