@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.7.3
+
+**Released:** 2026-03-19
+
+### Changes since v0.7.2
+
+- First version of E2E test flow integration
+- Add authors section to README
+
+
+
 ## v0.7.2
 
 **Released:** 2026-03-17
