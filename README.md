@@ -382,6 +382,15 @@ See [Feature Auto](docs/feature-auto.md) for full documentation.
 
 ---
 
+## Authors
+
+|                                                             | Name                                                                   | Contributions                                                 |
+|-------------------------------------------------------------|------------------------------------------------------------------------|---------------------------------------------------------------|
+| <img src="https://github.com/blake-simpson.png" width="50"> | **Blake Simpson** ([@blake-simpson](https://github.com/blake-simpson)) | Creator & maintainer                                          |
+| <img src="https://github.com/bigbenjoman.png" width="50">   | **Ben Lavender** ([@bigbenjoman](https://github.com/bigbenjoman))      | PR/FAQ skill, Product skill + PRD formats, Test & maintenance |
+
+---
+
 ## License
 
 Belmont is licensed under the [Apache License 2.0](LICENSE). See the [NOTICE](NOTICE) file for attribution details.
