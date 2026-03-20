@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.5
+
+**Released:** 2026-03-20
+
+### Changes since v0.7.4
+
+- Add --dry-run flag to belmont auto
+
+
+
 ## v0.7.4
 
 **Released:** 2026-03-20
