@@ -21,6 +21,8 @@ This session requires ultrathink-level reasoning — deeply consider customer ne
 
 <!-- @include forbidden-actions.md -->
 
+<!-- @include user-questions.md -->
+
 ## ALLOWED ACTIONS
 - Asking the user questions
 - Writing to `.belmont/PR_FAQ.md`
@@ -47,7 +49,7 @@ Before writing, establish these essentials. Ask the user if not provided:
 5. **What is the key customer benefit?** The one thing that matters most
 6. **What company/product is this for?** Needed for the leader quote and branding
 
-Use the AskUserQuestion tool to ask these ONE AT A TIME. Be conversational.
+Ask these using the structured question tool. Be conversational.
 
 ### Step 2: Write the Press Release (1 page max)
 

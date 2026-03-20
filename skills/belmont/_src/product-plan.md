@@ -19,6 +19,8 @@ This session requires ultrathink-level reasoning — deeply consider product edg
 
 <!-- @include forbidden-actions.md -->
 
+<!-- @include user-questions.md -->
+
 ## ALLOWED ACTIONS
 - Reading files to understand the codebase
 - If any Figma URLs are included, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design context (layout, colors, typography, component structure, copy) and incorporate findings into the PRD.
@@ -100,7 +102,7 @@ When **updating** an existing feature (its PRD.md has real content): only add/mo
 
 1. Load relevant skills for the domain (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 2. Ask the user what they want to build
-3. Use the AskUserQuestion tool to ask clarifying questions (ONE AT A TIME) until fully understood
+3. Ask clarifying questions until the feature is fully understood
 4. Consider edge cases, dependencies, blockers
 5. Be proactive and suggest questions to ask the user if they are not clear on something.
 6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use

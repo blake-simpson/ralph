@@ -23,6 +23,16 @@ This session requires ultrathink-level reasoning — deeply consider product edg
 - Running package manager or build commands
 - Making any code changes
 
+## Asking Questions (MANDATORY)
+
+When you need to ask the user a question:
+
+1. **Use your structured question tool** (e.g. `AskUserQuestion`, or equivalent). This is NON-NEGOTIABLE when such a tool is available.
+2. **Ask ONE set of related questions at a time** — group related questions into a single tool call, then wait for answers before asking the next set.
+3. **NEVER print the question as inline text AND use the tool.** The tool call IS the question — do not duplicate it in your response body.
+4. **NEVER ask questions as plain inline text** when a structured question tool exists. No "Question 1: ..." followed by more text. Use the tool.
+5. **Fallback**: If no structured question tool is available in your environment, ask questions as plain text — one set at a time, clearly formatted.
+
 ## ALLOWED ACTIONS
 - Reading files to understand the codebase
 - If any Figma URLs are included, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design context (layout, colors, typography, component structure, copy) and incorporate findings into the PRD.
@@ -129,7 +139,7 @@ When **updating** an existing feature (its PRD.md has real content): only add/mo
 
 1. Load relevant skills for the domain (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 2. Ask the user what they want to build
-3. Use the AskUserQuestion tool to ask clarifying questions (ONE AT A TIME) until fully understood
+3. Ask clarifying questions until the feature is fully understood
 4. Consider edge cases, dependencies, blockers
 5. Be proactive and suggest questions to ask the user if they are not clear on something.
 6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use

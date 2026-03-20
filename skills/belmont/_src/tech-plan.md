@@ -19,6 +19,8 @@ This session requires ultrathink-level reasoning — deeply analyze architecture
 
 <!-- @include forbidden-actions.md -->
 
+<!-- @include user-questions.md -->
+
 ## ALLOWED ACTIONS
 - Reading files to understand codebase
 - Loading Figma designs
@@ -91,8 +93,7 @@ Before starting, verify:
 - If the user says no / skip, proceed directly to interview questions.
 
 ### Phase 3 - Planning (interactive interview style questions)
-- With any upfront context in mind, ask targeted clarifying questions (ONE AT A TIME).
-- Use the AskUserQuestion tool when needed.
+- With any upfront context in mind, ask targeted clarifying questions.
 - Be proactive — skip questions that were already answered by the user's upfront context or by the master tech plan.
 - Continue asking until you and the user are 100% confident in the plan.
 
