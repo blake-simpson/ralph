@@ -199,6 +199,7 @@ type loopConfig struct {
 	MaxIterations int
 	MaxFailures   int
 	MaxParallel   int
+	DryRun        bool
 }
 
 type aiDecision struct {
@@ -2627,6 +2628,7 @@ func runAutoCmd(args []string) error {
 	fs.IntVar(&cfg.MaxIterations, "max-iterations", 20, "maximum loop iterations")
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
 	fs.IntVar(&cfg.MaxParallel, "max-parallel", 3, "max concurrent goroutines for parallel execution")
+	fs.BoolVar(&cfg.DryRun, "dry-run", false, "show execution plan without running")
 	fs.StringVar(&cfg.Root, "root", ".", "project root")
 
 	if err := fs.Parse(args); err != nil {
@@ -2711,6 +2713,24 @@ func runAutoCmd(args []string) error {
 		}
 		cfg.From = selectedFrom
 		cfg.To = selectedTo
+	}
+
+	if cfg.DryRun {
+		fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (single-feature) — %s\033[0m\n", cfg.Feature)
+		fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Policy: %s\033[0m\n", cfg.Tool, cfg.Policy)
+		if cfg.From != "" || cfg.To != "" {
+			fmt.Fprintf(os.Stderr, "\033[2mRange: %s → %s\033[0m\n", cfg.From, cfg.To)
+		}
+		fmt.Fprintf(os.Stderr, "\n\033[1mMilestones:\033[0m\n")
+		for _, m := range inRange {
+			status := "pending"
+			if m.Done {
+				status = "done"
+			}
+			fmt.Fprintf(os.Stderr, "  • %s — %s [%s]\n", m.ID, m.Name, status)
+		}
+		fmt.Fprintln(os.Stderr)
+		return nil
 	}
 
 	// Check if any milestones have explicit dependencies
@@ -2860,19 +2880,24 @@ func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
 }
 
 // validateFeatureDeps checks for dangling dependency references and cycles.
-func validateFeatureDeps(features []featureSummary) error {
+func validateFeatureDeps(features []featureSummary, allKnown []featureSummary) error {
+	// Build slug set from ALL known features so completed deps are recognized
 	slugSet := make(map[string]bool)
-	for _, f := range features {
+	for _, f := range allKnown {
 		slugSet[f.Slug] = true
 	}
 
-	// Check for dangling references
+	// Check for dangling references — collect all errors
+	var errs []string
 	for _, f := range features {
 		for _, dep := range f.Deps {
 			if !slugSet[dep] {
-				return fmt.Errorf("feature %q depends on %q which does not exist", f.Slug, dep)
+				errs = append(errs, fmt.Sprintf("feature %q depends on %q which does not exist", f.Slug, dep))
 			}
 		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
 
 	// Check for cycles by attempting wave computation
@@ -2905,7 +2930,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	}
 
 	// Validate dependencies
-	if err := validateFeatureDeps(features); err != nil {
+	if err := validateFeatureDeps(features, allFeatures); err != nil {
 		return fmt.Errorf("auto: %w", err)
 	}
 
@@ -2948,6 +2973,10 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		}
 	}
 	fmt.Fprintln(os.Stderr)
+
+	if cfg.DryRun {
+		return nil
+	}
 
 	// Set up worktree tracker and signal handler
 	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry)}
