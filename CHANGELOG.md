@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.4
+
+**Released:** 2026-03-20
+
+### Changes since v0.7.3
+
+- Fix for user question tooling in planning modes
+
+
+
 ## v0.7.3
 
 **Released:** 2026-03-19
