@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.6
+
+**Released:** 2026-03-24
+
+### Changes since v0.7.5
+
+- Huge changes to auto workflow
+
+
+
 ## v0.7.5
 
 **Released:** 2026-03-20
