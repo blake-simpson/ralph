@@ -6,8 +6,10 @@ STATE:
 
 AVAILABLE ACTIONS:
 - IMPLEMENT_MILESTONE: Implement next incomplete milestone (set milestone_id)
-- IMPLEMENT_NEXT: Fix follow-up tasks or issues found during verification
+- IMPLEMENT_NEXT: Fix a single follow-up task
 - VERIFY: Run verification on completed milestones
+- TRIAGE: Run AI triage to classify follow-up tasks as blocking vs polish
+- FIX_ALL: Fix all blocking follow-up tasks in batch before re-verification
 - REPLAN: Re-run tech planning when current approach has systemic issues
 - DEBUG: Run automated debugging when verification keeps failing on recurring issues
 - SKIP_MILESTONE: Skip a blocked milestone (set milestone_id)

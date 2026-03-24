@@ -1,6 +1,6 @@
 # CLI Commands
 
-Belmont ships a small Go CLI (`belmont`) for status checks, file queries, and self-updating. Install via the [curl one-liner](../README.md#quick-start), or on Windows use `./bin/install.ps1` for a project-local helper.
+Belmont ships a small Go CLI (`belmont`) for status checks, automated feature implementation, and self-updating. Install via the [curl one-liner](../README.md#quick-start), or on Windows use `./bin/install.ps1` for a project-local helper.
 
 ## Usage
 
@@ -11,15 +11,13 @@ belmont update --check                  # Check for updates without installing
 belmont status                          # View project progress
 belmont status --format json            # Machine-readable status
 belmont status --feature auth           # Feature-specific status
-belmont tree --max-depth 3              # Project tree
-belmont find --name PRD --type file     # Find files
-belmont search --pattern "TECH_PLAN"    # Search file contents
 belmont auto --feature auth              # Run feature auto (auto-detect tool)
 belmont auto --feature auth --tool codex # Use specific tool
 belmont auto --feature auth --from M2 --to M4  # Milestone range
 belmont auto --features auth,payments    # Run multiple features in parallel
 belmont auto --all                       # Run all pending features in parallel
 belmont auto --all --max-parallel 2      # Cap concurrent features
+belmont sync                             # Sync master PROGRESS.md with feature states
 belmont recover                          # List preserved worktrees from failed merges
 belmont recover --list                   # Same as above
 belmont recover --merge auth             # Retry merge for a preserved worktree
@@ -34,7 +32,6 @@ belmont version                         # Show version, commit, build date
 
 Skills prefer these helpers when available:
 - `status` uses `belmont status` first
-- `product-plan` and `tech-plan` may use `belmont tree`/`search` (or `find`) for quick structure/pattern checks
 - `implement`, `next`, `verify`, and `reset` may use `belmont status --format json` for summaries (still read `.belmont` files for full context)
 
 ## Windows

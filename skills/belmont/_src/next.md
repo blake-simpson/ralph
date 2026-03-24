@@ -23,7 +23,21 @@ This is ideal for small follow-up tasks from verification, quick fixes, and well
 - Large tasks that touch many files or systems
 - Tasks that require Figma design analysis
 - The first tasks in a brand-new milestone (use `/belmont:implement` instead)
-- Multiple tasks you want done in sequence (use `/belmont:implement` for the full milestone)
+
+## Batch Mode
+
+If the invoking prompt contains "BATCH MODE" instructions, implement **ALL pending FWLUP tasks** in the current milestone sequentially instead of stopping after one:
+
+1. After completing a task (Steps 1-5), loop back to Step 1 to find the next pending FWLUP task
+2. Continue until no pending FWLUP tasks remain in the milestone
+3. Archive each MILESTONE file individually after each task (Step 5)
+4. Report a combined summary at the end listing all tasks completed
+
+**Critical**: In batch mode, ONLY work on tasks that have "FWLUP" in their task ID. If Step 1 finds no pending FWLUP tasks, stop immediately and report "No FWLUP tasks to fix — batch mode complete." Do NOT pick up regular (non-FWLUP) tasks. Regular tasks require the full `/belmont:implement` pipeline.
+
+This mode is used by the auto loop to fix all follow-up issues in a single invocation, avoiding the overhead of re-invoking the tool CLI for each small fix.
+
+**Important**: In batch mode, still dispatch each task individually to the implementation agent (one sub-agent per task). Do not try to batch multiple tasks into a single implementation agent call.
 
 ## Setup
 
@@ -42,6 +56,7 @@ Optional helper:
 
 1. Read `{base}/PROGRESS.md` and find the **first pending milestone** (any milestone with unchecked `[ ]` tasks)
 2. Within that milestone, find the **first unchecked task** (`[ ]`)
+   - **In batch mode**: Only consider tasks with "FWLUP" in their ID. If no FWLUP tasks are pending, report "No FWLUP tasks to fix — batch mode complete." and stop. Do NOT implement regular tasks.
 3. Look up that task's full definition in `{base}/PRD.md`
 4. If all tasks are complete, report "All tasks complete!" and stop
 
@@ -63,6 +78,7 @@ Create `{base}/MILESTONE.md` with a focused, lightweight version of the mileston
 
 ## Status
 - **Milestone**: [e.g., M2: Core Features]
+- **Git Baseline**: [Run `git rev-parse HEAD` and record the SHA here — this is used by verification agents to distinguish new code from pre-existing code]
 - **Mode**: Lightweight (next skill — single task, no analysis agents)
 - **Created**: [timestamp]
 - **Tasks**:
@@ -174,7 +190,7 @@ Prompt the user to "/clear" and then "/belmont:status", "/belmont:next", or "/be
 
 ## Important Rules
 
-1. **One task only** — find the next task, implement it, stop. Do not continue to the next task.
+1. **One task only** (unless in batch mode) — find the next task, implement it, stop. In batch mode, continue to the next FWLUP task until none remain.
 2. **Use the implementation agent** — dispatch to a sub-agent, don't implement code yourself
 3. **Create the MILESTONE file** — even in lightweight mode, use the MILESTONE file as the contract with the implementation agent
 4. **Clean up after** — archive the MILESTONE file when done

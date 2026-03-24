@@ -41,6 +41,7 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 
 ## Status
 - **Milestone**: [e.g., M2: Core Features]
+- **Git Baseline**: [Run `git rev-parse HEAD` and record the SHA here — this is used by verification agents to distinguish new code from pre-existing code]
 - **Created**: [timestamp]
 - **Tasks**:
   - [ ] [Task ID]: [Task Name]

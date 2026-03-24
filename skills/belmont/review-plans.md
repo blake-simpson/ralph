@@ -153,8 +153,7 @@ For each finding, present interactively. If no findings: report "Layer 3: Tasks 
 Read the codebase structure to compare against plans:
 
 1. **Get codebase structure**
-   - Try `belmont tree` if the CLI is available
-   - Otherwise, use glob/read on key directories
+   - Use glob/read on key directories
 
 2. **Tech plan file structure**
    - For each feature with a tech plan that specifies file paths or directory structure:

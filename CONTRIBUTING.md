@@ -28,7 +28,6 @@ go build ./cmd/belmont
 ```bash
 # Run commands directly
 go run ./cmd/belmont status --root /path/to/project
-go run ./cmd/belmont tree
 go run ./cmd/belmont version
 
 # Install skills into a project (requires --source since dev builds have no embedded files)

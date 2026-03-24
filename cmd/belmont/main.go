@@ -86,30 +86,6 @@ type statusReport struct {
 	Features        []featureSummary
 }
 
-type cacheIndex struct {
-	Root        string      `json:"root"`
-	GeneratedAt time.Time   `json:"generated_at"`
-	Files       []cacheFile `json:"files"`
-}
-
-type cacheFile struct {
-	Path    string    `json:"path"`
-	Size    int64     `json:"size"`
-	ModTime time.Time `json:"mod_time"`
-	IsDir   bool      `json:"is_dir"`
-}
-
-type findResult struct {
-	Path  string `json:"path"`
-	IsDir bool   `json:"is_dir"`
-}
-
-type searchResult struct {
-	Path string `json:"path"`
-	Line int    `json:"line"`
-	Text string `json:"text"`
-}
-
 type config struct {
 	Source string `json:"source"`
 }
@@ -127,12 +103,18 @@ const (
 	actionReplan             loopActionType = "REPLAN"
 	actionSkipMilestone      loopActionType = "SKIP_MILESTONE"
 	actionDebug              loopActionType = "DEBUG"
+	actionTriage             loopActionType = "TRIAGE"
+	actionFixAll             loopActionType = "FIX_ALL"
 )
 
+var errFeaturePaused = fmt.Errorf("feature paused")
+
 type loopAction struct {
-	Type        loopActionType
-	Reason      string
-	MilestoneID string
+	Type            loopActionType
+	Reason          string
+	MilestoneID     string
+	TriageDecision  string // "fix_and_reverify", "fix_and_proceed", "defer_and_proceed" — set after triage
+	ReverifyScope   string // "full" or "focused" — set by triage
 }
 
 type executionResult struct {
@@ -171,14 +153,15 @@ type historyEntry struct {
 }
 
 type milestoneLoopState struct {
-	ID           string
-	Name         string
-	Done         bool
-	Implemented  bool
-	Verified     bool
-	VerifyFailed int
-	WorkType     workType
-	FilesChanged int
+	ID              string
+	Name            string
+	Done            bool
+	Implemented     bool
+	Verified        bool
+	VerifyFailed    int
+	WorkType        workType
+	FilesChanged    int
+	FwlupFixRounds  int // how many triage+fix cycles have run for this milestone
 }
 
 type checkpointPolicy string
@@ -239,12 +222,6 @@ func main() {
 	switch os.Args[1] {
 	case "status":
 		must(runStatus(os.Args[2:]))
-	case "tree":
-		must(runTree(os.Args[2:]))
-	case "find":
-		must(runFind(os.Args[2:]))
-	case "search":
-		must(runSearch(os.Args[2:]))
 	case "auto", "loop":
 		must(runAutoCmd(os.Args[2:]))
 	case "install":
@@ -253,6 +230,8 @@ func main() {
 		must(runUpdate(os.Args[2:]))
 	case "recover":
 		must(runRecover(os.Args[2:]))
+	case "sync":
+		must(runSyncCmd(os.Args[2:]))
 	case "version":
 		fmt.Printf("belmont %s (%s, %s)\n", Version, CommitSHA, BuildDate)
 	case "help", "-h", "--help":
@@ -272,11 +251,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont install [--source PATH] [--project PATH] [--tools all|none|claude,codex,...]")
 	fmt.Fprintln(w, "  belmont update [--check] [--force]")
 	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json]")
-	fmt.Fprintln(w, "  belmont tree [--root PATH] [--max-depth N] [--max-entries N] [--format text|json]")
-	fmt.Fprintln(w, "  belmont find --name QUERY [--root PATH] [--regex] [--type file|dir|any] [--limit N] [--format text|json]")
-	fmt.Fprintln(w, "  belmont search --pattern REGEX [--root PATH] [--limit N] [--format text|json]")
 	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--root PATH]")
 	fmt.Fprintln(w, "    (alias: belmont loop)")
+	fmt.Fprintln(w, "  belmont sync [--root PATH]")
 	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont version")
 }
@@ -605,6 +582,144 @@ func parseMasterPRDDeps(root string) (deps map[string][]string, priorities map[s
 	return
 }
 
+// parseMasterFeatureStatuses reads the ## Features table in the master .belmont/PROGRESS.md
+// and returns a map of slug → status string (e.g. "✅ Complete", "🟡 In Progress").
+func parseMasterFeatureStatuses(root string) map[string]string {
+	statuses := make(map[string]string)
+
+	progressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
+	content, err := os.ReadFile(progressPath)
+	if err != nil {
+		return statuses
+	}
+
+	lines := strings.Split(string(content), "\n")
+	inTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "## Features") {
+			inTable = true
+			continue
+		}
+
+		if inTable && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+
+		if !inTable || !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+
+		cols := strings.Split(trimmed, "|")
+		var cells []string
+		for _, c := range cols {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				cells = append(cells, c)
+			}
+		}
+
+		// Need at least 3 columns: Feature, Slug, Status
+		if len(cells) < 3 {
+			continue
+		}
+
+		slug := strings.TrimSpace(cells[1])
+		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
+			continue
+		}
+
+		status := strings.TrimSpace(cells[2])
+		statuses[slug] = status
+	}
+	return statuses
+}
+
+// syncMasterFeatureStatuses updates the ## Features table in master .belmont/PROGRESS.md
+// to match computed feature-level statuses. This prevents stale master data from causing
+// auto mode to skip features that still have pending work.
+func syncMasterFeatureStatuses(root string, features []featureSummary) {
+	progressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
+	content, err := os.ReadFile(progressPath)
+	if err != nil {
+		return
+	}
+
+	// Build lookup from computed features
+	type computed struct {
+		Status     string
+		MsDone     int
+		MsTotal    int
+		TasksDone  int
+		TasksTotal int
+	}
+	lookup := make(map[string]computed)
+	for _, f := range features {
+		lookup[f.Slug] = computed{
+			Status:     f.Status,
+			MsDone:     f.MilestonesDone,
+			MsTotal:    f.MilestonesTotal,
+			TasksDone:  f.TasksDone,
+			TasksTotal: f.TasksTotal,
+		}
+	}
+
+	lines := strings.Split(string(content), "\n")
+	inTable := false
+	changed := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "## Features") {
+			inTable = true
+			continue
+		}
+		if inTable && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if !inTable || !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+
+		cols := strings.Split(trimmed, "|")
+		var cells []string
+		for _, c := range cols {
+			c = strings.TrimSpace(c)
+			if c != "" {
+				cells = append(cells, c)
+			}
+		}
+		if len(cells) < 6 {
+			continue
+		}
+
+		slug := strings.TrimSpace(cells[1])
+		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
+			continue
+		}
+
+		c, ok := lookup[slug]
+		if !ok {
+			continue
+		}
+
+		newStatus := c.Status
+		newMs := fmt.Sprintf("%d/%d", c.MsDone, c.MsTotal)
+		newTasks := fmt.Sprintf("%d/%d", c.TasksDone, c.TasksTotal)
+
+		if cells[2] != newStatus || cells[3] != newMs || cells[4] != newTasks {
+			lines[i] = fmt.Sprintf("| %s | %s | %s | %s | %s | %s |",
+				cells[0], slug, newStatus, newMs, newTasks, cells[5])
+			changed = true
+		}
+	}
+
+	if changed {
+		os.WriteFile(progressPath, []byte(strings.Join(lines, "\n")), 0644)
+	}
+}
+
 // populateFeatureDeps enriches feature summaries with dependency and priority info from master PRD.
 func populateFeatureDeps(features []featureSummary, root string) {
 	deps, priorities := parseMasterPRDDeps(root)
@@ -783,6 +898,72 @@ func nextTask(tasks []task) *task {
 
 func parseBlockers(progress string) []string {
 	return parseSectionLines(progress, "## Blockers")
+}
+
+// filterResolvedFeatureBlockers removes blockers that reference feature slugs
+// which are already complete. This handles stale blockers that weren't cleaned
+// up by the AI agent after dependency features finished.
+func filterResolvedFeatureBlockers(blockers []string, root string) []string {
+	if len(blockers) == 0 {
+		return blockers
+	}
+
+	// Resolve symlinked .belmont to get the real root
+	belmontPath := filepath.Join(root, ".belmont")
+	if target, err := filepath.EvalSymlinks(belmontPath); err == nil {
+		root = filepath.Dir(target)
+	}
+
+	featuresDir := filepath.Join(root, ".belmont", "features")
+	entries, err := os.ReadDir(featuresDir)
+	if err != nil {
+		return blockers
+	}
+
+	// Build set of completed feature slugs
+	completeSlugs := make(map[string]bool)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		progressPath := filepath.Join(featuresDir, slug, "PROGRESS.md")
+		content, err := os.ReadFile(progressPath)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(content), "## Status: ✅ Complete") {
+			completeSlugs[slug] = true
+		}
+	}
+
+	// Also check master PROGRESS.md feature table statuses
+	masterStatuses := parseMasterFeatureStatuses(root)
+	for slug, status := range masterStatuses {
+		if strings.Contains(status, "✅") {
+			completeSlugs[slug] = true
+		}
+	}
+
+	if len(completeSlugs) == 0 {
+		return blockers
+	}
+
+	var filtered []string
+	for _, b := range blockers {
+		lower := strings.ToLower(b)
+		resolved := false
+		for slug := range completeSlugs {
+			if strings.Contains(lower, slug) {
+				resolved = true
+				break
+			}
+		}
+		if !resolved {
+			filtered = append(filtered, b)
+		}
+	}
+	return filtered
 }
 
 func parseDecisions(progress string, limit int) []string {
@@ -1083,220 +1264,6 @@ func taskStatusIcon(status taskStatus) string {
 	}
 }
 
-func runTree(args []string) error {
-	fsFlags := flag.NewFlagSet("tree", flag.ContinueOnError)
-	fsFlags.SetOutput(io.Discard)
-	var root string
-	var maxDepth int
-	var maxEntries int
-	var format string
-	var cacheTTL time.Duration
-	fsFlags.StringVar(&root, "root", ".", "project root")
-	fsFlags.IntVar(&maxDepth, "max-depth", 2, "max depth")
-	fsFlags.IntVar(&maxEntries, "max-entries", 200, "max entries")
-	fsFlags.StringVar(&format, "format", "text", "text or json")
-	fsFlags.DurationVar(&cacheTTL, "cache-ttl", 5*time.Second, "cache ttl")
-	if err := fsFlags.Parse(args); err != nil {
-		return fmt.Errorf("tree: %w", err)
-	}
-
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return err
-	}
-
-	entries, err := listEntries(absRoot, maxDepth, maxEntries, cacheTTL)
-	if err != nil {
-		return err
-	}
-
-	switch strings.ToLower(format) {
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(entries)
-	case "text":
-		for _, entry := range entries {
-			indent := strings.Repeat("  ", entry.Depth)
-			name := filepath.Base(entry.Path)
-			if entry.IsDir {
-				fmt.Printf("%s%s/\n", indent, name)
-			} else {
-				fmt.Printf("%s%s\n", indent, name)
-			}
-		}
-		return nil
-	default:
-		return fmt.Errorf("tree: unknown format %q", format)
-	}
-}
-
-func runFind(args []string) error {
-	fsFlags := flag.NewFlagSet("find", flag.ContinueOnError)
-	fsFlags.SetOutput(io.Discard)
-	var root string
-	var name string
-	var useRegex bool
-	var matchType string
-	var limit int
-	var format string
-	var ignoreCase bool
-	var cacheTTL time.Duration
-
-	fsFlags.StringVar(&root, "root", ".", "project root")
-	fsFlags.StringVar(&name, "name", "", "name query")
-	fsFlags.BoolVar(&useRegex, "regex", false, "treat name as regex")
-	fsFlags.StringVar(&matchType, "type", "file", "file, dir, or any")
-	fsFlags.IntVar(&limit, "limit", 200, "max results")
-	fsFlags.StringVar(&format, "format", "text", "text or json")
-	fsFlags.BoolVar(&ignoreCase, "ignore-case", false, "case insensitive")
-	fsFlags.DurationVar(&cacheTTL, "cache-ttl", 5*time.Second, "cache ttl")
-
-	if err := fsFlags.Parse(args); err != nil {
-		return fmt.Errorf("find: %w", err)
-	}
-
-	if name == "" {
-		return errors.New("find: --name is required")
-	}
-
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return err
-	}
-
-	matcher, err := buildMatcher(name, useRegex, ignoreCase)
-	if err != nil {
-		return err
-	}
-
-	entries, err := listEntries(absRoot, -1, limit, cacheTTL)
-	if err != nil {
-		return err
-	}
-
-	matchType = strings.ToLower(matchType)
-	results := make([]findResult, 0)
-	for _, entry := range entries {
-		if limit > 0 && len(results) >= limit {
-			break
-		}
-		if matchType == "file" && entry.IsDir {
-			continue
-		}
-		if matchType == "dir" && !entry.IsDir {
-			continue
-		}
-		rel := entry.Path
-		namePart := filepath.Base(rel)
-		if matcher(namePart) {
-			results = append(results, findResult{Path: rel, IsDir: entry.IsDir})
-		}
-	}
-
-	switch strings.ToLower(format) {
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(results)
-	case "text":
-		for _, res := range results {
-			fmt.Println(res.Path)
-		}
-		return nil
-	default:
-		return fmt.Errorf("find: unknown format %q", format)
-	}
-}
-
-func runSearch(args []string) error {
-	fsFlags := flag.NewFlagSet("search", flag.ContinueOnError)
-	fsFlags.SetOutput(io.Discard)
-	var root string
-	var pattern string
-	var limit int
-	var format string
-	var ignoreCase bool
-	fsFlags.StringVar(&root, "root", ".", "project root")
-	fsFlags.StringVar(&pattern, "pattern", "", "regex pattern")
-	fsFlags.IntVar(&limit, "limit", 200, "max results")
-	fsFlags.StringVar(&format, "format", "text", "text or json")
-	fsFlags.BoolVar(&ignoreCase, "ignore-case", false, "case insensitive")
-
-	if err := fsFlags.Parse(args); err != nil {
-		return fmt.Errorf("search: %w", err)
-	}
-
-	if pattern == "" {
-		return errors.New("search: --pattern is required")
-	}
-
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return err
-	}
-
-	if ignoreCase {
-		pattern = "(?i)" + pattern
-	}
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return fmt.Errorf("search: invalid pattern: %w", err)
-	}
-
-	results := make([]searchResult, 0)
-	err = filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == absRoot {
-			return nil
-		}
-		if shouldSkip(path, d) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-		if limit > 0 && len(results) >= limit {
-			return io.EOF
-		}
-
-		rel, err := filepath.Rel(absRoot, path)
-		if err != nil {
-			return err
-		}
-
-		matches, err := searchFile(path, rel, re, limit-len(results))
-		if err != nil {
-			return err
-		}
-		results = append(results, matches...)
-		return nil
-	})
-
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-
-	switch strings.ToLower(format) {
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(results)
-	case "text":
-		for _, res := range results {
-			fmt.Printf("%s:%d:%s\n", res.Path, res.Line, res.Text)
-		}
-		return nil
-	default:
-		return fmt.Errorf("search: unknown format %q", format)
-	}
-}
-
 type toolConfig struct {
 	Name  string
 	Label string
@@ -1468,217 +1435,6 @@ func runInstall(args []string) error {
 	fmt.Println("")
 
 	return nil
-}
-
-func searchFile(path, rel string, re *regexp.Regexp, limit int) ([]searchResult, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	if isBinary(file) {
-		return nil, nil
-	}
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 512*1024)
-	var results []searchResult
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		if limit > 0 && len(results) >= limit {
-			break
-		}
-		line := scanner.Text()
-		if re.MatchString(line) {
-			results = append(results, searchResult{Path: rel, Line: lineNo, Text: line})
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
-func isBinary(file *os.File) bool {
-	buf := make([]byte, 8000)
-	n, _ := file.Read(buf)
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return true
-	}
-	for i := 0; i < n; i++ {
-		if buf[i] == 0 {
-			return true
-		}
-	}
-	return false
-}
-
-type listEntry struct {
-	Path  string `json:"path"`
-	IsDir bool   `json:"is_dir"`
-	Depth int    `json:"depth"`
-}
-
-func listEntries(root string, maxDepth int, maxEntries int, cacheTTL time.Duration) ([]listEntry, error) {
-	useCache := cacheTTL > 0
-	cachePath := filepath.Join(root, ".belmont", "cache", "index.json")
-
-	if useCache {
-		if entries, ok := loadCachedEntries(cachePath, root, cacheTTL); ok {
-			return filterEntries(entries, maxDepth, maxEntries), nil
-		}
-	}
-
-	entries := make([]listEntry, 0)
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == root {
-			return nil
-		}
-		if shouldSkip(path, d) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		depth := depthOf(rel)
-		if maxDepth >= 0 && depth > maxDepth {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		entries = append(entries, listEntry{Path: rel, IsDir: d.IsDir(), Depth: depth})
-		if maxEntries > 0 && len(entries) >= maxEntries {
-			return io.EOF
-		}
-		return nil
-	})
-
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, err
-	}
-
-	if useCache {
-		_ = saveCache(cachePath, root, entries)
-	}
-
-	return entries, nil
-}
-
-func saveCache(path, root string, entries []listEntry) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-
-	cache := cacheIndex{Root: root, GeneratedAt: time.Now(), Files: make([]cacheFile, 0, len(entries))}
-	for _, entry := range entries {
-		cache.Files = append(cache.Files, cacheFile{Path: entry.Path, IsDir: entry.IsDir})
-	}
-
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	enc := json.NewEncoder(file)
-	enc.SetIndent("", "  ")
-	return enc.Encode(cache)
-}
-
-func loadCachedEntries(path, root string, ttl time.Duration) ([]listEntry, bool) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, false
-	}
-	defer file.Close()
-
-	var cache cacheIndex
-	dec := json.NewDecoder(file)
-	if err := dec.Decode(&cache); err != nil {
-		return nil, false
-	}
-
-	if cache.Root != root {
-		return nil, false
-	}
-	if time.Since(cache.GeneratedAt) > ttl {
-		return nil, false
-	}
-
-	entries := make([]listEntry, 0, len(cache.Files))
-	for _, file := range cache.Files {
-		entries = append(entries, listEntry{Path: file.Path, IsDir: file.IsDir, Depth: depthOf(file.Path)})
-	}
-	return entries, true
-}
-
-func filterEntries(entries []listEntry, maxDepth int, maxEntries int) []listEntry {
-	filtered := make([]listEntry, 0, len(entries))
-	for _, entry := range entries {
-		if maxDepth >= 0 && entry.Depth > maxDepth {
-			continue
-		}
-		filtered = append(filtered, entry)
-		if maxEntries > 0 && len(filtered) >= maxEntries {
-			break
-		}
-	}
-	return filtered
-}
-
-func depthOf(rel string) int {
-	if rel == "." || rel == "" {
-		return 0
-	}
-	sep := string(os.PathSeparator)
-	return strings.Count(rel, sep)
-}
-
-func buildMatcher(pattern string, regex bool, ignoreCase bool) (func(string) bool, error) {
-	if regex {
-		if ignoreCase {
-			pattern = "(?i)" + pattern
-		}
-		re, err := regexp.Compile(pattern)
-		if err != nil {
-			return nil, err
-		}
-		return re.MatchString, nil
-	}
-
-	if ignoreCase {
-		lower := strings.ToLower(pattern)
-		return func(s string) bool { return strings.Contains(strings.ToLower(s), lower) }, nil
-	}
-	return func(s string) bool { return strings.Contains(s, pattern) }, nil
-}
-
-func shouldSkip(path string, d fs.DirEntry) bool {
-	name := d.Name()
-	if d.IsDir() {
-		switch name {
-		case ".git", ".belmont", "node_modules", "dist", "build", "out", ".next", ".turbo", ".cache", "vendor", "coverage", ".idea", ".vscode", "target", "tmp", "temp", "__pycache__":
-			return true
-		}
-		return false
-	}
-
-	switch name {
-	case ".DS_Store", "Thumbs.db":
-		return true
-	}
-	return false
 }
 
 func atoiDefault(s string, def int) int {
@@ -1968,6 +1724,69 @@ func syncMarkdownDir(sourceDir, targetDir string) error {
 	return nil
 }
 
+// installClaudeCodeHook adds a postToolUse hook to .claude/settings.json that runs
+// `belmont sync` after skill invocations to keep master PROGRESS.md in sync.
+func installClaudeCodeHook(projectRoot string) {
+	settingsPath := filepath.Join(projectRoot, ".claude", "settings.json")
+	hookCommand := "belmont sync --root . 2>/dev/null || true"
+	hookMatcher := "Skill"
+
+	// Read existing settings or start fresh
+	var settings map[string]interface{}
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			settings = make(map[string]interface{})
+		}
+	} else {
+		settings = make(map[string]interface{})
+	}
+
+	// Navigate to hooks.postToolUse, creating structure as needed
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		hooks = make(map[string]interface{})
+		settings["hooks"] = hooks
+	}
+
+	// Get or create postToolUse array
+	var postToolUse []interface{}
+	if existing, ok := hooks["postToolUse"].([]interface{}); ok {
+		postToolUse = existing
+	}
+
+	// Check if belmont sync hook already exists
+	for _, entry := range postToolUse {
+		if m, ok := entry.(map[string]interface{}); ok {
+			if cmd, _ := m["command"].(string); strings.Contains(cmd, "belmont sync") {
+				return // already installed
+			}
+		}
+	}
+
+	// Add the hook
+	newHook := map[string]interface{}{
+		"matcher": hookMatcher,
+		"command": hookCommand,
+	}
+	postToolUse = append(postToolUse, newHook)
+	hooks["postToolUse"] = postToolUse
+
+	// Write settings back (disable HTML escaping so > doesn't become \u003e)
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(settings); err != nil {
+		return
+	}
+	os.MkdirAll(filepath.Dir(settingsPath), 0755)
+	if err := os.WriteFile(settingsPath, buf.Bytes(), 0644); err != nil {
+		fmt.Printf("  ⚠ Could not install sync hook: %s\n", err)
+		return
+	}
+	fmt.Println("  - .claude/settings.json (added belmont sync hook)")
+}
+
 func setupTool(projectRoot, tool string) error {
 	switch tool {
 	case "claude":
@@ -1989,6 +1808,8 @@ func setupTool(projectRoot, tool string) error {
 				return err
 			}
 		}
+		// Install belmont sync hook in Claude Code settings
+		installClaudeCodeHook(projectRoot)
 	case "codex":
 		fmt.Println("Linking Codex...")
 		skillsTarget := filepath.Join(projectRoot, ".agents", "skills", "belmont")
@@ -2625,9 +2446,9 @@ func runAutoCmd(args []string) error {
 	fs.StringVar(&cfg.To, "to", "", "end milestone (e.g. M5)")
 	fs.StringVar(&cfg.Tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor)")
 	fs.StringVar(&policyStr, "policy", "autonomous", "checkpoint policy (autonomous|milestone|every_action)")
-	fs.IntVar(&cfg.MaxIterations, "max-iterations", 20, "maximum loop iterations")
+	fs.IntVar(&cfg.MaxIterations, "max-iterations", 50, "maximum loop iterations")
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
-	fs.IntVar(&cfg.MaxParallel, "max-parallel", 3, "max concurrent goroutines for parallel execution")
+	fs.IntVar(&cfg.MaxParallel, "max-parallel", 5, "max concurrent goroutines for parallel execution")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "show execution plan without running")
 	fs.StringVar(&cfg.Root, "root", ".", "project root")
 
@@ -2759,11 +2580,15 @@ func resolveFeatureSlugs(root, featuresFlag string, allFlag bool) ([]string, err
 		if len(features) == 0 {
 			return nil, fmt.Errorf("auto: no features found in %s", featuresDir)
 		}
+		// Sync computed feature statuses back to master PROGRESS.md to fix drift
+		syncMasterFeatureStatuses(root, features)
 		var slugs []string
 		for _, f := range features {
-			if f.Status != "✅ Complete" {
-				slugs = append(slugs, f.Slug)
+			// Skip features that are complete (computed from feature-level PRD/PROGRESS files)
+			if f.Status == "✅ Complete" {
+				continue
 			}
+			slugs = append(slugs, f.Slug)
 		}
 		if len(slugs) == 0 {
 			return nil, fmt.Errorf("auto: all features are already complete")
@@ -2910,7 +2735,25 @@ func validateFeatureDeps(features []featureSummary, allKnown []featureSummary) e
 func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	startTime := time.Now()
 
-	ensureWorktreesGitignore(cfg.Root)
+	// Pre-flight: ensure repo is in a clean state before starting
+	if err := validateRepoState(cfg.Root); err != nil {
+		return fmt.Errorf("auto: %w", err)
+	}
+
+	// Record original branch and restore on exit if changed
+	origBranch := getCurrentBranch(cfg.Root)
+	defer func() {
+		if origBranch != "" && origBranch != "HEAD" {
+			if cur := getCurrentBranch(cfg.Root); cur != origBranch {
+				fmt.Fprintf(os.Stderr, "\033[33m⚠ Branch changed from %s to %s — restoring...\033[0m\n", origBranch, cur)
+				restoreCmd := exec.Command("git", "checkout", origBranch)
+				restoreCmd.Dir = cfg.Root
+				restoreCmd.Run()
+			}
+		}
+	}()
+
+	prepareWorktreesGitignore(cfg.Root)
 
 	// Build feature summaries with dependency info
 	featuresDir := filepath.Join(cfg.Root, ".belmont", "features")
@@ -2984,7 +2827,13 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — cleaning up worktrees...\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state and cleaning up worktrees...\033[0m\n")
+		// Revert .belmont/ state for all active worktrees to prevent phantom completion
+		activeWorktrees.mu.Lock()
+		for slug := range activeWorktrees.entries {
+			revertFeatureState(cfg.Root, slug)
+		}
+		activeWorktrees.mu.Unlock()
 		activeWorktrees.cleanupAll(cfg.Root)
 		os.Exit(1)
 	}()
@@ -3072,9 +2921,17 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		var waveSuccesses []featureResult
 		for r := range results {
 			if r.Err != nil {
-				fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", r.Slug, r.Err)
-				allFailures = append(allFailures, r)
-				failedSlugs[r.Slug] = true
+				if errors.Is(r.Err, errFeaturePaused) {
+					fmt.Fprintf(os.Stderr, "\033[33m⏸ %s paused\033[0m — has unresolved blockers\n", r.Slug)
+					// Don't add to failedSlugs (downstream deps may still be satisfiable)
+					// Don't add to waveSuccesses (nothing to merge)
+				} else {
+					fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", r.Slug, r.Err)
+					// Revert .belmont/ state — worktree writes via symlink polluted state
+					revertFeatureState(cfg.Root, r.Slug)
+					allFailures = append(allFailures, r)
+					failedSlugs[r.Slug] = true
+				}
 			} else {
 				fmt.Fprintf(os.Stderr, "\033[32m✓ %s complete\033[0m — merging...\n", r.Slug)
 				waveSuccesses = append(waveSuccesses, r)
@@ -3082,17 +2939,44 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		}
 
 		// Merge this wave's successes before proceeding to next wave
-		for _, s := range waveSuccesses {
+		// State is NOT committed before merge — only after successful merge.
+		// This prevents "phantom completion" where state says ✅ but code never merged.
+		for i, s := range waveSuccesses {
+			// Ensure repo is in a clean merge state before each merge
+			if err := ensureCleanMergeState(cfg.Root); err != nil {
+				fmt.Fprintf(os.Stderr, "\033[33m⚠ %s — skipping remaining %d merge(s)\033[0m\n", err, len(waveSuccesses)-i)
+				for _, remaining := range waveSuccesses[i:] {
+					revertFeatureState(cfg.Root, remaining.Slug)
+					allFailures = append(allFailures, featureResult{Slug: remaining.Slug, Err: fmt.Errorf("skipped: unclean merge state")})
+					failedSlugs[remaining.Slug] = true
+				}
+				break
+			}
 			if err := mergeFeatureBranch(cfg, s.Slug, s.Branch, s.WorktreePath, activeWorktrees); err != nil {
 				fmt.Fprintf(os.Stderr, "\033[31m✗ merge failed for %s: %s\033[0m\n", s.Slug, err)
 				fmt.Fprintf(os.Stderr, "  Worktree preserved at: %s\n", s.WorktreePath)
 				fmt.Fprintf(os.Stderr, "  Branch: %s\n", s.Branch)
+				// Revert state — code didn't merge, state shouldn't say done
+				revertFeatureState(cfg.Root, s.Slug)
 				allFailures = append(allFailures, featureResult{Slug: s.Slug, Err: err})
 				failedSlugs[s.Slug] = true
 			} else {
+				// Merge succeeded — NOW commit the state
+				if err := commitBelmontState(cfg.Root); err != nil {
+					fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to commit .belmont/ state: %s\033[0m\n", err)
+				}
 				totalMerged++
 			}
 		}
+	}
+
+	// Sync master PROGRESS.md with actual feature states after all merges
+	featuresDir = filepath.Join(cfg.Root, ".belmont", "features")
+	syncMasterFeatureStatuses(cfg.Root, listFeatures(featuresDir, 50))
+
+	// Commit any remaining .belmont/ state changes after all merges
+	if err := commitBelmontState(cfg.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ Failed to commit final .belmont/ state: %s\033[0m\n", err)
 	}
 
 	// Report
@@ -3151,18 +3035,29 @@ func handleStaleWorktree(root, id, branch, wtPath string) (resumed bool, err err
 			if wtExists {
 				// Worktree still exists — reuse it directly
 				fmt.Fprintf(os.Stderr, "  Resuming with existing worktree at %s\n", wtPath)
-				return true, nil
+			} else {
+				// Branch exists but worktree is gone — reattach
+				fmt.Fprintf(os.Stderr, "  Reattaching worktree to existing branch %s\n", branch)
+				wtDir := filepath.Dir(wtPath)
+				if err := os.MkdirAll(wtDir, 0755); err != nil {
+					return false, fmt.Errorf("create worktree dir: %w", err)
+				}
+				addCmd := exec.Command("git", "worktree", "add", wtPath, branch)
+				addCmd.Dir = root
+				if out, err := addCmd.CombinedOutput(); err != nil {
+					return false, fmt.Errorf("git worktree add (resume): %w (%s)", err, strings.TrimSpace(string(out)))
+				}
 			}
-			// Branch exists but worktree is gone — reattach
-			fmt.Fprintf(os.Stderr, "  Reattaching worktree to existing branch %s\n", branch)
-			wtDir := filepath.Dir(wtPath)
-			if err := os.MkdirAll(wtDir, 0755); err != nil {
-				return false, fmt.Errorf("create worktree dir: %w", err)
-			}
-			addCmd := exec.Command("git", "worktree", "add", wtPath, branch)
-			addCmd.Dir = root
-			if out, err := addCmd.CombinedOutput(); err != nil {
-				return false, fmt.Errorf("git worktree add (resume): %w (%s)", err, strings.TrimSpace(string(out)))
+			// Ensure .belmont symlink exists (may be old-style copy or missing)
+			dstBelmont := filepath.Join(wtPath, ".belmont")
+			if fi, err := os.Lstat(dstBelmont); err == nil {
+				if fi.Mode()&os.ModeSymlink == 0 {
+					// Old-style copy — replace with symlink
+					os.RemoveAll(dstBelmont)
+					os.Symlink(filepath.Join(root, ".belmont"), dstBelmont)
+				}
+			} else {
+				os.Symlink(filepath.Join(root, ".belmont"), dstBelmont)
 			}
 			return true, nil
 
@@ -3216,18 +3111,17 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string) error {
 		}
 	}
 
-	// Copy .belmont/features/<slug>/ state to worktree
-	srcFeatureDir := filepath.Join(cfg.Root, ".belmont", "features", slug)
-	dstFeatureDir := filepath.Join(wtPath, ".belmont", "features", slug)
-	if err := os.MkdirAll(dstFeatureDir, 0755); err != nil {
-		return fmt.Errorf("create feature dir in worktree: %w", err)
-	}
-	if err := copyDir(srcFeatureDir, dstFeatureDir); err != nil {
-		return fmt.Errorf("copy feature state: %w", err)
+	// Symlink .belmont in worktree to main repo's .belmont (shared state)
+	srcBelmont := filepath.Join(cfg.Root, ".belmont")
+	dstBelmont := filepath.Join(wtPath, ".belmont")
+	// Remove any existing .belmont (checked-out dir or stale symlink from previous run)
+	os.RemoveAll(dstBelmont)
+	if err := os.Symlink(srcBelmont, dstBelmont); err != nil {
+		return fmt.Errorf("symlink .belmont in worktree: %w", err)
 	}
 
-	// Ensure .belmont/ is gitignored in the worktree to prevent AI tools from committing state files
-	ensureBelmontGitignore(wtPath)
+	// Exclude .belmont/ via worktree-local git exclude (never committed, no merge conflicts)
+	excludeBelmontInWorktree(wtPath)
 
 	// Run belmont install in the worktree
 	exePath, err := os.Executable()
@@ -3316,6 +3210,7 @@ func runLoop(cfg loopConfig) error {
 
 		// 2. Derive extra signals
 		hasFwlup := detectFwlupTasks(cfg.Root, cfg.Feature, report)
+		pendingTasks := hasPendingTasks(report)
 		msStates := buildMilestoneLoopStates(history, report.Milestones)
 
 		// Print state summary
@@ -3326,7 +3221,12 @@ func runLoop(cfg loopConfig) error {
 
 		// 4. If no guardrail triggered, try smart rules first
 		if action == nil {
-			action = decideLoopActionSmart(report, history, cfg, hasFwlup, msStates)
+			action = decideLoopActionSmart(report, history, cfg, hasFwlup, pendingTasks, msStates)
+		}
+
+		// 4b. If smart rules returned nil, check stuck detection before AI
+		if action == nil && isLoopStuck(history) {
+			action = &loopAction{Type: actionPause, Reason: fmt.Sprintf("Loop appears stuck — no state change after 2 iterations (last action: %s)", history[len(history)-1].Action.Type)}
 		}
 
 		// 5. If smart rules returned nil, use AI decisions (with rules fallback)
@@ -3334,7 +3234,7 @@ func runLoop(cfg loopConfig) error {
 			aiAction, err := decideLoopActionAI(report, history, cfg, hasFwlup, lastOutput, msStates)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\033[33m  AI decision failed: %s — falling back to rules\033[0m\n", err)
-				decided := decideLoopAction(report, history, cfg, hasFwlup)
+				decided := decideLoopAction(report, history, cfg, hasFwlup, pendingTasks)
 				action = &decided
 			} else {
 				action = aiAction
@@ -3344,9 +3244,9 @@ func runLoop(cfg loopConfig) error {
 		label := describeMilestone(action, report)
 		actionLabel := shortActionLabel(action.Type)
 		if label != "" {
-			fmt.Fprintf(os.Stderr, "\n\033[1m━━ [%d] %s ━━ %s ━━\033[0m\n", i, actionLabel, label)
+			fmt.Fprintf(os.Stderr, "\n\033[1m━━ [%d] %s ━━ %s › %s ━━\033[0m\n", i, actionLabel, cfg.Feature, label)
 		} else {
-			fmt.Fprintf(os.Stderr, "\n\033[1m━━ [%d] %s ━━\033[0m\n", i, actionLabel)
+			fmt.Fprintf(os.Stderr, "\n\033[1m━━ [%d] %s ━━ %s ━━\033[0m\n", i, actionLabel, cfg.Feature)
 		}
 		fmt.Fprintf(os.Stderr, "\033[2m  %s\033[0m\n\n", action.Reason)
 
@@ -3369,7 +3269,7 @@ func runLoop(cfg loopConfig) error {
 				fmt.Fprintf(os.Stderr, " --to %s", cfg.To)
 			}
 			fmt.Fprintln(os.Stderr)
-			return nil
+			return errFeaturePaused
 		}
 
 		// 6. Handle SKIP_MILESTONE (state mutation, no tool call)
@@ -3415,6 +3315,32 @@ func runLoop(cfg loopConfig) error {
 		// 9. Execute action
 		result := executeLoopAction(*action, cfg)
 		lastOutput = truncateTail(result.Output, 1500)
+
+		// 9b. Parse triage decision from output
+		if action.Type == actionTriage && result.Success {
+			if td := parseTriageDecision(result.Output); td != nil {
+				action.TriageDecision = td.Decision
+				action.ReverifyScope = td.ReverifyScope
+				fmt.Fprintf(os.Stderr, "\033[2m  Triage: %s (%s)\033[0m\n", td.Decision, td.Reason)
+			} else {
+				fmt.Fprintf(os.Stderr, "\033[33m  Warning: could not parse triage decision from output\033[0m\n")
+				// Default to fix_and_reverify if parsing fails
+				action.TriageDecision = "fix_and_reverify"
+				action.ReverifyScope = "focused"
+			}
+		}
+
+		// 9c. Propagate triage decision to FIX_ALL action for downstream rules
+		if action.Type == actionFixAll && action.TriageDecision == "" {
+			// Look back in history for the most recent triage decision
+			for i := len(history) - 1; i >= 0; i-- {
+				if history[i].Action.Type == actionTriage {
+					action.TriageDecision = history[i].Action.TriageDecision
+					action.ReverifyScope = history[i].Action.ReverifyScope
+					break
+				}
+			}
+		}
 
 		// 10. Post-action classification
 		postSHA := captureGitSHA(cfg.Root)
@@ -3474,7 +3400,7 @@ func printLoopState(report statusReport, hasFwlup bool) {
 	fmt.Fprintln(os.Stderr)
 }
 
-func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool) loopAction {
+func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, pendingTasks bool) loopAction {
 	last := lastActionType(history)
 
 	// Rule 1: Blockers → PAUSE
@@ -3492,18 +3418,13 @@ func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfi
 		return loopAction{Type: actionPause, Reason: "Loop appears stuck — no state change after 2 iterations"}
 	}
 
-	// Rule 4: FWLUP tasks after VERIFY → IMPLEMENT_NEXT
-	if hasFwlup && last == actionImplementNext {
-		// After implementing next (follow-up fix), re-verify
-		return loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
+	// Rule 4: FWLUP tasks after VERIFY → TRIAGE
+	if hasFwlup && (last == actionVerify || last == actionFixAll) {
+		return loopAction{Type: actionTriage, Reason: "Triaging follow-up tasks"}
 	}
 
-	if hasFwlup && last == actionVerify {
-		return loopAction{Type: actionImplementNext, Reason: "Follow-up tasks detected after verification"}
-	}
-
-	// Rule 5: After IMPLEMENT_NEXT → VERIFY
-	if last == actionImplementNext {
+	// Rule 5: After IMPLEMENT_NEXT or FIX_ALL → VERIFY
+	if last == actionImplementNext || last == actionFixAll {
 		return loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
 	}
 
@@ -3522,14 +3443,17 @@ func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfi
 		}
 	}
 
-	// Rule 7: All done + no FWLUP → COMPLETE
-	if allDone && !hasFwlup {
+	// Rule 7: All done + no FWLUP → COMPLETE (but check pending tasks first)
+	if allDone && !hasFwlup && !pendingTasks {
 		return loopAction{Type: actionComplete, Reason: "All milestones in range completed"}
 	}
+	if allDone && !hasFwlup && pendingTasks {
+		return loopAction{Type: actionImplementNext, Reason: "All milestones marked done but tasks still pending"}
+	}
 
-	// Rule 8: All done but FWLUP remaining → IMPLEMENT_NEXT
+	// Rule 8: All done but FWLUP remaining → TRIAGE
 	if allDone && hasFwlup {
-		return loopAction{Type: actionImplementNext, Reason: "Follow-up tasks remaining after all milestones complete"}
+		return loopAction{Type: actionTriage, Reason: "Triaging remaining follow-up tasks"}
 	}
 
 	// Rule 10: Next milestone in range → IMPLEMENT_MILESTONE
@@ -3540,6 +3464,9 @@ func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfi
 	}
 
 	// Fallback
+	if pendingTasks {
+		return loopAction{Type: actionImplementNext, Reason: "Tasks still pending — implementing next"}
+	}
 	return loopAction{Type: actionComplete, Reason: "No actionable milestones found"}
 }
 
@@ -3719,6 +3646,10 @@ func shortActionLabel(t loopActionType) string {
 		return "SKIP"
 	case actionDebug:
 		return "DEBUG"
+	case actionTriage:
+		return "TRIAGE"
+	case actionFixAll:
+		return "FIX-ALL"
 	default:
 		return string(t)
 	}
@@ -3742,6 +3673,11 @@ func describeMilestone(action *loopAction, report statusReport) string {
 
 func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	prompt := buildLoopPrompt(action, cfg.Feature)
+
+	// Triage uses its own prompt template
+	if action.Type == actionTriage {
+		return executeTriageAction(cfg)
+	}
 
 	var cmd *exec.Cmd
 	switch cfg.Tool {
@@ -3818,6 +3754,89 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	}
 }
 
+// executeTriageAction runs the triage prompt template as a full tool-equipped invocation.
+func executeTriageAction(cfg loopConfig) executionResult {
+	featureBase := filepath.Join(".belmont", "features", cfg.Feature)
+
+	// Determine fix round from milestone states
+	fixRound := 0
+	// We'll pass 0 and let the template handle it; the prompt template itself
+	// contains circuit breaker logic based on this value
+
+	// Load the triage prompt template
+	tmpl, tmplErr := loadPromptTemplate("post-verify-triage")
+	var prompt string
+	if tmplErr != nil {
+		// Fallback inline prompt
+		prompt = fmt.Sprintf(`You are a triage agent. Read %s/PRD.md to find pending FWLUP tasks.
+Classify each as blocking (real bug) or deferrable (polish).
+If all are deferrable, move them to %s/NOTES.md under ## Polish and remove from PRD.md/PROGRESS.md.
+Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","blocking_tasks":[],"deferred_tasks":[],"reason":"...","reverify_scope":"focused"}`, featureBase, featureBase)
+	} else {
+		var buf bytes.Buffer
+		if err := tmpl.Execute(&buf, map[string]string{
+			"Feature":      cfg.Feature,
+			"FeatureBase":  featureBase,
+			"FixRound":     fmt.Sprintf("%d", fixRound),
+			"VerifyOutput": "", // verify output is available from lastOutput in the loop
+		}); err != nil {
+			return executionResult{Success: false, Error: fmt.Sprintf("execute triage template: %s", err)}
+		}
+		prompt = buf.String()
+	}
+
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+
+	tw := newTailWriter(os.Stderr, 1500)
+	if cfg.Tool == "claude" {
+		cmd.Stdout = &claudeStreamWriter{tw: tw}
+	} else {
+		cmd.Stdout = tw
+	}
+	cmd.Stderr = tw
+
+	var stopTimer chan struct{}
+	if cfg.Tool != "claude" {
+		stopTimer = make(chan struct{})
+		go func() {
+			start := time.Now()
+			ticker := time.NewTicker(time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					fmt.Fprintf(os.Stderr, "\r\033[2m  ⏱ %s\033[0m", time.Since(start).Truncate(time.Second))
+				case <-stopTimer:
+					fmt.Fprintf(os.Stderr, "\r\033[K")
+					return
+				}
+			}
+		}()
+	}
+
+	start := time.Now()
+	err := cmd.Run()
+	if stopTimer != nil {
+		close(stopTimer)
+	}
+	durationMs := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return executionResult{
+			Success:    false,
+			Output:     tw.String(),
+			Error:      err.Error(),
+			DurationMs: durationMs,
+		}
+	}
+
+	return executionResult{
+		Success:    true,
+		Output:     tw.String(),
+		DurationMs: durationMs,
+	}
+}
+
 func buildLoopPrompt(action loopAction, feature string) string {
 	switch action.Type {
 	case actionImplementMilestone:
@@ -3825,11 +3844,20 @@ func buildLoopPrompt(action loopAction, feature string) string {
 	case actionImplementNext:
 		return fmt.Sprintf("/belmont:next --feature %s", feature)
 	case actionVerify:
-		return fmt.Sprintf("/belmont:verify --feature %s", feature)
+		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
+		if action.ReverifyScope == "focused" {
+			prompt += "\n\nFOCUSED RE-VERIFICATION: This is a re-verify after follow-up fixes. Only verify: (1) the specific FWLUP tasks that were just fixed, (2) build/test pass, (3) any previously-failing acceptance criteria. Do NOT re-run Lighthouse. Do NOT re-check visual specs unless a FWLUP specifically addressed UI. Do NOT create new Polish-level issues."
+		}
+		return prompt
 	case actionReplan:
 		return fmt.Sprintf("/belmont:tech-plan --feature %s", feature)
 	case actionDebug:
 		return fmt.Sprintf("/belmont:debug-auto --feature %s", feature)
+	case actionFixAll:
+		return fmt.Sprintf("/belmont:next --feature %s\n\nBATCH MODE: Implement ALL pending FWLUP tasks in the current milestone sequentially. For each task: find it, create MILESTONE file, dispatch to implementation agent, process results, archive MILESTONE, then loop to the next pending FWLUP. Stop when no FWLUP tasks remain in the milestone.\n\nIMPORTANT: Only work on FWLUP tasks (tasks with \"FWLUP\" in their ID). If there are NO pending FWLUP tasks in the current milestone, stop immediately and report \"No FWLUP tasks to fix.\" Do NOT implement regular tasks — those require the full implementation pipeline.", feature)
+	case actionTriage:
+		// Triage uses its own prompt template — handled in executeLoopAction
+		return ""
 	default:
 		return ""
 	}
@@ -4068,6 +4096,13 @@ func buildMilestoneLoopStates(history []historyEntry, milestones []milestone) ma
 					}
 				}
 			}
+		case actionTriage:
+			// Track triage rounds per milestone
+			if lastImplementedMS != "" {
+				if s, ok := states[lastImplementedMS]; ok {
+					s.FwlupFixRounds++
+				}
+			}
 		}
 	}
 	return states
@@ -4075,7 +4110,7 @@ func buildMilestoneLoopStates(history []historyEntry, milestones []milestone) ma
 
 // decideLoopActionSmart applies deterministic rules for ~80% of cases.
 // Returns nil for ambiguous cases that should fall through to AI.
-func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, msStates map[string]*milestoneLoopState) *loopAction {
+func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, pendingTasks bool, msStates map[string]*milestoneLoopState) *loopAction {
 	if len(history) == 0 {
 		// First iteration: implement first undone milestone in range
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
@@ -4084,7 +4119,15 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("First iteration — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
-		// All done already
+		// All milestones marked done — but verify against actual task counts
+		if pendingTasks {
+			// State drift: milestones marked ✅ but tasks still pending
+			lastMS := inRange[len(inRange)-1]
+			if hasFwlup {
+				return &loopAction{Type: actionFixAll, Reason: fmt.Sprintf("State drift: %s marked complete but FWLUP tasks pending — fixing", lastMS.ID)}
+			}
+			return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("State drift: %s marked complete but tasks still pending — reimplementing", lastMS.ID), MilestoneID: lastMS.ID}
+		}
 		if !hasFwlup {
 			return &loopAction{Type: actionComplete, Reason: "All milestones already complete"}
 		}
@@ -4111,6 +4154,9 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Docs-only milestone — moving to %s", m.ID), MilestoneID: m.ID}
 				}
 			}
+			if pendingTasks {
+				return &loopAction{Type: actionImplementNext, Reason: "Docs-only done but tasks still pending"}
+			}
 			if !hasFwlup {
 				return &loopAction{Type: actionComplete, Reason: "All milestones complete (last was docs-only)"}
 			}
@@ -4128,15 +4174,70 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Verification passed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
+		if pendingTasks {
+			return &loopAction{Type: actionImplementNext, Reason: "All milestones marked done but tasks still pending after verification"}
+		}
 		return &loopAction{Type: actionComplete, Reason: "All milestones verified and complete"}
 	}
 
-	// Rule 3: After VERIFY success + follow-ups exist → IMPLEMENT_NEXT
+	// Rule 3: After VERIFY success + follow-ups exist → TRIAGE (AI reads the actual FWLUPs)
 	if lastType == actionVerify && lastSuccess && hasFwlup {
-		return &loopAction{Type: actionImplementNext, Reason: "Follow-up tasks detected after verification"}
+		return &loopAction{Type: actionTriage, Reason: "Triaging follow-up tasks after verification"}
 	}
 
-	// Rule 4: After IMPLEMENT_NEXT success → VERIFY (re-verify)
+	// Rule 3b: After TRIAGE → decide based on triage decision
+	if lastType == actionTriage && lastSuccess {
+		decision := last.Action.TriageDecision
+		switch decision {
+		case "defer_and_proceed":
+			// Triage already moved FWLUPs to NOTES.md — proceed to next milestone
+			inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+			for _, m := range inRange {
+				if !m.Done {
+					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Triage deferred polish items — implementing %s", m.ID), MilestoneID: m.ID}
+				}
+			}
+			if pendingTasks {
+				return &loopAction{Type: actionImplementNext, Reason: "Triage deferred polish but tasks still pending"}
+			}
+			return &loopAction{Type: actionComplete, Reason: "All milestones complete (remaining items deferred as polish)"}
+		case "fix_and_proceed":
+			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will skip re-verification)", TriageDecision: "fix_and_proceed"}
+		case "fix_and_reverify":
+			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will re-verify after)", TriageDecision: "fix_and_reverify", ReverifyScope: last.Action.ReverifyScope}
+		default:
+			// Unknown triage decision — fall back to fix-all with re-verify
+			return &loopAction{Type: actionFixAll, Reason: "Fixing follow-ups after triage", TriageDecision: "fix_and_reverify", ReverifyScope: "focused"}
+		}
+	}
+
+	// Rule 3c: After FIX_ALL success → check triage decision for next step
+	if lastType == actionFixAll && lastSuccess {
+		decision := last.Action.TriageDecision
+		if decision == "fix_and_reverify" {
+			scope := last.Action.ReverifyScope
+			if scope == "" {
+				scope = "focused"
+			}
+			return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Re-verifying after follow-up fixes (scope: %s)", scope), ReverifyScope: scope}
+		}
+		// fix_and_proceed: skip re-verification, move to next milestone
+		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+		for _, m := range inRange {
+			if !m.Done {
+				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Follow-ups fixed — implementing %s", m.ID), MilestoneID: m.ID}
+			}
+		}
+		if pendingTasks {
+			return &loopAction{Type: actionImplementNext, Reason: "Follow-ups fixed but tasks still pending"}
+		}
+		if !hasFwlup {
+			return &loopAction{Type: actionComplete, Reason: "All milestones complete after follow-up fixes"}
+		}
+		return &loopAction{Type: actionTriage, Reason: "Follow-ups remain after fix-all — re-triaging"}
+	}
+
+	// Rule 4: After IMPLEMENT_NEXT success → VERIFY (re-verify) — kept for non-auto invocations
 	if lastType == actionImplementNext && lastSuccess {
 		return &loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
 	}
@@ -4187,8 +4288,11 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			}
 		}
 	}
-	if allDone && allVerified && !hasFwlup {
+	if allDone && allVerified && !hasFwlup && !pendingTasks {
 		return &loopAction{Type: actionComplete, Reason: "All milestones implemented, verified, and no follow-ups"}
+	}
+	if allDone && allVerified && !hasFwlup && pendingTasks {
+		return &loopAction{Type: actionImplementNext, Reason: "All milestones marked done and verified but tasks still pending"}
 	}
 
 	// Rule 8: All done but not all verified → VERIFY
@@ -4196,9 +4300,9 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		return &loopAction{Type: actionVerify, Reason: "All milestones done but not all verified"}
 	}
 
-	// Rule 9: All done but follow-ups remain → IMPLEMENT_NEXT
+	// Rule 9: All done but follow-ups remain → TRIAGE
 	if allDone && hasFwlup {
-		return &loopAction{Type: actionImplementNext, Reason: "Follow-up tasks remaining after all milestones complete"}
+		return &loopAction{Type: actionTriage, Reason: "Triaging remaining follow-up tasks"}
 	}
 
 	// Rule 10: Next undone milestone
@@ -4215,19 +4319,15 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 // checkHardGuardrails runs safety checks that always apply before AI decisions.
 // Returns nil if no guardrail triggers, otherwise a loopAction to take.
 func checkHardGuardrails(report statusReport, history []historyEntry, cfg loopConfig) *loopAction {
-	// Blockers → PAUSE
-	if len(report.Blockers) > 0 {
-		return &loopAction{Type: actionPause, Reason: fmt.Sprintf("Blockers detected: %s", strings.Join(report.Blockers, ", "))}
+	// Blockers → PAUSE (filter out blockers for completed features first)
+	blockers := filterResolvedFeatureBlockers(report.Blockers, cfg.Root)
+	if len(blockers) > 0 {
+		return &loopAction{Type: actionPause, Reason: fmt.Sprintf("Blockers detected: %s", strings.Join(blockers, ", "))}
 	}
 
 	// Consecutive failures >= maxFailures → ERROR
 	if consecutiveFailures(history) >= cfg.MaxFailures {
 		return &loopAction{Type: actionError, Reason: fmt.Sprintf("%d consecutive failures", cfg.MaxFailures)}
-	}
-
-	// Stuck detection
-	if isLoopStuck(history) {
-		return &loopAction{Type: actionPause, Reason: "Loop appears stuck — no state change after 2 iterations"}
 	}
 
 	return nil
@@ -4345,8 +4445,10 @@ STATE:
 
 AVAILABLE ACTIONS:
 - IMPLEMENT_MILESTONE: Implement next incomplete milestone (set milestone_id)
-- IMPLEMENT_NEXT: Fix follow-up tasks or issues found during verification
+- IMPLEMENT_NEXT: Fix a single follow-up task
 - VERIFY: Run verification on completed milestones
+- TRIAGE: Run AI triage to classify follow-up tasks as blocking vs polish
+- FIX_ALL: Fix all blocking follow-up tasks in batch before re-verification
 - REPLAN: Re-run tech planning when current approach has systemic issues
 - DEBUG: Run automated debugging when verification keeps failing on recurring issues
 - SKIP_MILESTONE: Skip a blocked milestone (set milestone_id)
@@ -4361,6 +4463,7 @@ HARD RULES:
 5. If a milestone has recurring failures across multiple cycles, use DEBUG.
 6. Use SKIP_MILESTONE only when a milestone truly cannot proceed due to external blockers.
 7. If all milestones in range are done+verified with no follow-ups, COMPLETE.
+8. Prefer TRIAGE over IMPLEMENT_NEXT when follow-ups exist — let triage classify issues before fixing.
 
 Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"..."}`, string(stateJSON))
 	} else {
@@ -4391,7 +4494,8 @@ Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"...
 	actionType := loopActionType(decision.Action)
 	switch actionType {
 	case actionImplementMilestone, actionImplementNext, actionVerify,
-		actionReplan, actionSkipMilestone, actionComplete, actionPause, actionDebug:
+		actionReplan, actionSkipMilestone, actionComplete, actionPause, actionDebug,
+		actionTriage, actionFixAll:
 		// valid
 	default:
 		return nil, fmt.Errorf("unknown action %q from AI", decision.Action)
@@ -4463,6 +4567,40 @@ func extractDecisionJSON(output, tool string) (string, error) {
 	return match, nil
 }
 
+type triageDecision struct {
+	Decision      string   `json:"decision"`
+	BlockingTasks []string `json:"blocking_tasks"`
+	DeferredTasks []string `json:"deferred_tasks"`
+	Reason        string   `json:"reason"`
+	ReverifyScope string   `json:"reverify_scope"`
+}
+
+// parseTriageDecision extracts the triage JSON decision from the tool output.
+func parseTriageDecision(output string) *triageDecision {
+	// Find JSON object with "decision" field
+	re := regexp.MustCompile(`\{[^{}]*"decision"\s*:\s*"[^"]+?"[^{}]*\}`)
+	match := re.FindString(output)
+	if match == "" {
+		// Try to find it in the last 2000 chars (triage outputs it at the end)
+		tail := output
+		if len(tail) > 2000 {
+			tail = tail[len(tail)-2000:]
+		}
+		match = re.FindString(tail)
+		if match == "" {
+			return nil
+		}
+	}
+	var td triageDecision
+	if err := json.Unmarshal([]byte(match), &td); err != nil {
+		return nil
+	}
+	if td.Decision == "" {
+		return nil
+	}
+	return &td
+}
+
 // truncateTail returns the last maxLen characters of s.
 func truncateTail(s string, maxLen int) string {
 	if len(s) <= maxLen {
@@ -4509,6 +4647,17 @@ func detectFwlupTasks(root, feature string, report statusReport) bool {
 			if fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// hasPendingTasks returns true if any task in the report is pending or in progress.
+// Used to detect state drift where milestones are marked ✅ but tasks remain incomplete.
+func hasPendingTasks(report statusReport) bool {
+	for _, t := range report.Tasks {
+		if t.Status == taskPending || t.Status == taskInProgress {
+			return true
 		}
 	}
 	return false
@@ -4735,8 +4884,26 @@ func computeWaves(milestones []milestone) ([]wave, error) {
 func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	startTime := time.Now()
 
-	// Ensure .belmont/worktrees/ is in .gitignore
-	ensureWorktreesGitignore(cfg.Root)
+	// Pre-flight: ensure repo is in a clean state before starting
+	if err := validateRepoState(cfg.Root); err != nil {
+		return fmt.Errorf("auto: %w", err)
+	}
+
+	// Record original branch and restore on exit if changed
+	origBranch := getCurrentBranch(cfg.Root)
+	defer func() {
+		if origBranch != "" && origBranch != "HEAD" {
+			if cur := getCurrentBranch(cfg.Root); cur != origBranch {
+				fmt.Fprintf(os.Stderr, "\033[33m⚠ Branch changed from %s to %s — restoring...\033[0m\n", origBranch, cur)
+				restoreCmd := exec.Command("git", "checkout", origBranch)
+				restoreCmd.Dir = cfg.Root
+				restoreCmd.Run()
+			}
+		}
+	}()
+
+	// Ensure .belmont/worktrees/ is in .gitignore and committed before branching
+	prepareWorktreesGitignore(cfg.Root)
 
 	fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (parallel) — %s\033[0m\n", cfg.Feature)
 	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Max parallel: %d\033[0m\n", cfg.Tool, cfg.MaxParallel)
@@ -4772,7 +4939,9 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — cleaning up worktrees...\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state and cleaning up worktrees...\033[0m\n")
+		// Revert .belmont/ state to prevent phantom completion
+		revertFeatureState(cfg.Root, cfg.Feature)
 		activeWorktrees.cleanupAll(cfg.Root)
 		os.Exit(1)
 	}()
@@ -4798,6 +4967,15 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 		}
 
 		fmt.Fprintf(os.Stderr, "\033[32m  ✓ Wave %d complete\033[0m\n\n", w.Index+1)
+	}
+
+	// Sync master PROGRESS.md with actual feature states
+	featuresDir := filepath.Join(cfg.Root, ".belmont", "features")
+	syncMasterFeatureStatuses(cfg.Root, listFeatures(featuresDir, 50))
+
+	// Commit any remaining .belmont/ state changes
+	if err := commitBelmontState(cfg.Root); err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ Failed to commit final .belmont/ state: %s\033[0m\n", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "\n\033[32m✓ All waves complete\033[0m (%.1fs total)\n", time.Since(startTime).Seconds())
@@ -4903,9 +5081,25 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 		return parseMilestoneNum(successes[i].MilestoneID) < parseMilestoneNum(successes[j].MilestoneID)
 	})
 
-	for _, s := range successes {
+	for i, s := range successes {
+		// Ensure repo is in a clean merge state before each merge
+		if err := ensureCleanMergeState(cfg.Root); err != nil {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ %s — skipping remaining %d merge(s)\033[0m\n", err, len(successes)-i)
+			for _, remaining := range successes[i:] {
+				failures = append(failures, result{MilestoneID: remaining.MilestoneID, WorktreePath: remaining.WorktreePath, Err: fmt.Errorf("skipped: unclean merge state")})
+			}
+			// Revert feature state for skipped merges
+			revertFeatureState(cfg.Root, cfg.Feature)
+			break
+		}
 		if err := mergeWorktreeBranch(cfg, s.MilestoneID, s.Branch, s.WorktreePath, tracker); err != nil {
+			// Revert feature state — code didn't merge
+			revertFeatureState(cfg.Root, cfg.Feature)
 			return fmt.Errorf("auto: merge failed for %s: %w", s.MilestoneID, err)
+		}
+		// Merge succeeded — commit state
+		if err := commitBelmontState(cfg.Root); err != nil {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to commit .belmont/ state: %s\033[0m\n", err)
 		}
 	}
 
@@ -4945,18 +5139,17 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string)
 		}
 	}
 
-	// Copy .belmont/features/<slug>/ state to worktree
-	srcFeatureDir := filepath.Join(cfg.Root, ".belmont", "features", cfg.Feature)
-	dstFeatureDir := filepath.Join(wtPath, ".belmont", "features", cfg.Feature)
-	if err := os.MkdirAll(dstFeatureDir, 0755); err != nil {
-		return fmt.Errorf("create feature dir in worktree: %w", err)
-	}
-	if err := copyDir(srcFeatureDir, dstFeatureDir); err != nil {
-		return fmt.Errorf("copy feature state: %w", err)
+	// Symlink .belmont in worktree to main repo's .belmont (shared state)
+	srcBelmont := filepath.Join(cfg.Root, ".belmont")
+	dstBelmont := filepath.Join(wtPath, ".belmont")
+	// Remove any existing .belmont (checked-out dir or stale symlink from previous run)
+	os.RemoveAll(dstBelmont)
+	if err := os.Symlink(srcBelmont, dstBelmont); err != nil {
+		return fmt.Errorf("symlink .belmont in worktree: %w", err)
 	}
 
-	// Ensure .belmont/ is gitignored in the worktree to prevent AI tools from committing state files
-	ensureBelmontGitignore(wtPath)
+	// Exclude .belmont/ via worktree-local git exclude (never committed, no merge conflicts)
+	excludeBelmontInWorktree(wtPath)
 
 	// Run belmont install in the worktree (shell out to self)
 	exePath, err := os.Executable()
@@ -5357,15 +5550,140 @@ func removeWorktree(root, wtPath, _ string) {
 	}
 }
 
-// ensureWorktreesGitignore adds .belmont/worktrees/ to .gitignore if not present.
-func ensureWorktreesGitignore(root string) {
-	ensureGitignoreEntry(root, ".belmont/worktrees/")
+// validateRepoState checks that the repo is in a clean state suitable for auto mode.
+// Returns an error if there's an in-progress merge, rebase, or unmerged files.
+func validateRepoState(root string) error {
+	// Resolve .git dir (could be a file in a worktree)
+	gitDir := filepath.Join(root, ".git")
+
+	// Check no in-progress merge
+	if fileExists(filepath.Join(gitDir, "MERGE_HEAD")) {
+		return fmt.Errorf("repository has an in-progress merge — resolve with 'git merge --abort' or 'git merge --continue' first")
+	}
+	// Check no in-progress rebase
+	if dirExists(filepath.Join(gitDir, "rebase-merge")) || dirExists(filepath.Join(gitDir, "rebase-apply")) {
+		return fmt.Errorf("repository has an in-progress rebase — resolve first")
+	}
+	// Check no unmerged files
+	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err == nil && strings.TrimSpace(string(out)) != "" {
+		return fmt.Errorf("repository has unmerged files — resolve conflicts first:\n%s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
-// ensureBelmontGitignore adds .belmont/ to .gitignore if not present.
-// Used in worktrees to prevent AI tools from committing .belmont/ state files.
-func ensureBelmontGitignore(root string) {
-	ensureGitignoreEntry(root, ".belmont/")
+// getCurrentBranch returns the current branch name, or "HEAD" if detached.
+func getCurrentBranch(root string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ensureCleanMergeState aborts any in-progress merge and cleans up unmerged files.
+// Called between sequential merges to prevent cascade failures.
+func ensureCleanMergeState(root string) error {
+	gitDir := filepath.Join(root, ".git")
+
+	// Abort any in-progress merge
+	if fileExists(filepath.Join(gitDir, "MERGE_HEAD")) {
+		abortCmd := exec.Command("git", "merge", "--abort")
+		abortCmd.Dir = root
+		abortCmd.Run()
+	}
+
+	// Check for remaining unmerged files
+	diffCmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	diffCmd.Dir = root
+	out, _ := diffCmd.Output()
+	if strings.TrimSpace(string(out)) == "" {
+		return nil // clean
+	}
+
+	// Try harder: reset index and checkout
+	resetCmd := exec.Command("git", "reset", "HEAD")
+	resetCmd.Dir = root
+	resetCmd.Run()
+	checkoutCmd := exec.Command("git", "checkout", "--", ".")
+	checkoutCmd.Dir = root
+	checkoutCmd.Run()
+
+	// Re-check
+	recheckCmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	recheckCmd.Dir = root
+	out2, _ := recheckCmd.Output()
+	if strings.TrimSpace(string(out2)) != "" {
+		return fmt.Errorf("unable to clean merge state — unmerged files remain:\n%s", strings.TrimSpace(string(out2)))
+	}
+	return nil
+}
+
+// prepareWorktreesGitignore adds .belmont/worktrees/ to .gitignore and commits the change.
+// This must happen before creating worktrees so they branch from a clean HEAD with the entry.
+func prepareWorktreesGitignore(root string) {
+	ensureGitignoreEntry(root, ".belmont/worktrees/")
+
+	// Check if .gitignore was modified
+	statusCmd := exec.Command("git", "status", "--porcelain", ".gitignore")
+	statusCmd.Dir = root
+	out, err := statusCmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		return // nothing to commit
+	}
+
+	// Commit the .gitignore change so worktrees branch from clean HEAD
+	addCmd := exec.Command("git", "add", ".gitignore")
+	addCmd.Dir = root
+	if _, err := addCmd.CombinedOutput(); err != nil {
+		return
+	}
+	commitCmd := exec.Command("git", "commit", "-m", "belmont: add worktrees to gitignore")
+	commitCmd.Dir = root
+	commitCmd.CombinedOutput() // best-effort
+}
+
+// excludeBelmontInWorktree adds .belmont/ to the worktree's local git exclude file.
+// Unlike modifying .gitignore (which gets committed and causes merge conflicts),
+// the local exclude is never committed and is specific to the worktree.
+func excludeBelmontInWorktree(wtPath string) {
+	// Read .git file to find worktree git dir
+	gitFile := filepath.Join(wtPath, ".git")
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return
+	}
+	// Parse "gitdir: /path/to/.git/worktrees/{name}"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "gitdir: ") {
+		return
+	}
+	gitDir := strings.TrimPrefix(line, "gitdir: ")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wtPath, gitDir)
+	}
+
+	// Write to info/exclude
+	infoDir := filepath.Join(gitDir, "info")
+	os.MkdirAll(infoDir, 0755)
+	excludePath := filepath.Join(infoDir, "exclude")
+	existing, _ := os.ReadFile(excludePath)
+	if strings.Contains(string(existing), ".belmont/") {
+		return // already present
+	}
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		f.WriteString("\n")
+	}
+	f.WriteString(".belmont/\n")
 }
 
 // ensureGitignoreEntry adds an entry to .gitignore if not already present.
@@ -5392,6 +5710,57 @@ func ensureGitignoreEntry(root, entry string) {
 	f.WriteString(entry + "\n")
 }
 
+// commitBelmontState commits any uncommitted .belmont/ state files in the main repo.
+// revertFeatureState discards uncommitted .belmont/ state changes for a specific feature.
+// Called when a feature's merge fails or execution fails, to prevent "phantom completion"
+// where state says ✅ but code was never merged.
+func revertFeatureState(root, slug string) {
+	featureDir := filepath.Join(".belmont", "features", slug)
+	cmd := exec.Command("git", "checkout", "HEAD", "--", featureDir)
+	cmd.Dir = root
+	if _, err := cmd.CombinedOutput(); err != nil {
+		// checkout may fail for new/untracked files — clean them up
+		cleanCmd := exec.Command("git", "clean", "-fd", featureDir)
+		cleanCmd.Dir = root
+		cleanCmd.Run()
+	}
+	fmt.Fprintf(os.Stderr, "  \033[33mReverted .belmont/ state for %s (code not merged)\033[0m\n", slug)
+}
+
+// This prevents "local changes would be overwritten by merge" errors when merging
+// feature/milestone branches, since .belmont/ is tracked in the main repo but modified
+// through symlinks from worktrees.
+func commitBelmontState(root string) error {
+	// Don't try to commit if there's an in-progress merge — git commit would
+	// either fail or finalize the merge unintentionally
+	if fileExists(filepath.Join(root, ".git", "MERGE_HEAD")) {
+		return fmt.Errorf("skipping: merge in progress")
+	}
+
+	statusCmd := exec.Command("git", "status", "--porcelain", ".belmont/")
+	statusCmd.Dir = root
+	out, err := statusCmd.Output()
+	if err != nil {
+		return nil // can't check, skip gracefully
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return nil // nothing to commit
+	}
+
+	addCmd := exec.Command("git", "add", ".belmont/")
+	addCmd.Dir = root
+	if _, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add .belmont/: %w", err)
+	}
+
+	commitCmd := exec.Command("git", "commit", "-m", "belmont: update state files")
+	commitCmd.Dir = root
+	if _, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit .belmont/: %w", err)
+	}
+	return nil
+}
+
 // mergeFailureKind classifies the type of git merge failure.
 type mergeFailureKind int
 
@@ -5399,6 +5768,7 @@ const (
 	mergeConflict            mergeFailureKind = iota // file-level conflicts
 	mergeUntrackedOverwrite                          // untracked files would be overwritten
 	mergeDirtyWorktree                               // local changes would be overwritten
+	mergeUnmergedFiles                               // stale unmerged files from previous merge
 	mergeOtherFailure                                // unknown merge failure
 )
 
@@ -5412,6 +5782,9 @@ func classifyMergeError(output string) mergeFailureKind {
 	}
 	if strings.Contains(output, "CONFLICT") || strings.Contains(output, "Automatic merge failed") {
 		return mergeConflict
+	}
+	if strings.Contains(output, "unmerged files") {
+		return mergeUnmergedFiles
 	}
 	return mergeOtherFailure
 }
@@ -5509,7 +5882,30 @@ func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
 		return fmt.Errorf("merge failed for %s after stashing untracked files: %s", id, retryOutput)
 
 	case mergeDirtyWorktree:
-		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Local changes would be overwritten for %s — stashing...\033[0m\n", id)
+		// Phase 1: Try committing .belmont/ state first (most common cause)
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Local changes would be overwritten for %s — committing .belmont/ state...\033[0m\n", id)
+
+		if commitErr := commitBelmontState(cfg.Root); commitErr == nil {
+			retryCmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
+			retryCmd.Dir = cfg.Root
+			retryOut, retryErr := retryCmd.CombinedOutput()
+			if retryErr == nil {
+				fmt.Fprintf(os.Stderr, "  \033[32m✓ Merge succeeded after committing .belmont/ state for %s\033[0m\n", id)
+				return nil
+			}
+			retryOutput := string(retryOut)
+			retryKind := classifyMergeError(retryOutput)
+			if retryKind == mergeConflict {
+				goto handleConflict
+			}
+			if retryKind != mergeDirtyWorktree {
+				return fmt.Errorf("merge failed for %s after committing state: %s", id, retryOutput)
+			}
+			// Still dirty (non-.belmont/ files) — fall through to stash
+		}
+
+		// Phase 2: Fall back to stash for non-.belmont/ dirty files
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Still dirty for %s — falling back to stash...\033[0m\n", id)
 
 		stashCmd := exec.Command("git", "stash", "push", "--include-untracked", "-m", "belmont: pre-merge stash")
 		stashCmd.Dir = cfg.Root
@@ -5517,30 +5913,53 @@ func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
 			return fmt.Errorf("git stash failed for %s: %w", id, stashErr)
 		}
 
-		// Retry the merge
-		retryCmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
-		retryCmd.Dir = cfg.Root
-		retryOut, retryErr := retryCmd.CombinedOutput()
+		retryCmd2 := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
+		retryCmd2.Dir = cfg.Root
+		retryOut2, retryErr2 := retryCmd2.CombinedOutput()
 
-		// Pop the stash (best-effort)
+		// Pop the stash — handle failure to avoid orphaned stash entries
 		popCmd := exec.Command("git", "stash", "pop")
 		popCmd.Dir = cfg.Root
-		popCmd.Run()
+		if popOut, popErr := popCmd.CombinedOutput(); popErr != nil {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ stash pop failed for %s — dropping stash: %s\033[0m\n", id, strings.TrimSpace(string(popOut)))
+			dropCmd := exec.Command("git", "stash", "drop")
+			dropCmd.Dir = cfg.Root
+			dropCmd.Run()
+		}
 
-		if retryErr == nil {
+		if retryErr2 == nil {
 			fmt.Fprintf(os.Stderr, "  \033[32m✓ Merge succeeded after stashing local changes for %s\033[0m\n", id)
 			return nil
 		}
 
-		retryOutput := string(retryOut)
-		retryKind := classifyMergeError(retryOutput)
-		if retryKind == mergeConflict {
+		retryOutput2 := string(retryOut2)
+		retryKind2 := classifyMergeError(retryOutput2)
+		if retryKind2 == mergeConflict {
 			goto handleConflict
 		}
-		return fmt.Errorf("merge failed for %s after stashing local changes: %s", id, retryOutput)
+		return fmt.Errorf("merge failed for %s after stashing local changes: %s", id, retryOutput2)
 
 	case mergeConflict:
 		goto handleConflict
+
+	case mergeUnmergedFiles:
+		// Stale merge state from a previous operation — abort and retry once
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Stale unmerged files for %s — aborting previous merge and retrying...\033[0m\n", id)
+		abortCmd := exec.Command("git", "merge", "--abort")
+		abortCmd.Dir = cfg.Root
+		abortCmd.Run()
+		retryCmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
+		retryCmd.Dir = cfg.Root
+		retryOut, retryErr := retryCmd.CombinedOutput()
+		if retryErr == nil {
+			fmt.Fprintf(os.Stderr, "  \033[32m✓ Merge succeeded after aborting stale merge for %s\033[0m\n", id)
+			return nil
+		}
+		retryKind := classifyMergeError(string(retryOut))
+		if retryKind == mergeConflict {
+			goto handleConflict
+		}
+		return fmt.Errorf("merge failed for %s after aborting stale merge: %s", id, string(retryOut))
 
 	default:
 		return fmt.Errorf("merge failed for %s: %s", id, output)
@@ -5561,6 +5980,10 @@ handleConflict:
 	commitCmd := exec.Command("git", "commit", "-m", commitMsg)
 	commitCmd.Dir = cfg.Root
 	if _, commitErr := commitCmd.CombinedOutput(); commitErr != nil {
+		// Abort the merge to prevent stale MERGE_HEAD from poisoning subsequent operations
+		abortCmd2 := exec.Command("git", "merge", "--abort")
+		abortCmd2.Dir = cfg.Root
+		abortCmd2.Run()
 		return fmt.Errorf("commit after reconciliation for %s: %w", id, commitErr)
 	}
 
@@ -5592,6 +6015,31 @@ func listPreservedWorktrees(root string) []worktreeEntry {
 		result = append(result, worktreeEntry{Path: wtPath, Branch: branch})
 	}
 	return result
+}
+
+// runSyncCmd handles the "belmont sync" command.
+// Syncs master .belmont/PROGRESS.md with computed feature-level states.
+func runSyncCmd(args []string) error {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var root string
+	fs.StringVar(&root, "root", ".", "project root")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("sync: %w", err)
+	}
+	root, _ = filepath.Abs(root)
+
+	featuresDir := filepath.Join(root, ".belmont", "features")
+	features := listFeatures(featuresDir, 50)
+	if len(features) == 0 {
+		return nil
+	}
+
+	syncMasterFeatureStatuses(root, features)
+
+	// Commit if anything changed (best-effort)
+	commitBelmontState(root)
+	return nil
 }
 
 // runRecover handles the "belmont recover" command.

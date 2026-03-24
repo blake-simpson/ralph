@@ -297,7 +297,7 @@ See [Skills Reference](docs/skills-reference.md) for detailed descriptions of ea
 
 | Tool               | How Skills Are Wired                             | How to Use                                          |
 |--------------------|--------------------------------------------------|-----------------------------------------------------|
-| **Claude Code**    | Symlinked agents + copied commands               | `/belmont:product-plan`, `/belmont:implement`, etc. |
+| **Claude Code**    | Symlinked agents + copied commands + sync hook   | `/belmont:product-plan`, `/belmont:implement`, etc. |
 | **Codex**          | Copied to `.codex/belmont` + `AGENTS.md` routing | `belmont:implement` in prompt                       |
 | **Cursor**         | Per-file `.mdc` symlinks in `.cursor/rules/`     | Toggle in Settings > Rules                          |
 | **Windsurf**       | Directory symlink in `.windsurf/rules/`          | Reference in Cascade                                |
@@ -336,13 +336,16 @@ belmont auto --feature my-feature --policy milestone
 
 # Cap concurrent features or milestones
 belmont auto --all --max-parallel 2
+
+# Sync master PROGRESS.md with actual feature states
+belmont sync
 ```
 
 The auto command auto-detects which AI tool CLI you have installed (Claude Code, Codex, Gemini, Copilot, Cursor) and shells out to it in headless mode. Override with `--tool`.
 
 It uses a hybrid decision system: smart deterministic rules handle ~80% of cases (using git diff classification and per-milestone tracking), with AI called only for ambiguous situations like repeated verification failures. The AI receives rich context including work type, failure history, and verification state. Falls back to deterministic rules automatically if the AI call fails.
 
-Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 3). Multiple features can also run in parallel with `--features` or `--all`, each in its own worktree with automatic merge and conflict reconciliation. Feature-level dependencies declared in the master PRD's Dependencies column enable wave-based execution — independent features run in parallel, dependent features wait for their dependencies to complete first.
+Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 5). Multiple features can also run in parallel with `--features` or `--all`, each in its own worktree with automatic merge and conflict reconciliation. Feature-level dependencies declared in the master PRD's Dependencies column enable wave-based execution — independent features run in parallel, dependent features wait for their dependencies to complete first.
 
 Three checkpoint policies control human involvement:
 - `autonomous` (default) — only pauses on blockers or errors

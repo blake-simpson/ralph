@@ -27,15 +27,18 @@ You will receive a list of completed tasks and file paths in the sub-agent promp
 
 ### Phase 0: Scope Verification
 
-Before verifying functionality, check that the implementation stayed within scope:
+Before verifying functionality, check that the implementation stayed within scope.
 
-1. **Review changed files** - Get the list of files created/modified from the implementation log (in archived MILESTONE files or git history)
-2. **Trace to task** - For each changed file, verify it's required by the task's description or acceptance criteria
-3. **Check PRD "Out of Scope"** - Verify no changes implement anything listed in the PRD's "Out of Scope" section
-4. **Check milestone boundary** - Verify no changes implement tasks from a different milestone
-5. **Check for extras** - Look for added features, endpoints, components, or behaviors not in the acceptance criteria
+> **CRITICAL RULE: Only flag code that was NEWLY WRITTEN by the current task.**
+> Pre-existing code from other features, milestones, or prior work MUST NOT be flagged as out-of-scope. Use `git diff` against the pre-implementation baseline (recorded in the MILESTONE file's "Git Baseline" field) to determine what is new vs pre-existing. If no baseline is available, use the implementation log or git history to identify what THIS task changed.
 
-If scope violations are found, flag them as **Critical** issues in your report.
+1. **Review changed files** - Get the list of files created/modified **by this task** from the implementation log (in archived MILESTONE files) or `git diff` against the baseline. Only evaluate code that was added or modified by this task.
+2. **Trace to task** - For each **newly changed** file, verify it's required by the task's description or acceptance criteria
+3. **Check PRD "Out of Scope"** - Verify no **new** changes implement anything listed in the PRD's "Out of Scope" section
+4. **Check milestone boundary** - Verify no **new** changes implement tasks from a different milestone
+5. **Check for extras** - Look for **newly added** features, endpoints, components, or behaviors not in the acceptance criteria. Code that existed before this task started is NOT an "extra."
+
+If scope violations in **newly written code** are found, flag them as **Critical** issues. Never flag pre-existing code from other features as a scope violation.
 
 ### Phase 1: Acceptance Criteria Check
 
@@ -198,11 +201,52 @@ Provide a detailed verification report:
 |--------|-------------|-------------|
 | [type] | [file:line] | [details]   |
 
+### Polish (Minor — Does NOT Block Milestone)
+| Issue  | Location    | Description |
+|--------|-------------|-------------|
+| [type] | [file:line] | [details]   |
+
 ## Follow-up Tasks Recommended
 | ID       | Description   | Priority | Reason       |
 |----------|---------------|----------|--------------|
 | FWLUP-V1 | [description] | [P0-P3]  | [why needed] |
+
+**Note**: Only Critical and Warning issues should become FWLUP tasks. Polish items are reported here for reference but should NOT generate follow-up tasks — the orchestrator will record them in NOTES.md instead.
 ```
+
+## Severity Classification Guide
+
+Use this guide to categorize issues consistently. The distinction between Warning and Polish is critical — it determines whether the auto loop creates follow-up tasks or defers the issue.
+
+### Critical (Blocks Milestone — Must Fix)
+- Acceptance criteria not met
+- Visual design mismatches (colors, layout, spacing significantly off from Figma)
+- Broken functionality or runtime errors
+- Security vulnerabilities
+- Scope violations (implemented out-of-scope work)
+- Missing required features/components
+
+### Warning (Blocks Milestone — Should Fix)
+- Missing error handling for likely edge cases
+- i18n keys missing for user-facing text
+- Failing tests
+- Accessibility issues that affect usability (missing focus management, no keyboard nav for interactive elements)
+- Responsive layout broken at standard breakpoints
+
+### Polish (Does NOT Block Milestone — Minor Improvement)
+- Missing aria-labels on decorative or supplementary elements
+- Lighthouse score warnings (50-89) on non-critical categories
+- Minor accessibility notes (color contrast close to threshold but not failing)
+- Small responsive tweaks at uncommon breakpoints
+- Minor spacing inconsistencies (1-2px off)
+- Animation/transition polish
+
+### Suggestions (Informational Only — Not Tracked)
+- Alternative implementation approaches
+- Future enhancement ideas
+- "Nice to have" features not in the PRD
+
+**Key principle**: If removing the issue would not affect a user's ability to use the feature or cause a visually broken experience, it's Polish, not Warning.
 
 ## Important Rules
 

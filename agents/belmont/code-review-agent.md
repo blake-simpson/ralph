@@ -42,10 +42,10 @@ Run comprehensive checks using the detected package manager (`<pkg>`):
 # All tests
 <pkg> run test
 
-# E2E tests (if playwright.config.ts/.js exists)
+# E2E tests (if Playwright is configured AND installed)
 <pkg> run test:e2e  # or: npx playwright test
 ```
-For E2E: only run if `playwright.config.ts`/`.js` exists. If no `test:e2e` script in `package.json`, try `npx playwright test`. Use Playwright MCP for browser interaction when debugging failures.
+For E2E: only run if `playwright.config.ts`/`.js` exists AND `@playwright/test` is installed (check `node_modules/@playwright/test` or lockfile). If config exists but the package isn't installed, skip E2E execution with a warning ("E2E skipped — Playwright config found but package not installed") rather than failing the review. If no `test:e2e` script in `package.json`, try `npx playwright test`. Use Playwright MCP for browser interaction when debugging failures.
 
 Record all output - warnings matter too, not just errors.
 
@@ -77,16 +77,21 @@ Review each changed file for:
 
 #### Scope Adherence (CRITICAL CHECK)
 
-This is one of the most important checks. For every file changed, ask:
+> **CRITICAL RULE: Only flag code that was NEWLY WRITTEN by the current task.**
+> Pre-existing code from other features, milestones, or prior work MUST NOT be flagged as out-of-scope, even if it doesn't relate to the current task. Use `git diff` against the pre-implementation baseline (recorded in the MILESTONE file's "Git Baseline" field, or the commit before implementation started) to determine what code is new vs pre-existing.
+>
+> If you cannot determine the baseline, err on the side of NOT flagging code as out-of-scope. **Deleting pre-existing features is far worse than leaving a few extra lines of new code.**
 
-- **Task Traceability** - Can this change be traced to the current task's description or acceptance criteria?
-- **Milestone Boundary** - Does this change belong to a task in the current milestone, or did it leak from a future milestone?
-- **PRD Boundary** - Is this change within the overall PRD scope? Check against the PRD's "Out of Scope" section
-- **Feature Creep** - Were any unrequested features, endpoints, components, or utilities added?
+For every **newly added or modified** file/code block (relative to the baseline), ask:
+
+- **Task Traceability** - Can this NEW change be traced to the current task's description or acceptance criteria?
+- **Milestone Boundary** - Does this NEW change belong to a task in the current milestone, or did it leak from a future milestone?
+- **PRD Boundary** - Does this NEW change implement anything listed in the PRD's "Out of Scope" section?
+- **Feature Creep** - Were any unrequested features, endpoints, components, or utilities NEWLY ADDED?
 - **Opportunistic Refactoring** - Was unrelated code refactored, restructured, or "improved" beyond what the task requires?
 - **Gold Plating** - Were enhancements added that go beyond the acceptance criteria (extra states, extra config, extra abstraction)?
 
-**Any scope violation is a CRITICAL issue.** Out-of-scope changes must be reverted or extracted into follow-up tasks.
+**Out-of-scope changes NEWLY ADDED by this task** should be reverted or extracted into follow-up tasks. Pre-existing code from other features must NEVER be flagged for revert — it belongs to other completed work. If unsure whether code is new or pre-existing, do NOT recommend reverting it.
 
 #### Security & Performance
 - **Security** - Any obvious security issues?
@@ -137,6 +142,11 @@ Provide a detailed review report:
 |-------------|-----------|----------------|
 | [file:line] | [problem] | [how to fix]   |
 
+### Polish (Minor — Does NOT Block Milestone)
+| File:Line   | Issue     | Recommendation |
+|-------------|-----------|----------------|
+| [file:line] | [issue]   | [suggestion]   |
+
 ### Suggestions (Nice to Have)
 | File:Line   | Suggestion | Benefit |
 |-------------|------------|---------|
@@ -185,30 +195,43 @@ Provide a detailed review report:
 | ID        | Description   | Priority | Type                   |
 |-----------|---------------|----------|------------------------|
 | FWLUP-CR1 | [description] | [P0-P3]  | [refactor/bug/feature] |
+
+**Note**: Only Critical and Warning issues should become FWLUP tasks. Polish items are reported above for reference but should NOT generate follow-up tasks — the orchestrator will record them in NOTES.md instead.
 ```
 
 ## Review Guidelines
 
-### What to Flag as Critical (Blocking)
+### Critical (Blocks Milestone — Must Fix)
 - **Scope violations** - Any code that doesn't trace to the current task (most common issue)
 - **Out-of-scope implementations** - Work from the PRD's "Out of Scope" section or from future milestones
 - Security vulnerabilities
-- Obvious bugs that will cause failures
+- Build failures or test failures
+- Obvious bugs that will cause runtime failures
 - Breaking changes to existing functionality
 - Missing required functionality
 - Type safety violations that could cause runtime errors
 
-### What to Flag as Warnings
-- Code that works but doesn't follow patterns
-- Missing error handling for edge cases
-- Missing tests for important logic
-- Minor type safety issues
+### Warning (Blocks Milestone — Should Fix)
+- Code that works but violates established project patterns
+- Missing error handling for likely edge cases
+- Missing tests for important business logic
+- Type safety issues that could cause subtle bugs
 
-### What to Flag as Suggestions
-- Refactoring opportunities
-- Performance optimizations
-- Documentation additions
-- Alternative approaches
+### Polish (Does NOT Block Milestone — Minor Improvement)
+- Minor naming improvements that don't affect readability
+- Documentation additions (comments, JSDoc)
+- Import ordering inconsistencies
+- Small refactoring opportunities (e.g., extract a helper)
+- Console.log/debug statements left in (non-production paths)
+- Code style preferences not enforced by linter
+
+### Suggestions (Informational Only — Not Tracked)
+- Larger refactoring opportunities
+- Performance optimizations without measurable impact
+- Alternative architectural approaches
+- Future enhancement ideas
+
+**Key principle**: If the code works correctly, passes tests, and follows the critical project patterns, remaining issues are Polish, not Warning. Only flag as Warning when the issue could cause problems in production or significantly violates established conventions.
 
 ## Important Rules
 

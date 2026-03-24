@@ -95,12 +95,18 @@ Execute in this order:
    - Aim for meaningful coverage, not 100%
 
 8. **E2E Tests** (web UI tasks only)
-   - Write Playwright E2E tests for browser UI flows, deriving test scenarios from PRD acceptance criteria (BDD Given/When/Then)
-   - Follow existing E2E patterns from `## Codebase Analysis` (page objects, fixtures, helpers)
-   - Cover cross-feature flows that touch the current task (auth, navigation, shared state)
-   - Include mobile viewport tests (`devices['iPhone 13']`, etc.) for responsive UI tasks
-   - Aim for meaningful coverage of critical user flows, not 100%
-   - Update existing E2E tests when your changes affect established flows
+   - **Prerequisite check**: Before writing E2E tests, verify Playwright is actually installed:
+     - Check for `playwright.config.ts` or `playwright.config.js`
+     - Check that `@playwright/test` is resolvable (exists in `node_modules` or lockfile)
+   - **If Playwright is NOT installed**: skip E2E test writing entirely. Add a note in the Implementation Log for this task: "E2E tests skipped — Playwright is not installed/configured. Set up Playwright before adding E2E coverage."
+   - **If Playwright IS installed**:
+     - Check the MILESTONE file's `## Orchestrator Context` or `## Codebase Analysis` for documented auth credentials/fixtures. If auth is needed for E2E flows but no credentials are documented, note this as a gap rather than writing tests that will fail at login.
+     - Write Playwright E2E tests for browser UI flows, deriving test scenarios from PRD acceptance criteria (BDD Given/When/Then)
+     - Follow existing E2E patterns from `## Codebase Analysis` (page objects, fixtures, helpers)
+     - Cover cross-feature flows that touch the current task (auth, navigation, shared state)
+     - Include mobile viewport tests (`devices['iPhone 13']`, etc.) for responsive UI tasks
+     - Aim for meaningful coverage of critical user flows, not 100%
+     - Update existing E2E tests when your changes affect established flows
 
 #### Step 3: Verification
 
@@ -214,6 +220,17 @@ Once every task has been implemented (or marked as blocked), write the implement
 - **REPORT out-of-scope issues** as follow-up tasks — this is how good ideas get captured without scope creep
 
 **When in doubt**: If you're unsure whether a change is in scope, it probably isn't. Report it as a follow-up task instead of implementing it.
+
+### Deletion Safeguard (CRITICAL)
+
+**NEVER delete pre-existing code from other features**, even if a FWLUP task says to "revert" or "remove" it. Only revert/delete code that was added in the current or recent task's implementation within this milestone.
+
+Before deleting any code, check:
+1. Was this code added by a recent task in this milestone? → OK to revert if out of scope
+2. Was this code pre-existing from another feature/milestone? → **DO NOT delete.** Instead, mark the FWLUP task as BLOCKED with reason: "Code belongs to another feature and cannot be safely deleted"
+3. Is this a dependency (npm package, import, config) used by other parts of the codebase? → **DO NOT remove.** Check for other usages first.
+
+If a scope violation FWLUP tells you to remove code and you're unsure of its origin, **leave the code in place** and report the ambiguity. It is always safer to leave working code than to delete it.
 
 ### Testing Guidelines
 

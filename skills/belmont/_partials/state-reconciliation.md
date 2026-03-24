@@ -13,6 +13,7 @@ Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and 
 
 3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
    - Remove entries whose referenced task ID is now marked ✅ in PRD.md
+   - Remove entries that reference other features (e.g. "Depends on X feature") if that feature's status is `✅ Complete` in `.belmont/PROGRESS.md`'s Features table
    - If section becomes empty, set to `None`
 
 4. **Overall status line** — Update `## Status:` in PROGRESS.md:
@@ -24,5 +25,10 @@ Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and 
    - Verify all dependency slugs reference existing feature slugs in the table
    - If a feature row is removed, remove its slug from other features' Dependencies columns
    - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
+
+6. **Master PROGRESS sync** — After reconciling the feature-level files:
+   - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
+   - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
+   - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
 
 Only fix actual discrepancies — if files already agree, make no changes.

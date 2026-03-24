@@ -82,7 +82,10 @@ Before starting, verify:
 - Read the feature PRD at `{base}/PRD.md`
 - If any Figma URLs are included in the PRD, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design tokens, layout, typography, and component specs. Document findings in the tech plan.
 - Explore the codebase for existing patterns. This may be done in a sub-agent if the codebase is large.
-  - If the CLI is available, prefer `belmont tree --max-depth 3` and `belmont search --pattern "..."` (or `belmont find --name ...`) for quick structure/pattern checks.
+- **E2E Readiness Detection**: Check whether Playwright is actually set up:
+  - Look for `playwright.config.ts` or `playwright.config.js`
+  - Check if `@playwright/test` is installed (exists in `node_modules/@playwright/test` or appears in lockfile)
+  - Record the result: "configured and installed", "config found but not installed", or "not configured"
 - Load relevant skills (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 - Consider middleware, webhooks, infrastructure (how are we hosted?), etc.
 
@@ -126,6 +129,13 @@ This is a **technical** planning session. Product decisions were already made in
 - Asset strategy (placeholders vs real assets)
 - Performance requirements and constraints
 - Testing approach for this feature
+- **E2E testing readiness** (based on Phase 1 detection):
+  - If E2E is **NOT set up**: inform the user that Playwright is not configured/installed. Ask if they want to add a milestone or task to set up Playwright (install `@playwright/test`, create config, install browsers). Skip E2E test planning for other features until setup is done.
+  - If E2E **IS set up**: ask about auth credentials and login flow for E2E tests:
+    - What login options exist (email/password, OAuth, magic link)?
+    - Are there test accounts or seed data agents can use?
+    - What env vars or fixtures provide auth credentials?
+    - Are there existing auth helpers/fixtures in the test suite (e.g., `storageState`, login utilities)?
 - Any cross-feature E2E flows to consider (auth, navigation, etc.)?
 - Edge cases and error states (technical handling)
 - Infrastructure and deployment concerns specific to this feature
@@ -219,6 +229,10 @@ Write to `.belmont/TECH_PLAN.md` with this structure:
   - Test directory and config location
   - Cross-feature flows (auth, navigation, shared state)
   - Test script command (`test:e2e` or `npx playwright test`)
+- **E2E Readiness**:
+  - Playwright installed and configured: [yes / config only / no]
+  - Auth strategy for E2E: [test accounts, env vars, fixtures, storageState, or N/A]
+  - Login flow details: [email/password with test creds in .env, OAuth bypass, magic link stub, etc.]
 
 ## Security Baseline
 [Auth approach, input validation, CSRF, CSP, etc.]
@@ -330,6 +344,8 @@ src/
 - [ ] Flows to cover (derived from PRD BDD acceptance criteria)
 - [ ] Cross-feature dependencies (auth, navigation, shared state)
 - [ ] Mobile viewport tests for responsive UI
+- [ ] Auth/login prerequisites for E2E flows (test accounts, env vars, fixture references)
+- [ ] E2E readiness confirmed (Playwright installed and configured)
 
 ### Commands
 Use the project's package manager (detect via lockfile: `pnpm-lock.yaml` → pnpm, `yarn.lock` → yarn, `bun.lockb`/`bun.lock` → bun, `package-lock.json` → npm):

@@ -21,9 +21,6 @@ go build ./cmd/belmont
 
 # Development: run directly (requires --source for install)
 go run ./cmd/belmont status --root /path/to/project
-go run ./cmd/belmont tree
-go run ./cmd/belmont find --name PRD --type file
-go run ./cmd/belmont search --pattern "TECH_PLAN"
 go run ./cmd/belmont install --source . --project /tmp/test-project --no-prompt
 
 # Release build: compile with embedded skills/agents + version injection
@@ -77,7 +74,7 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 
 ### Key directories
 
-- `cmd/belmont/main.go` — Single-file Go CLI. All logic lives here (status parsing, tree/find/search, installer, updater). No external dependencies.
+- `cmd/belmont/main.go` — Single-file Go CLI. All logic lives here (status parsing, installer, updater). No external dependencies.
 - `cmd/belmont/embed.go` — `//go:embed` directives for release builds (build tag: `embed`). Embeds `skills/`, `agents/`, and `prompts/` into the binary.
 - `cmd/belmont/embed_dev.go` — Empty embed vars for dev builds (build tag: `!embed`). Allows `go run` without embedded content.
 - `skills/belmont/` — Skill markdown files (product-plan, tech-plan, implement, next, verify, status, reset). These are the source-of-truth copied/linked into target projects.
@@ -109,4 +106,4 @@ Source resolution order (source mode only): `--source` flag > `BELMONT_SOURCE` e
 
 ### CLI commands
 
-The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `auto` (alias: `loop`), `recover`, `tree`, `find`, `search`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. The `auto` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. It supports milestone dependencies with `(depends: M1)` syntax in PROGRESS.md, enabling parallel execution via git worktrees when milestones are independent. The `recover` command manages preserved worktrees from failed merges — listing, retrying merges with improved error handling, or cleaning up. The `update` command self-updates by downloading the latest release from GitHub.
+The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `auto` (alias: `loop`), `sync`, `recover`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. The `auto` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. It supports milestone dependencies with `(depends: M1)` syntax in PROGRESS.md, enabling parallel execution via git worktrees when milestones are independent. The `sync` command updates the master `.belmont/PROGRESS.md` feature table to match computed feature-level states. For Claude Code installs, a `postToolUse` hook is automatically configured that runs `belmont sync` after every skill invocation. The `recover` command manages preserved worktrees from failed merges — listing, retrying merges with improved error handling, or cleaning up. The `update` command self-updates by downloading the latest release from GitHub.

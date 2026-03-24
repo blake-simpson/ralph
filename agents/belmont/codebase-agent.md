@@ -43,7 +43,11 @@ Identify and report:
 - **Language**: TypeScript, JavaScript, etc.
 - **Styling**: Tailwind, CSS Modules, styled-components, etc.
 - **State Management**: React Query, Zustand, Redux, etc.
-- **Testing**: Jest, Vitest, Playwright, etc. (check for `playwright.config.ts`/`.js`)
+- **Testing**: Jest, Vitest, Playwright, etc.
+  - **Playwright E2E readiness**: Check BOTH config file (`playwright.config.ts`/`.js`) AND installed package (`@playwright/test` in `node_modules` or lockfile). Report status as one of:
+    - "Playwright: configured and installed" — config file exists AND package is installed
+    - "Playwright: config found but not installed" — config file exists but package is missing
+    - "Playwright: not configured" — no config file found
 - **Build Tools**: Webpack, Vite, Turbopack, etc.
 - **Package Manager**: Detect by checking (in order):
   1. `pnpm-lock.yaml` exists → **pnpm**
@@ -76,6 +80,7 @@ For ALL tasks described in the MILESTONE file's `## Orchestrator Context` sectio
 - **API Routes** - Related API endpoints
 - **Tests** - Existing test patterns to follow
 - **E2E Tests** - Playwright config location, test directory structure, shared test utilities (page objects, fixtures, helpers)
+- **E2E Auth Fixtures** - If Playwright is installed, discover and document auth-related test helpers: login utilities, test account setup, `storageState` files, auth fixture factories, and any env vars used for test credentials
 
 ### 4. Convention Analysis
 

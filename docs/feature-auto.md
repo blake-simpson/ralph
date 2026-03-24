@@ -145,7 +145,7 @@ The auto command supports executing independent milestones in parallel using git
 
 ### How It Works
 
-When `--max-parallel` is set (default: 3), the auto command analyzes milestone dependencies declared in PROGRESS.md and runs independent milestones concurrently. Each parallel milestone executes in its own git worktree, so there are no conflicts between concurrent implementations.
+When `--max-parallel` is set (default: 5), the auto command analyzes milestone dependencies declared in PROGRESS.md and runs independent milestones concurrently. Each parallel milestone executes in its own git worktree, so there are no conflicts between concurrent implementations.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -243,7 +243,7 @@ Interactive prompt options for low-confidence conflicts:
 
 - Milestones that modify the same files may cause merge conflicts — declare dependencies to avoid this
 - Each worktree runs a separate AI tool process, so resource usage scales with parallelism
-- The `--max-parallel` flag caps concurrency (default: 3) to manage resource usage
+- The `--max-parallel` flag caps concurrency (default: 5) to manage resource usage
 
 ## Checkpoint Policies
 
@@ -272,7 +272,7 @@ belmont auto --features feat-a,feat-b,feat-c
 # Run all pending (non-complete) features
 belmont auto --all
 
-# Cap concurrent features (default: 3)
+# Cap concurrent features (default: 5)
 belmont auto --features feat-a,feat-b,feat-c --max-parallel 2
 ```
 
@@ -351,9 +351,9 @@ belmont auto --all (with dependencies)
 | `--to <milestone>` | | End at milestone (single-feature only) |
 | `--tool <name>` | auto-detect | CLI tool: claude, codex, gemini, copilot, cursor |
 | `--policy <policy>` | `autonomous` | Checkpoint policy |
-| `--max-iterations <n>` | `20` | Maximum loop iterations per feature |
+| `--max-iterations <n>` | `50` | Maximum loop iterations per feature |
 | `--max-failures <n>` | `3` | Consecutive failures before stopping |
-| `--max-parallel <n>` | `3` | Maximum concurrent features or milestones |
+| `--max-parallel <n>` | `5` | Maximum concurrent features or milestones |
 | `--root <path>` | `.` | Project root directory |
 
 *Required in single-feature mode. Use `--features` or `--all` for multi-feature mode.
