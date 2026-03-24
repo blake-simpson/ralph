@@ -1724,7 +1724,7 @@ func syncMarkdownDir(sourceDir, targetDir string) error {
 	return nil
 }
 
-// installClaudeCodeHook adds a postToolUse hook to .claude/settings.json that runs
+// installClaudeCodeHook adds a PostToolUse hook to .claude/settings.json that runs
 // `belmont sync` after skill invocations to keep master PROGRESS.md in sync.
 func installClaudeCodeHook(projectRoot string) {
 	settingsPath := filepath.Join(projectRoot, ".claude", "settings.json")
@@ -1741,35 +1741,51 @@ func installClaudeCodeHook(projectRoot string) {
 		settings = make(map[string]interface{})
 	}
 
-	// Navigate to hooks.postToolUse, creating structure as needed
+	// Navigate to hooks.PostToolUse, creating structure as needed
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	if !ok {
 		hooks = make(map[string]interface{})
 		settings["hooks"] = hooks
 	}
 
-	// Get or create postToolUse array
-	var postToolUse []interface{}
-	if existing, ok := hooks["postToolUse"].([]interface{}); ok {
-		postToolUse = existing
+	// Get or create PostToolUse array
+	var PostToolUse []interface{}
+	if existing, ok := hooks["PostToolUse"].([]interface{}); ok {
+		PostToolUse = existing
 	}
 
 	// Check if belmont sync hook already exists
-	for _, entry := range postToolUse {
+	for _, entry := range PostToolUse {
 		if m, ok := entry.(map[string]interface{}); ok {
+			// Check in the nested hooks array (correct format)
+			if hooksArr, ok := m["hooks"].([]interface{}); ok {
+				for _, h := range hooksArr {
+					if hm, ok := h.(map[string]interface{}); ok {
+						if cmd, _ := hm["command"].(string); strings.Contains(cmd, "belmont sync") {
+							return // already installed
+						}
+					}
+				}
+			}
+			// Also check legacy flat format
 			if cmd, _ := m["command"].(string); strings.Contains(cmd, "belmont sync") {
 				return // already installed
 			}
 		}
 	}
 
-	// Add the hook
+	// Add the hook (matcher + hooks array format required by Claude Code)
 	newHook := map[string]interface{}{
 		"matcher": hookMatcher,
-		"command": hookCommand,
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": hookCommand,
+			},
+		},
 	}
-	postToolUse = append(postToolUse, newHook)
-	hooks["postToolUse"] = postToolUse
+	PostToolUse = append(PostToolUse, newHook)
+	hooks["PostToolUse"] = PostToolUse
 
 	// Write settings back (disable HTML escaping so > doesn't become \u003e)
 	var buf bytes.Buffer
