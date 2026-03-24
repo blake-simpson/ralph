@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.7.6.1
+
+**Released:** 2026-03-24
+
+### Changes since v0.7.6
+
+- Fix for claude code hook format
+
+
+
 ## v0.7.6
 
 **Released:** 2026-03-24
