@@ -201,9 +201,14 @@ Milestones without a `(depends: ...)` declaration are treated as having no depen
 ### Worktree Lifecycle
 
 1. **Create**: A git worktree is created for each parallel milestone at `.belmont/worktrees/<feature>-<milestone>/`
-2. **Execute**: The AI tool runs the implement and verify cycle in the worktree
-3. **Merge**: On successful verification, changes are merged back to the main branch
-4. **Clean up**: The worktree and branch are removed after merge
+2. **Env files**: `.env*` files are copied from the project root (they're gitignored, so absent in fresh worktrees)
+3. **Port assignment**: A unique port is allocated and set as `PORT` and `BELMONT_PORT` environment variables
+4. **Setup hooks**: If `.belmont/worktree.json` exists, its `setup` commands run (e.g., `npm install`)
+4. **Execute**: The AI tool runs the implement and verify cycle in the worktree (with `PORT`/`BELMONT_PORT`/`BELMONT_WORKTREE` env vars)
+5. **Merge**: On successful verification, changes are merged back to the main branch
+6. **Teardown**: Teardown hooks run (if configured), processes are killed, and the worktree is removed
+
+See [Worktree Isolation](worktree-isolation.md) for configuration details.
 
 ### Interrupted Run Recovery
 
@@ -244,6 +249,7 @@ Interactive prompt options for low-confidence conflicts:
 - Milestones that modify the same files may cause merge conflicts — declare dependencies to avoid this
 - Each worktree runs a separate AI tool process, so resource usage scales with parallelism
 - The `--max-parallel` flag caps concurrency (default: 5) to manage resource usage
+- Multiple worktrees with `node_modules` copies consume disk space — consider pnpm or `--prefer-offline`
 
 ## Checkpoint Policies
 

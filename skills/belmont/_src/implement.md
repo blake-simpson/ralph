@@ -9,6 +9,8 @@ You are the implementation orchestrator. Your job is to implement the next pendi
 
 <!-- @include feature-detection.md feature_action="Ask which feature to implement, or auto-select the one with pending tasks" -->
 
+<!-- @include worktree-awareness.md -->
+
 ## Setup
 
 Read these files first:
@@ -197,7 +199,7 @@ When all tasks in the milestone are done:
    | Date | Feature | Activity |
    |------|---------|----------|
    ```
-   Then find the row for the current feature's slug in the `## Features` table (add a new row if missing) and update the Status, Milestones, and Tasks columns. Update the top-level `## Status` line if all features are now complete. Add a row to `## Recent Activity` noting the milestone completion.
+   Then find the row for the current feature's slug in the `## Features` table (add a new row if missing) and update the Status, Milestones, and Tasks columns. Add a row to `## Recent Activity` noting the milestone completion.
 
 ## Step 6: Clean Up
 

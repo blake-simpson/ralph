@@ -9,6 +9,8 @@ You are the verification orchestrator. Your job is to run comprehensive verifica
 
 <!-- @include feature-detection.md feature_action="Ask which feature to verify, or auto-select the one with completed tasks" -->
 
+<!-- @include worktree-awareness.md -->
+
 ## Setup
 
 Read these files first:

@@ -347,6 +347,8 @@ It uses a hybrid decision system: smart deterministic rules handle ~80% of cases
 
 Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 5). Multiple features can also run in parallel with `--features` or `--all`, each in its own worktree with automatic merge and conflict reconciliation. Feature-level dependencies declared in the master PRD's Dependencies column enable wave-based execution — independent features run in parallel, dependent features wait for their dependencies to complete first.
 
+Each worktree is automatically assigned a unique `PORT` to prevent dev server conflicts. Create `.belmont/worktree.json` to configure setup hooks (e.g., `npm install`) and environment variables. See [Worktree Isolation](docs/worktree-isolation.md) for details.
+
 Three checkpoint policies control human involvement:
 - `autonomous` (default) — only pauses on blockers or errors
 - `milestone` — pauses before each new milestone
@@ -364,6 +366,7 @@ See [Feature Auto](docs/feature-auto.md) for full documentation.
 | [Supported Tools](docs/supported-tools.md)         | Detailed per-tool setup (Claude Code, Codex, Cursor, etc.)  |
 | [Skills Reference](docs/skills-reference.md)       | Detailed description of each skill                          |
 | [Feature Auto](docs/feature-auto.md)               | Automated orchestrator for end-to-end feature execution     |
+| [Worktree Isolation](docs/worktree-isolation.md)   | Port assignment, lifecycle hooks, and parallel execution    |
 | [Full Workflow](docs/workflow.md)                  | Step-by-step walkthrough from vision to iteration           |
 | [Directory Structure](docs/directory-structure.md) | Repository and installed project layouts                    |
 | [PRD & Progress Format](docs/prd-format.md)        | PRD task format, states, priorities, and PROGRESS structure |

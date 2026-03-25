@@ -223,6 +223,7 @@ Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and 
    - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
    - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
    - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
+   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
 
 Only fix actual discrepancies — if files already agree, make no changes.
 

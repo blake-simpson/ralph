@@ -34,6 +34,15 @@ Once the base path is resolved, use `{base}` as shorthand:
 - `.belmont/PROGRESS.md` — master progress tracking (feature summary table)
 - `.belmont/TECH_PLAN.md` — master tech plan (cross-cutting architecture)
 
+## Worktree Environment
+
+If the environment variable `BELMONT_WORKTREE` is set to `1`, you are running in an isolated git worktree for parallel execution. The following rules apply:
+
+- **Port**: Use `$PORT` (or `$BELMONT_PORT`) when starting dev servers or configuring URLs. Do NOT hardcode port numbers like 3000, 5173, or 8080. Examples: `next dev -p $PORT`, `vite --port $PORT`, `PORT=$PORT npm start`, `rails server -p $PORT`.
+- **Dependencies**: Worktree setup hooks have already run (e.g., `npm install`). Do NOT re-install dependencies unless a task specifically requires adding new packages.
+- **Build isolation**: Your `.next/`, `dist/`, `node_modules/`, and other gitignored directories are local to this worktree. Other worktrees are unaffected by your builds.
+- **Scope**: Only modify files within this worktree. Changes will be merged back via git.
+
 ## Setup
 
 Read these files first:
@@ -325,7 +334,7 @@ When all tasks in the milestone are done:
    | Date | Feature | Activity |
    |------|---------|----------|
    ```
-   Then find the row for the current feature's slug in the `## Features` table (add a new row if missing) and update the Status, Milestones, and Tasks columns. Update the top-level `## Status` line if all features are now complete. Add a row to `## Recent Activity` noting the milestone completion.
+   Then find the row for the current feature's slug in the `## Features` table (add a new row if missing) and update the Status, Milestones, and Tasks columns. Add a row to `## Recent Activity` noting the milestone completion.
 
 ## Step 6: Clean Up
 
@@ -378,6 +387,7 @@ Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and 
    - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
    - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
    - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
+   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
 
 Only fix actual discrepancies — if files already agree, make no changes.
 

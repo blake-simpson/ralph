@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -183,6 +184,100 @@ type loopConfig struct {
 	MaxFailures   int
 	MaxParallel   int
 	DryRun        bool
+	Port          int                // assigned port for worktree isolation (0 = not in worktree)
+	WorktreeEnv   map[string]string  // extra env vars from worktree.json
+}
+
+// worktreeHooks defines lifecycle hooks for worktree isolation.
+type worktreeHooks struct {
+	Setup    []string          `json:"setup"`
+	Teardown []string          `json:"teardown"`
+	Env      map[string]string `json:"env"`
+}
+
+// loadWorktreeHooks reads .belmont/worktree.json from the project root.
+// Returns nil if the file does not exist.
+func loadWorktreeHooks(root string) *worktreeHooks {
+	data, err := os.ReadFile(filepath.Join(root, ".belmont", "worktree.json"))
+	if err != nil {
+		return nil
+	}
+	var hooks worktreeHooks
+	if err := json.Unmarshal(data, &hooks); err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ Failed to parse .belmont/worktree.json: %s\033[0m\n", err)
+		return nil
+	}
+	return &hooks
+}
+
+// allocatePort asks the OS for a free TCP port by binding to :0.
+func allocatePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	port := l.Addr().(*net.TCPAddr).Port
+	l.Close()
+	return port, nil
+}
+
+// buildWorktreeEnv creates an environment slice with worktree-specific variables.
+// It starts from the current process env and appends PORT, BELMONT_PORT, BELMONT_WORKTREE,
+// and any user-defined env vars from worktree.json.
+func buildWorktreeEnv(port int, extraEnv map[string]string) []string {
+	env := os.Environ()
+	if port != 0 {
+		env = append(env,
+			fmt.Sprintf("PORT=%d", port),
+			fmt.Sprintf("BELMONT_PORT=%d", port),
+			"BELMONT_WORKTREE=1",
+		)
+	}
+	for k, v := range extraEnv {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	return env
+}
+
+// runWorktreeHookCommands executes a list of shell commands in the worktree directory.
+func runWorktreeHookCommands(commands []string, wtPath string, port int, extraEnv map[string]string) error {
+	env := buildWorktreeEnv(port, extraEnv)
+	for _, cmdStr := range commands {
+		cmd := exec.Command("sh", "-c", cmdStr)
+		cmd.Dir = wtPath
+		cmd.Env = env
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("hook %q failed: %w", cmdStr, err)
+		}
+	}
+	return nil
+}
+
+// copyEnvFiles copies .env* files from the project root into the worktree.
+// These are gitignored so they don't exist in fresh worktrees, but are needed
+// by postinstall scripts (e.g., prisma generate) and dev servers.
+func copyEnvFiles(projectRoot, wtPath string) {
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == ".env" || strings.HasPrefix(name, ".env.") {
+			src := filepath.Join(projectRoot, name)
+			dst := filepath.Join(wtPath, name)
+			data, err := os.ReadFile(src)
+			if err != nil {
+				continue
+			}
+			os.WriteFile(dst, data, 0644)
+		}
+	}
 }
 
 type aiDecision struct {
@@ -385,13 +480,15 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	masterProgressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
 	if masterProgress, err := os.ReadFile(masterProgressPath); err == nil {
 		content := string(masterProgress)
-		statusLine := parseStatusLine(content)
-		if statusLine != "" {
-			report.OverallStatus = statusLine
-		} else if len(features) > 0 {
+		if len(features) > 0 {
 			report.OverallStatus = computeFeatureListStatus(features)
 		} else {
-			report.OverallStatus = "🔴 Not Started"
+			statusLine := parseStatusLine(content)
+			if statusLine != "" {
+				report.OverallStatus = statusLine
+			} else {
+				report.OverallStatus = "🔴 Not Started"
+			}
 		}
 		report.Blockers = parseBlockers(content)
 	} else if len(features) > 0 {
@@ -712,6 +809,19 @@ func syncMasterFeatureStatuses(root string, features []featureSummary) {
 			lines[i] = fmt.Sprintf("| %s | %s | %s | %s | %s | %s |",
 				cells[0], slug, newStatus, newMs, newTasks, cells[5])
 			changed = true
+		}
+	}
+
+	// Also sync the ## Status: line
+	computedStatus := computeFeatureListStatus(features)
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "## Status:") {
+			newLine := "## Status: " + computedStatus
+			if lines[i] != newLine {
+				lines[i] = newLine
+				changed = true
+			}
+			break
 		}
 	}
 
@@ -1433,6 +1543,20 @@ func runInstall(args []string) error {
 	fmt.Println("  6. Status     - View progress")
 	fmt.Println("  7. Reset      - Reset state and start fresh")
 	fmt.Println("")
+
+	// Hint about worktree.json if project has a lockfile but no worktree config
+	worktreeJSON := filepath.Join(projectRoot, ".belmont", "worktree.json")
+	if _, err := os.Stat(worktreeJSON); os.IsNotExist(err) {
+		lockfiles := []string{"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "requirements.txt", "Gemfile.lock", "Cargo.lock"}
+		for _, lf := range lockfiles {
+			if _, err := os.Stat(filepath.Join(projectRoot, lf)); err == nil {
+				fmt.Println("Tip: Create .belmont/worktree.json for parallel worktree isolation (dependency install, port management).")
+				fmt.Println("     See: https://github.com/belmont-ai/belmont/blob/main/docs/worktree-isolation.md")
+				fmt.Println("")
+				break
+			}
+		}
+	}
 
 	return nil
 }
@@ -2838,7 +2962,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	}
 
 	// Set up worktree tracker and signal handler
-	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry)}
+	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -2899,6 +3023,18 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 			fmt.Fprintf(os.Stderr, "\n\033[1m── Wave %d ──\033[0m\n", w.Index+1)
 		}
 
+		// Resolve stale worktrees sequentially (before parallel launch) to avoid stdin races
+		preResolved := make(map[string]bool) // slug -> resumed
+		for _, f := range waveFeatures {
+			branch := fmt.Sprintf("belmont/auto/%s", f.Slug)
+			wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", f.Slug)
+			resumed, err := handleStaleWorktree(cfg.Root, f.Slug, branch, wtPath)
+			if err != nil {
+				return err
+			}
+			preResolved[f.Slug] = resumed
+		}
+
 		// Run this wave's features in parallel
 		semaphore := make(chan struct{}, cfg.MaxParallel)
 		var wg sync.WaitGroup
@@ -2906,7 +3042,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 
 		for _, f := range waveFeatures {
 			wg.Add(1)
-			go func(slug string) {
+			go func(slug string, resumed bool) {
 				defer wg.Done()
 				semaphore <- struct{}{}
 				defer func() { <-semaphore }()
@@ -2918,14 +3054,14 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 
 				fmt.Fprintf(os.Stderr, "\033[36m▶ %s\033[0m — starting in worktree\n", slug)
 
-				err := runFeatureInWorktree(cfg, slug, branch, wtPath)
+				err := runFeatureInWorktree(cfg, slug, branch, wtPath, activeWorktrees, resumed)
 				results <- featureResult{
 					Slug:         slug,
 					Branch:       branch,
 					WorktreePath: wtPath,
 					Err:          err,
 				}
-			}(f.Slug)
+			}(f.Slug, preResolved[f.Slug])
 		}
 
 		go func() {
@@ -3105,13 +3241,7 @@ func handleStaleWorktree(root, id, branch, wtPath string) (resumed bool, err err
 }
 
 // runFeatureInWorktree creates a worktree for a feature, installs belmont, and runs the full loop.
-func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string) error {
-	// Handle stale worktree/branch from previous interrupted run
-	resumed, err := handleStaleWorktree(cfg.Root, slug, branch, wtPath)
-	if err != nil {
-		return err
-	}
-
+func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *worktreeTracker, resumed bool) error {
 	if !resumed {
 		// Create worktree directory
 		wtDir := filepath.Dir(wtPath)
@@ -3139,6 +3269,9 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string) error {
 	// Exclude .belmont/ via worktree-local git exclude (never committed, no merge conflicts)
 	excludeBelmontInWorktree(wtPath)
 
+	// Copy .env files (gitignored, so not present in fresh worktrees)
+	copyEnvFiles(cfg.Root, wtPath)
+
 	// Run belmont install in the worktree
 	exePath, err := os.Executable()
 	if err != nil {
@@ -3150,10 +3283,34 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string) error {
 		fmt.Fprintf(os.Stderr, "  \033[33mInstall warning for %s: %s\033[0m\n", slug, strings.TrimSpace(string(out)))
 	}
 
+	// Allocate a port for this worktree
+	port, err := allocatePort()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to allocate port for %s: %s\033[0m\n", slug, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "  Port %d assigned to %s\n", port, slug)
+	}
+	if tracker != nil {
+		tracker.setPort(slug, port)
+	}
+
+	// Run worktree setup hooks
+	hooks := loadWorktreeHooks(cfg.Root)
+	if hooks != nil && len(hooks.Setup) > 0 {
+		fmt.Fprintf(os.Stderr, "  Running worktree setup hooks for %s...\n", slug)
+		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env); err != nil {
+			return fmt.Errorf("worktree setup for %s: %w", slug, err)
+		}
+	}
+
 	// Run loop for this feature (all milestones)
 	mCfg := cfg
 	mCfg.Root = wtPath
 	mCfg.Feature = slug
+	mCfg.Port = port
+	if hooks != nil {
+		mCfg.WorktreeEnv = hooks.Env
+	}
 
 	return runLoop(mCfg)
 }
@@ -3174,7 +3331,8 @@ func mergeFeatureBranch(cfg loopConfig, slug, branch, wtPath string, tracker *wo
 	// Clean up reconciliation report if it exists
 	os.Remove(filepath.Join(cfg.Root, ".belmont", "reconciliation-report.json"))
 
-	// Clean up worktree and branch
+	// Run teardown hooks and clean up worktree
+	tracker.teardownEntry(slug)
 	removeWorktree(cfg.Root, wtPath, slug)
 	tracker.remove(slug)
 
@@ -3700,7 +3858,7 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	case "claude":
 		cmd = exec.Command("claude", "-p", prompt,
 			"--permission-mode", "bypassPermissions",
-			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill",
+			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
 			"--output-format", "stream-json", "--verbose")
 	case "codex":
 		cmd = exec.Command("codex", "exec", prompt,
@@ -3719,6 +3877,12 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	}
 
 	cmd.Dir = cfg.Root
+
+	// Worktree isolation: inject env vars and set process group
+	if cfg.Port != 0 {
+		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 
 	tw := newTailWriter(os.Stderr, 1500)
 	if cfg.Tool == "claude" {
@@ -3802,6 +3966,12 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 	}
 
 	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+
+	// Worktree isolation: inject env vars and set process group
+	if cfg.Port != 0 {
+		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 
 	tw := newTailWriter(os.Stderr, 1500)
 	if cfg.Tool == "claude" {
@@ -4537,6 +4707,7 @@ func buildToolCommand(tool, prompt, root string) *exec.Cmd {
 	case "claude":
 		cmd = exec.Command("claude", "-p", prompt,
 			"--permission-mode", "bypassPermissions",
+			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
 			"--output-format", "json")
 	case "codex":
 		cmd = exec.Command("codex", "exec", prompt,
@@ -4950,7 +5121,7 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	fmt.Fprintln(os.Stderr)
 
 	// Set up signal handler for cleanup
-	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry)}
+	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -5002,12 +5173,15 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 type worktreeEntry struct {
 	Path   string
 	Branch string
+	Port   int
+	Pgid   int // process group ID for cleanup
 }
 
 // worktreeTracker keeps track of active worktrees for cleanup on interrupt.
 type worktreeTracker struct {
 	mu      sync.Mutex
 	entries map[string]worktreeEntry // ID -> worktree entry
+	hooks   *worktreeHooks          // shared hooks config (nil if no worktree.json)
 }
 
 func (wt *worktreeTracker) add(id, path, branch string) {
@@ -5016,10 +5190,45 @@ func (wt *worktreeTracker) add(id, path, branch string) {
 	wt.entries[id] = worktreeEntry{Path: path, Branch: branch}
 }
 
+func (wt *worktreeTracker) setPort(id string, port int) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if entry, ok := wt.entries[id]; ok {
+		entry.Port = port
+		wt.entries[id] = entry
+	}
+}
+
+func (wt *worktreeTracker) setPgid(id string, pgid int) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	if entry, ok := wt.entries[id]; ok {
+		entry.Pgid = pgid
+		wt.entries[id] = entry
+	}
+}
+
 func (wt *worktreeTracker) remove(id string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 	delete(wt.entries, id)
+}
+
+// teardownEntry runs teardown hooks for a worktree entry (if configured).
+func (wt *worktreeTracker) teardownEntry(id string) {
+	wt.mu.Lock()
+	entry, ok := wt.entries[id]
+	hooks := wt.hooks
+	wt.mu.Unlock()
+	if !ok {
+		return
+	}
+	if entry.Pgid != 0 {
+		syscall.Kill(-entry.Pgid, syscall.SIGTERM)
+	}
+	if hooks != nil && len(hooks.Teardown) > 0 {
+		_ = runWorktreeHookCommands(hooks.Teardown, entry.Path, entry.Port, hooks.Env)
+	}
 }
 
 func (wt *worktreeTracker) cleanupAll(root string) {
@@ -5027,6 +5236,14 @@ func (wt *worktreeTracker) cleanupAll(root string) {
 	defer wt.mu.Unlock()
 	for id, entry := range wt.entries {
 		fmt.Fprintf(os.Stderr, "  Cleaning up worktree for %s...\n", id)
+		// Kill process group if running
+		if entry.Pgid != 0 {
+			syscall.Kill(-entry.Pgid, syscall.SIGTERM)
+		}
+		// Run teardown hooks
+		if wt.hooks != nil && len(wt.hooks.Teardown) > 0 {
+			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env)
+		}
 		removeWorktree(root, entry.Path, id)
 		// Also delete the branch to prevent stale branch on restart
 		delCmd := exec.Command("git", "branch", "-D", entry.Branch)
@@ -5049,9 +5266,21 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 	}
 	results := make(chan result, len(w.Milestones))
 
+	// Resolve stale worktrees sequentially (before parallel launch) to avoid stdin races
+	msPreResolved := make(map[string]bool) // milestone ID -> resumed
+	for _, m := range w.Milestones {
+		branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(m.ID))
+		wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(m.ID)))
+		resumed, err := handleStaleWorktree(cfg.Root, m.ID, branch, wtPath)
+		if err != nil {
+			return err
+		}
+		msPreResolved[m.ID] = resumed
+	}
+
 	for _, m := range w.Milestones {
 		wg.Add(1)
-		go func(ms milestone) {
+		go func(ms milestone, resumed bool) {
 			defer wg.Done()
 			semaphore <- struct{}{}        // acquire
 			defer func() { <-semaphore }() // release
@@ -5063,14 +5292,14 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 
 			fmt.Fprintf(os.Stderr, "  \033[36m▶ %s: %s\033[0m (worktree)\n", ms.ID, ms.Name)
 
-			err := runMilestoneInWorktree(cfg, ms, branch, wtPath)
+			err := runMilestoneInWorktree(cfg, ms, branch, wtPath, tracker, resumed)
 			results <- result{
 				MilestoneID:  ms.ID,
 				Branch:       branch,
 				WorktreePath: wtPath,
 				Err:          err,
 			}
-		}(m)
+		}(m, msPreResolved[m.ID])
 	}
 
 	// Wait for all goroutines then close results
@@ -5133,13 +5362,7 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 }
 
 // runMilestoneInWorktree creates a worktree, installs belmont, copies state, and runs the loop.
-func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string) error {
-	// Handle stale worktree/branch from previous interrupted run
-	resumed, err := handleStaleWorktree(cfg.Root, ms.ID, branch, wtPath)
-	if err != nil {
-		return err
-	}
-
+func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string, tracker *worktreeTracker, resumed bool) error {
 	if !resumed {
 		// Create worktree directory
 		wtDir := filepath.Dir(wtPath)
@@ -5167,6 +5390,9 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string)
 	// Exclude .belmont/ via worktree-local git exclude (never committed, no merge conflicts)
 	excludeBelmontInWorktree(wtPath)
 
+	// Copy .env files (gitignored, so not present in fresh worktrees)
+	copyEnvFiles(cfg.Root, wtPath)
+
 	// Run belmont install in the worktree (shell out to self)
 	exePath, err := os.Executable()
 	if err != nil {
@@ -5178,11 +5404,35 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string)
 		fmt.Fprintf(os.Stderr, "    \033[33mInstall warning for %s: %s\033[0m\n", ms.ID, strings.TrimSpace(string(out)))
 	}
 
+	// Allocate a port for this worktree
+	port, err := allocatePort()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    \033[33m⚠ Failed to allocate port for %s: %s\033[0m\n", ms.ID, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "    Port %d assigned to %s\n", port, ms.ID)
+	}
+	if tracker != nil {
+		tracker.setPort(ms.ID, port)
+	}
+
+	// Run worktree setup hooks
+	hooks := loadWorktreeHooks(cfg.Root)
+	if hooks != nil && len(hooks.Setup) > 0 {
+		fmt.Fprintf(os.Stderr, "    Running worktree setup hooks for %s...\n", ms.ID)
+		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env); err != nil {
+			return fmt.Errorf("worktree setup for %s: %w", ms.ID, err)
+		}
+	}
+
 	// Run loop for this single milestone
 	mCfg := cfg
 	mCfg.Root = wtPath
 	mCfg.From = ms.ID
 	mCfg.To = ms.ID
+	mCfg.Port = port
+	if hooks != nil {
+		mCfg.WorktreeEnv = hooks.Env
+	}
 
 	return runLoop(mCfg)
 }
@@ -5215,7 +5465,8 @@ func mergeWorktreeBranch(cfg loopConfig, milestoneID, branch, wtPath string, tra
 	// Clean up reconciliation report if it exists
 	os.Remove(filepath.Join(cfg.Root, ".belmont", "reconciliation-report.json"))
 
-	// Clean up worktree and branch
+	// Run teardown hooks and clean up worktree
+	tracker.teardownEntry(milestoneID)
 	removeWorktree(cfg.Root, wtPath, milestoneID)
 	tracker.remove(milestoneID)
 
@@ -5831,6 +6082,10 @@ func parseOverwrittenFiles(output string) []string {
 // attemptMerge tries to merge a branch, handling various failure modes automatically.
 // It handles untracked file overwrites, dirty worktrees, and merge conflicts.
 func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
+	// Always commit .belmont/ state before merging — worktrees modify it via
+	// symlink, leaving dirty files on main that block merges.
+	commitBelmontState(cfg.Root) // best-effort, ignore errors
+
 	// Try the merge
 	cmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
 	cmd.Dir = cfg.Root

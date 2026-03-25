@@ -52,7 +52,7 @@ For each acceptance criterion from the PRD:
 If the task involved UI changes, you MUST:
 
 1. **Load Figma Design** - Get the reference design
-2. **Start Dev Server** - Run the application
+2. **Start Dev Server** - Run the application. If `$BELMONT_PORT` is set, pass it as the port flag (e.g., `--port $BELMONT_PORT`, `-p $BELMONT_PORT`). Otherwise use the project's default port.
 3. **Use Playwright** - You MUST attempt to use the playwright MCP (if installed) to navigate to the implemented UI
 4. **Screenshot Comparison** - Compare against Figma (you will clean these up in Phase 6)
 5. **Check Pixel Accuracy**:

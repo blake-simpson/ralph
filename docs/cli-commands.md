@@ -28,6 +28,18 @@ belmont version                         # Show version, commit, build date
 # If a previous run was interrupted, auto detects stale branches and prompts to resume or restart
 ```
 
+## Worktree Environment Variables
+
+When `belmont auto` runs features or milestones in parallel worktrees, the following environment variables are automatically set for each worktree:
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Unique free port assigned to this worktree |
+| `BELMONT_PORT` | Same value as `PORT` |
+| `BELMONT_WORKTREE` | Set to `1` in worktree context |
+
+Configure worktree lifecycle hooks via `.belmont/worktree.json`. See [Worktree Isolation](worktree-isolation.md) for full documentation.
+
 ## How Skills Use the CLI
 
 Skills prefer these helpers when available:

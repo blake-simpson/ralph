@@ -110,6 +110,8 @@ Execute in this order:
 
 #### Step 3: Verification
 
+**Port awareness**: If `$BELMONT_PORT` is set (worktree mode), use it when starting dev servers or running commands that need a port (e.g., `next dev -p $BELMONT_PORT`, `vite --port $BELMONT_PORT`). Do NOT hardcode port numbers.
+
 **Detect the project's package manager** from the `## Codebase Analysis` section, or check in this order:
 1. `pnpm-lock.yaml` exists → use `pnpm`
 2. `yarn.lock` exists → use `yarn`
