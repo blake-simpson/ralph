@@ -255,6 +255,32 @@ func runWorktreeHookCommands(commands []string, wtPath string, port int, extraEn
 	return nil
 }
 
+// detectAutoInstallCommands checks the project root for known lock files and
+// returns the appropriate dependency install command(s). Returns nil if no
+// recognized lock file is found. First match wins.
+func detectAutoInstallCommands(root string) []string {
+	type entry struct {
+		File     string
+		Commands []string
+	}
+	lockfiles := []entry{
+		{"pnpm-lock.yaml", []string{"pnpm install --prefer-offline"}},
+		{"bun.lockb", []string{"bun install"}},
+		{"bun.lock", []string{"bun install"}},
+		{"yarn.lock", []string{"yarn install --prefer-offline"}},
+		{"package-lock.json", []string{"npm install --prefer-offline"}},
+		{"Gemfile.lock", []string{"bundle install"}},
+		{"requirements.txt", []string{"pip install -r requirements.txt"}},
+		{"Cargo.lock", []string{"cargo build"}},
+	}
+	for _, lf := range lockfiles {
+		if _, err := os.Stat(filepath.Join(root, lf.File)); err == nil {
+			return lf.Commands
+		}
+	}
+	return nil
+}
+
 // copyEnvFiles copies .env* files from the project root into the worktree.
 // These are gitignored so they don't exist in fresh worktrees, but are needed
 // by postinstall scripts (e.g., prisma generate) and dev servers.
@@ -1544,14 +1570,14 @@ func runInstall(args []string) error {
 	fmt.Println("  7. Reset      - Reset state and start fresh")
 	fmt.Println("")
 
-	// Hint about worktree.json if project has a lockfile but no worktree config
+	// Hint about worktree auto-install if project has a lockfile but no worktree config
 	worktreeJSON := filepath.Join(projectRoot, ".belmont", "worktree.json")
 	if _, err := os.Stat(worktreeJSON); os.IsNotExist(err) {
-		lockfiles := []string{"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock", "requirements.txt", "Gemfile.lock", "Cargo.lock"}
+		lockfiles := []string{"pnpm-lock.yaml", "bun.lockb", "bun.lock", "yarn.lock", "package-lock.json", "Gemfile.lock", "requirements.txt", "Cargo.lock"}
 		for _, lf := range lockfiles {
 			if _, err := os.Stat(filepath.Join(projectRoot, lf)); err == nil {
-				fmt.Println("Tip: Create .belmont/worktree.json for parallel worktree isolation (dependency install, port management).")
-				fmt.Println("     See: https://github.com/belmont-ai/belmont/blob/main/docs/worktree-isolation.md")
+				fmt.Printf("Note: Worktree dependencies will be auto-installed (%s detected).\n", lf)
+				fmt.Println("      Create .belmont/worktree.json to customize setup hooks, teardown, or env vars.")
 				fmt.Println("")
 				break
 			}
@@ -2967,14 +2993,14 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state and cleaning up worktrees...\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state, preserving worktrees for resume...\033[0m\n")
 		// Revert .belmont/ state for all active worktrees to prevent phantom completion
 		activeWorktrees.mu.Lock()
 		for slug := range activeWorktrees.entries {
 			revertFeatureState(cfg.Root, slug)
 		}
 		activeWorktrees.mu.Unlock()
-		activeWorktrees.cleanupAll(cfg.Root)
+		activeWorktrees.gracefulShutdown(cfg.Root)
 		os.Exit(1)
 	}()
 
@@ -3300,6 +3326,14 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		fmt.Fprintf(os.Stderr, "  Running worktree setup hooks for %s...\n", slug)
 		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env); err != nil {
 			return fmt.Errorf("worktree setup for %s: %w", slug, err)
+		}
+	} else if hooks == nil {
+		// No worktree.json — auto-detect dependency install from lock files
+		if cmds := detectAutoInstallCommands(cfg.Root); len(cmds) > 0 {
+			fmt.Fprintf(os.Stderr, "  Auto-installing dependencies for %s (%s)...\n", slug, strings.Join(cmds, ", "))
+			if err := runWorktreeHookCommands(cmds, wtPath, port, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "  \033[33m⚠ Auto-install failed for %s: %s (continuing)\033[0m\n", slug, err)
+			}
 		}
 	}
 
@@ -3688,24 +3722,42 @@ func parseMilestoneNum(id string) int {
 // tailWriter writes all data to an underlying writer and keeps a rolling
 // buffer of the last `size` bytes for later retrieval.
 type tailWriter struct {
-	out  io.Writer
-	buf  []byte
-	size int
+	out     io.Writer
+	buf     []byte
+	size    int
+	prefix  string
+	lineBuf []byte // partial line accumulator (used when prefix is set)
 }
 
-func newTailWriter(out io.Writer, size int) *tailWriter {
-	return &tailWriter{out: out, buf: make([]byte, 0, size), size: size}
+func newTailWriter(out io.Writer, size int, prefix string) *tailWriter {
+	return &tailWriter{out: out, buf: make([]byte, 0, size), size: size, prefix: prefix}
 }
 
 func (tw *tailWriter) Write(p []byte) (int, error) {
-	n, err := tw.out.Write(p)
-	if n > 0 {
-		tw.buf = append(tw.buf, p[:n]...)
-		if len(tw.buf) > tw.size {
-			tw.buf = tw.buf[len(tw.buf)-tw.size:]
-		}
+	// Always store raw bytes in buf for error tail reporting
+	tw.buf = append(tw.buf, p...)
+	if len(tw.buf) > tw.size {
+		tw.buf = tw.buf[len(tw.buf)-tw.size:]
 	}
-	return n, err
+
+	// When no prefix, pass through directly
+	if tw.prefix == "" {
+		_, err := tw.out.Write(p)
+		return len(p), err
+	}
+
+	// Line-buffer and prepend prefix to each complete line
+	tw.lineBuf = append(tw.lineBuf, p...)
+	for {
+		idx := bytes.IndexByte(tw.lineBuf, '\n')
+		if idx < 0 {
+			break
+		}
+		line := tw.lineBuf[:idx]
+		tw.lineBuf = tw.lineBuf[idx+1:]
+		tw.out.Write([]byte(tw.prefix + string(line) + "\n"))
+	}
+	return len(p), nil
 }
 
 func (tw *tailWriter) String() string {
@@ -3717,6 +3769,7 @@ func (tw *tailWriter) String() string {
 type claudeStreamWriter struct {
 	tw      *tailWriter
 	partial []byte
+	prefix  string // e.g. "\033[36m[slug]\033[0m: "
 }
 
 type streamLine struct {
@@ -3758,11 +3811,19 @@ func (c *claudeStreamWriter) Write(p []byte) (int, error) {
 			switch item.Type {
 			case "text":
 				if item.Text != "" {
-					c.tw.Write([]byte("  " + item.Text + "\n"))
+					if c.prefix != "" {
+						c.tw.Write([]byte(c.prefix + item.Text + "\n"))
+					} else {
+						c.tw.Write([]byte("  " + item.Text + "\n"))
+					}
 				}
 			case "tool_use":
 				if item.Name != "" {
-					c.tw.Write([]byte("  → " + toolSummary(item.Name, item.Input) + "\n"))
+					if c.prefix != "" {
+						c.tw.Write([]byte(c.prefix + toolSummary(item.Name, item.Input) + "\n"))
+					} else {
+						c.tw.Write([]byte("  → " + toolSummary(item.Name, item.Input) + "\n"))
+					}
 				}
 			}
 		}
@@ -3884,13 +3945,21 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
-	tw := newTailWriter(os.Stderr, 1500)
-	if cfg.Tool == "claude" {
-		cmd.Stdout = &claudeStreamWriter{tw: tw}
-	} else {
-		cmd.Stdout = tw
+	var prefix string
+	if cfg.Port != 0 && cfg.Feature != "" {
+		prefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", cfg.Feature)
 	}
-	cmd.Stderr = tw
+
+	var tw *tailWriter
+	if cfg.Tool == "claude" {
+		tw = newTailWriter(os.Stderr, 1500, "")
+		cmd.Stdout = &claudeStreamWriter{tw: tw, prefix: prefix}
+		cmd.Stderr = tw
+	} else {
+		tw = newTailWriter(os.Stderr, 1500, prefix)
+		cmd.Stdout = tw
+		cmd.Stderr = tw
+	}
 
 	var stopTimer chan struct{}
 	if cfg.Tool != "claude" {
@@ -3973,13 +4042,21 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
-	tw := newTailWriter(os.Stderr, 1500)
-	if cfg.Tool == "claude" {
-		cmd.Stdout = &claudeStreamWriter{tw: tw}
-	} else {
-		cmd.Stdout = tw
+	var triagePrefix string
+	if cfg.Port != 0 && cfg.Feature != "" {
+		triagePrefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", cfg.Feature)
 	}
-	cmd.Stderr = tw
+
+	var tw *tailWriter
+	if cfg.Tool == "claude" {
+		tw = newTailWriter(os.Stderr, 1500, "")
+		cmd.Stdout = &claudeStreamWriter{tw: tw, prefix: triagePrefix}
+		cmd.Stderr = tw
+	} else {
+		tw = newTailWriter(os.Stderr, 1500, triagePrefix)
+		cmd.Stdout = tw
+		cmd.Stderr = tw
+	}
 
 	var stopTimer chan struct{}
 	if cfg.Tool != "claude" {
@@ -5126,10 +5203,10 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state and cleaning up worktrees...\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state, preserving worktrees for resume...\033[0m\n")
 		// Revert .belmont/ state to prevent phantom completion
 		revertFeatureState(cfg.Root, cfg.Feature)
-		activeWorktrees.cleanupAll(cfg.Root)
+		activeWorktrees.gracefulShutdown(cfg.Root)
 		os.Exit(1)
 	}()
 
@@ -5249,6 +5326,28 @@ func (wt *worktreeTracker) cleanupAll(root string) {
 		delCmd := exec.Command("git", "branch", "-D", entry.Branch)
 		delCmd.Dir = root
 		delCmd.Run() // best-effort
+	}
+	wt.entries = make(map[string]worktreeEntry)
+}
+
+// gracefulShutdown stops processes and releases resources but preserves worktrees
+// and branches so the user can resume on next run.
+func (wt *worktreeTracker) gracefulShutdown(root string) {
+	wt.mu.Lock()
+	defer wt.mu.Unlock()
+	for id, entry := range wt.entries {
+		// Kill process group if running
+		if entry.Pgid != 0 {
+			syscall.Kill(-entry.Pgid, syscall.SIGTERM)
+		}
+		// Run teardown hooks (release ports, stop dev servers)
+		if wt.hooks != nil && len(wt.hooks.Teardown) > 0 {
+			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env)
+		}
+		// Preserve worktree and branch for resume
+		fmt.Fprintf(os.Stderr, "  Worktree preserved for %s at %s\n", id, entry.Path)
+		fmt.Fprintf(os.Stderr, "    Resume with: belmont auto (will prompt to resume)\n")
+		fmt.Fprintf(os.Stderr, "    Or clean up: belmont recover --clean %s\n", id)
 	}
 	wt.entries = make(map[string]worktreeEntry)
 }
@@ -5421,6 +5520,14 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 		fmt.Fprintf(os.Stderr, "    Running worktree setup hooks for %s...\n", ms.ID)
 		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env); err != nil {
 			return fmt.Errorf("worktree setup for %s: %w", ms.ID, err)
+		}
+	} else if hooks == nil {
+		// No worktree.json — auto-detect dependency install from lock files
+		if cmds := detectAutoInstallCommands(cfg.Root); len(cmds) > 0 {
+			fmt.Fprintf(os.Stderr, "    Auto-installing dependencies for %s (%s)...\n", ms.ID, strings.Join(cmds, ", "))
+			if err := runWorktreeHookCommands(cmds, wtPath, port, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "    \033[33m⚠ Auto-install failed for %s: %s (continuing)\033[0m\n", ms.ID, err)
+			}
 		}
 	}
 

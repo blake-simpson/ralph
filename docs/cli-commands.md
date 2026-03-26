@@ -38,7 +38,7 @@ When `belmont auto` runs features or milestones in parallel worktrees, the follo
 | `BELMONT_PORT` | Same value as `PORT` |
 | `BELMONT_WORKTREE` | Set to `1` in worktree context |
 
-Configure worktree lifecycle hooks via `.belmont/worktree.json`. See [Worktree Isolation](worktree-isolation.md) for full documentation.
+Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Configure custom worktree lifecycle hooks via `.belmont/worktree.json`. See [Worktree Isolation](worktree-isolation.md) for full documentation.
 
 ## How Skills Use the CLI
 

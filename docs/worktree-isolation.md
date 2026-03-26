@@ -11,6 +11,30 @@ Each parallel worktree gets:
 - **Its own file tree** — gitignored directories like `node_modules/`, `.next/`, `dist/` are local to each worktree
 - **Shared `.belmont/` state** via symlink for coordination
 - **Process group isolation** — processes started by the AI agent are tracked and cleaned up when the worktree is removed
+- **Auto-detected dependency install** — if no `worktree.json` exists, Belmont detects your package manager and installs dependencies automatically
+
+## Automatic Dependency Installation
+
+When no `.belmont/worktree.json` exists, Belmont auto-detects your package manager from lock files and runs the appropriate install command in each new worktree:
+
+| Lock File | Command |
+|-----------|---------|
+| `pnpm-lock.yaml` | `pnpm install --prefer-offline` |
+| `bun.lockb` / `bun.lock` | `bun install` |
+| `yarn.lock` | `yarn install --prefer-offline` |
+| `package-lock.json` | `npm install --prefer-offline` |
+| `Gemfile.lock` | `bundle install` |
+| `requirements.txt` | `pip install -r requirements.txt` |
+| `Cargo.lock` | `cargo build` |
+
+This means most projects work out of the box with no configuration.
+
+To **disable** auto-install, create a `.belmont/worktree.json` with an empty setup array:
+```json
+{ "setup": [] }
+```
+
+To **customize** the install command or add additional setup steps, specify them explicitly in `worktree.json` (see Worktree Hooks below).
 
 ## Environment Variables
 
@@ -46,31 +70,100 @@ Create `.belmont/worktree.json` in your project to configure lifecycle hooks:
 
 ### Examples
 
-**Node.js (npm)**
+**Next.js (npm)**
+```json
+{
+  "setup": ["npm install --prefer-offline"],
+  "env": {
+    "NEXT_TELEMETRY_DISABLED": "1"
+  }
+}
+```
+
+**Next.js (pnpm)**
+```json
+{
+  "setup": ["pnpm install --prefer-offline"],
+  "env": {
+    "NEXT_TELEMETRY_DISABLED": "1"
+  }
+}
+```
+
+**Astro**
 ```json
 {
   "setup": ["npm install --prefer-offline"]
 }
 ```
 
-**Node.js (pnpm)**
+**Node.js (yarn)**
 ```json
 {
-  "setup": ["pnpm install --prefer-offline"]
+  "setup": ["yarn install --prefer-offline"]
 }
 ```
 
-**Python**
+**Node.js (bun)**
+```json
+{
+  "setup": ["bun install"]
+}
+```
+
+**PHP (Laravel / Composer)**
+```json
+{
+  "setup": ["composer install --no-interaction"]
+}
+```
+
+**Ruby on Rails**
+```json
+{
+  "setup": ["bundle install", "bin/rails db:prepare"]
+}
+```
+
+**Python (Django / Flask)**
 ```json
 {
   "setup": ["python -m venv .venv", ".venv/bin/pip install -r requirements.txt"]
 }
 ```
 
-**Ruby (Bundler)**
+**Swift (Xcode / SwiftPM)**
 ```json
 {
-  "setup": ["bundle install"]
+  "setup": ["swift package resolve"]
+}
+```
+
+**Rust (Cargo)**
+```json
+{
+  "setup": ["cargo build"]
+}
+```
+
+**Go**
+```json
+{
+  "setup": ["go mod download"]
+}
+```
+
+**Elixir (Phoenix)**
+```json
+{
+  "setup": ["mix deps.get", "mix ecto.setup"]
+}
+```
+
+**Disable auto-install**
+```json
+{
+  "setup": []
 }
 ```
 
@@ -82,7 +175,7 @@ Handled automatically. Each worktree gets a unique `PORT` from the OS. Most web 
 
 ### Dependency Isolation
 
-Git worktrees get their own file tree. Since `node_modules/` is typically gitignored, each worktree starts without dependencies. Use the `setup` hook to install them.
+Git worktrees get their own file tree. Since `node_modules/` is typically gitignored, each worktree starts without dependencies. Belmont auto-detects your package manager and installs dependencies automatically when no `worktree.json` exists (see Automatic Dependency Installation above). For custom setups, use the `setup` hook.
 
 If one feature adds a new package, that change is isolated to its worktree until merged. Other worktrees are unaffected.
 

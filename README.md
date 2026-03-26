@@ -347,7 +347,7 @@ It uses a hybrid decision system: smart deterministic rules handle ~80% of cases
 
 Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 5). Multiple features can also run in parallel with `--features` or `--all`, each in its own worktree with automatic merge and conflict reconciliation. Feature-level dependencies declared in the master PRD's Dependencies column enable wave-based execution — independent features run in parallel, dependent features wait for their dependencies to complete first.
 
-Each worktree is automatically assigned a unique `PORT` to prevent dev server conflicts. Create `.belmont/worktree.json` to configure setup hooks (e.g., `npm install`) and environment variables. See [Worktree Isolation](docs/worktree-isolation.md) for details.
+Each worktree is automatically assigned a unique `PORT` to prevent dev server conflicts. Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Create `.belmont/worktree.json` to customize setup hooks, teardown, or environment variables. See [Worktree Isolation](docs/worktree-isolation.md) for details.
 
 Three checkpoint policies control human involvement:
 - `autonomous` (default) — only pauses on blockers or errors
