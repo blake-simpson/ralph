@@ -441,9 +441,16 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	// Determine base path based on feature mode
 	featuresDir := filepath.Join(root, ".belmont", "features")
 
+	// Load worktree overrides so we can read live state from active worktrees
+	worktreeOverrides := loadAutoWorktrees(root)
+
 	if feature != "" {
 		// Specific feature requested
 		featurePath := filepath.Join(featuresDir, feature)
+		// If there's an active worktree for this feature, read state from there
+		if override, ok := worktreeOverrides[feature]; ok {
+			featurePath = override
+		}
 		if !dirExists(featurePath) {
 			return report, fmt.Errorf("status: feature %q not found in %s", feature, featuresDir)
 		}
@@ -493,7 +500,7 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	}
 
 	// Feature listing mode (default)
-	features := listFeatures(featuresDir, maxName)
+	features := listFeaturesWithOverrides(featuresDir, maxName, worktreeOverrides)
 	if features == nil {
 		features = []featureSummary{}
 	}
@@ -539,7 +546,36 @@ func extractProductName(prdPath string) string {
 	return extractFeatureName(string(content))
 }
 
+// loadAutoWorktrees reads .belmont/auto.json and returns a map of feature slug → worktree feature path.
+// If auto.json doesn't exist or isn't active, returns nil.
+func loadAutoWorktrees(root string) map[string]string {
+	autoPath := filepath.Join(root, ".belmont", "auto.json")
+	data, err := os.ReadFile(autoPath)
+	if err != nil {
+		return nil
+	}
+	var aj autoJSON
+	if err := json.Unmarshal(data, &aj); err != nil || !aj.Active {
+		return nil
+	}
+	result := make(map[string]string)
+	for slug, entry := range aj.Worktrees {
+		// Verify the worktree still exists before using it
+		wtFeaturePath := filepath.Join(entry.Path, ".belmont", "features", slug)
+		if dirExists(wtFeaturePath) {
+			result[slug] = wtFeaturePath
+		}
+	}
+	return result
+}
+
 func listFeatures(featuresDir string, maxName int) []featureSummary {
+	return listFeaturesWithOverrides(featuresDir, maxName, nil)
+}
+
+// listFeaturesWithOverrides is like listFeatures but allows worktree path overrides.
+// The overrides map slug → worktree feature path for features with active worktrees.
+func listFeaturesWithOverrides(featuresDir string, maxName int, worktreeOverrides map[string]string) []featureSummary {
 	entries, err := os.ReadDir(featuresDir)
 	if err != nil {
 		return nil
@@ -551,6 +587,10 @@ func listFeatures(featuresDir string, maxName int) []featureSummary {
 		}
 		slug := entry.Name()
 		featurePath := filepath.Join(featuresDir, slug)
+		// If there's an active worktree for this feature, read state from there instead
+		if override, ok := worktreeOverrides[slug]; ok {
+			featurePath = override
+		}
 		prdPath := filepath.Join(featurePath, "PRD.md")
 
 		name := slug
@@ -1874,70 +1914,71 @@ func syncMarkdownDir(sourceDir, targetDir string) error {
 	return nil
 }
 
-// installClaudeCodeHook adds a PostToolUse hook to .claude/settings.json that runs
-// `belmont sync` after skill invocations to keep master PROGRESS.md in sync.
-func installClaudeCodeHook(projectRoot string) {
+// removeLegacySyncHook removes the belmont sync PostToolUse hook from Claude Code settings
+// if it was installed by a previous version of belmont. The sync hook is no longer needed —
+// with copy-based worktree isolation, belmont status reads live state from active worktrees
+// via auto.json.
+func removeLegacySyncHook(projectRoot string) {
 	settingsPath := filepath.Join(projectRoot, ".claude", "settings.json")
-	hookCommand := "belmont sync --root . 2>/dev/null || true"
-	hookMatcher := "Skill"
 
-	// Read existing settings or start fresh
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return
+	}
 	var settings map[string]interface{}
-	if data, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			settings = make(map[string]interface{})
-		}
-	} else {
-		settings = make(map[string]interface{})
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return
 	}
 
-	// Navigate to hooks.PostToolUse, creating structure as needed
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	if !ok {
-		hooks = make(map[string]interface{})
-		settings["hooks"] = hooks
+		return
 	}
 
-	// Get or create PostToolUse array
-	var PostToolUse []interface{}
-	if existing, ok := hooks["PostToolUse"].([]interface{}); ok {
-		PostToolUse = existing
+	PostToolUse, ok := hooks["PostToolUse"].([]interface{})
+	if !ok {
+		return
 	}
 
-	// Check if belmont sync hook already exists
+	// Filter out any entry containing "belmont sync"
+	var filtered []interface{}
+	removed := false
 	for _, entry := range PostToolUse {
+		keep := true
 		if m, ok := entry.(map[string]interface{}); ok {
-			// Check in the nested hooks array (correct format)
 			if hooksArr, ok := m["hooks"].([]interface{}); ok {
 				for _, h := range hooksArr {
 					if hm, ok := h.(map[string]interface{}); ok {
 						if cmd, _ := hm["command"].(string); strings.Contains(cmd, "belmont sync") {
-							return // already installed
+							keep = false
+							removed = true
 						}
 					}
 				}
 			}
-			// Also check legacy flat format
 			if cmd, _ := m["command"].(string); strings.Contains(cmd, "belmont sync") {
-				return // already installed
+				keep = false
+				removed = true
 			}
+		}
+		if keep {
+			filtered = append(filtered, entry)
 		}
 	}
 
-	// Add the hook (matcher + hooks array format required by Claude Code)
-	newHook := map[string]interface{}{
-		"matcher": hookMatcher,
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": hookCommand,
-			},
-		},
+	if !removed {
+		return
 	}
-	PostToolUse = append(PostToolUse, newHook)
-	hooks["PostToolUse"] = PostToolUse
 
-	// Write settings back (disable HTML escaping so > doesn't become \u003e)
+	if len(filtered) == 0 {
+		delete(hooks, "PostToolUse")
+		if len(hooks) == 0 {
+			delete(settings, "hooks")
+		}
+	} else {
+		hooks["PostToolUse"] = filtered
+	}
+
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetIndent("", "  ")
@@ -1945,12 +1986,8 @@ func installClaudeCodeHook(projectRoot string) {
 	if err := enc.Encode(settings); err != nil {
 		return
 	}
-	os.MkdirAll(filepath.Dir(settingsPath), 0755)
-	if err := os.WriteFile(settingsPath, buf.Bytes(), 0644); err != nil {
-		fmt.Printf("  ⚠ Could not install sync hook: %s\n", err)
-		return
-	}
-	fmt.Println("  - .claude/settings.json (added belmont sync hook)")
+	os.WriteFile(settingsPath, buf.Bytes(), 0644)
+	fmt.Println("  - .claude/settings.json (removed legacy belmont sync hook)")
 }
 
 func setupTool(projectRoot, tool string) error {
@@ -1974,8 +2011,8 @@ func setupTool(projectRoot, tool string) error {
 				return err
 			}
 		}
-		// Install belmont sync hook in Claude Code settings
-		installClaudeCodeHook(projectRoot)
+		// Remove legacy belmont sync hook if present (no longer needed)
+		removeLegacySyncHook(projectRoot)
 	case "codex":
 		fmt.Println("Linking Codex...")
 		skillsTarget := filepath.Join(projectRoot, ".agents", "skills", "belmont")
@@ -2988,18 +3025,12 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	}
 
 	// Set up worktree tracker and signal handler
-	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
+	activeWorktrees := &worktreeTracker{root: cfg.Root, entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state, preserving worktrees for resume...\033[0m\n")
-		// Revert .belmont/ state for all active worktrees to prevent phantom completion
-		activeWorktrees.mu.Lock()
-		for slug := range activeWorktrees.entries {
-			revertFeatureState(cfg.Root, slug)
-		}
-		activeWorktrees.mu.Unlock()
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — preserving worktrees for resume...\033[0m\n")
 		activeWorktrees.gracefulShutdown(cfg.Root)
 		os.Exit(1)
 	}()
@@ -3105,8 +3136,6 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 					// Don't add to waveSuccesses (nothing to merge)
 				} else {
 					fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", r.Slug, r.Err)
-					// Revert .belmont/ state — worktree writes via symlink polluted state
-					revertFeatureState(cfg.Root, r.Slug)
 					allFailures = append(allFailures, r)
 					failedSlugs[r.Slug] = true
 				}
@@ -3124,7 +3153,6 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 			if err := ensureCleanMergeState(cfg.Root); err != nil {
 				fmt.Fprintf(os.Stderr, "\033[33m⚠ %s — skipping remaining %d merge(s)\033[0m\n", err, len(waveSuccesses)-i)
 				for _, remaining := range waveSuccesses[i:] {
-					revertFeatureState(cfg.Root, remaining.Slug)
 					allFailures = append(allFailures, featureResult{Slug: remaining.Slug, Err: fmt.Errorf("skipped: unclean merge state")})
 					failedSlugs[remaining.Slug] = true
 				}
@@ -3134,15 +3162,9 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 				fmt.Fprintf(os.Stderr, "\033[31m✗ merge failed for %s: %s\033[0m\n", s.Slug, err)
 				fmt.Fprintf(os.Stderr, "  Worktree preserved at: %s\n", s.WorktreePath)
 				fmt.Fprintf(os.Stderr, "  Branch: %s\n", s.Branch)
-				// Revert state — code didn't merge, state shouldn't say done
-				revertFeatureState(cfg.Root, s.Slug)
 				allFailures = append(allFailures, featureResult{Slug: s.Slug, Err: err})
 				failedSlugs[s.Slug] = true
 			} else {
-				// Merge succeeded — NOW commit the state
-				if err := commitBelmontState(cfg.Root); err != nil {
-					fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to commit .belmont/ state: %s\033[0m\n", err)
-				}
 				totalMerged++
 			}
 		}
@@ -3167,6 +3189,9 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 			}
 		}
 	}
+
+	// Clean up auto.json now that all features are processed
+	activeWorktrees.removeAutoJSON()
 
 	fmt.Fprintf(os.Stderr, "\n\033[32m✓ %d/%d features complete\033[0m (%.1fs total)\n", totalMerged, len(slugs), time.Since(startTime).Seconds())
 
@@ -3226,16 +3251,19 @@ func handleStaleWorktree(root, id, branch, wtPath string) (resumed bool, err err
 					return false, fmt.Errorf("git worktree add (resume): %w (%s)", err, strings.TrimSpace(string(out)))
 				}
 			}
-			// Ensure .belmont symlink exists (may be old-style copy or missing)
+			// Leave .belmont/ as-is in the worktree — it has committed state from the
+			// previous run. Don't overwrite with stale copy from main repo.
+			// If it's an old symlink from a previous version, replace with a fresh copy.
 			dstBelmont := filepath.Join(wtPath, ".belmont")
-			if fi, err := os.Lstat(dstBelmont); err == nil {
-				if fi.Mode()&os.ModeSymlink == 0 {
-					// Old-style copy — replace with symlink
-					os.RemoveAll(dstBelmont)
-					os.Symlink(filepath.Join(root, ".belmont"), dstBelmont)
-				}
-			} else {
-				os.Symlink(filepath.Join(root, ".belmont"), dstBelmont)
+			if fi, err := os.Lstat(dstBelmont); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+				// Old-style symlink — replace with copy-based approach
+				os.RemoveAll(dstBelmont)
+				copyBelmontStateToWorktree(root, wtPath, id)
+				commitWorktreeFeatureState(wtPath, id)
+			} else if err != nil {
+				// .belmont/ missing entirely — copy it in
+				copyBelmontStateToWorktree(root, wtPath, id)
+				commitWorktreeFeatureState(wtPath, id)
 			}
 			return true, nil
 
@@ -3283,17 +3311,13 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		}
 	}
 
-	// Symlink .belmont in worktree to main repo's .belmont (shared state)
-	srcBelmont := filepath.Join(cfg.Root, ".belmont")
-	dstBelmont := filepath.Join(wtPath, ".belmont")
-	// Remove any existing .belmont (checked-out dir or stale symlink from previous run)
-	os.RemoveAll(dstBelmont)
-	if err := os.Symlink(srcBelmont, dstBelmont); err != nil {
-		return fmt.Errorf("symlink .belmont in worktree: %w", err)
+	// Copy .belmont state into worktree (isolated copy, not symlink)
+	if err := copyBelmontStateToWorktree(cfg.Root, wtPath, slug); err != nil {
+		return fmt.Errorf("copy .belmont state to worktree: %w", err)
 	}
 
-	// Exclude .belmont/ via worktree-local git exclude (never committed, no merge conflicts)
-	excludeBelmontInWorktree(wtPath)
+	// Commit the initial feature state so the AI agent starts from a clean git state
+	commitWorktreeFeatureState(wtPath, slug)
 
 	// Copy .env files (gitignored, so not present in fresh worktrees)
 	copyEnvFiles(cfg.Root, wtPath)
@@ -5198,14 +5222,12 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	fmt.Fprintln(os.Stderr)
 
 	// Set up signal handler for cleanup
-	activeWorktrees := &worktreeTracker{entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
+	activeWorktrees := &worktreeTracker{root: cfg.Root, entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — reverting state, preserving worktrees for resume...\033[0m\n")
-		// Revert .belmont/ state to prevent phantom completion
-		revertFeatureState(cfg.Root, cfg.Feature)
+		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — preserving worktrees for resume...\033[0m\n")
 		activeWorktrees.gracefulShutdown(cfg.Root)
 		os.Exit(1)
 	}()
@@ -5242,6 +5264,9 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 		fmt.Fprintf(os.Stderr, "\033[33m⚠ Failed to commit final .belmont/ state: %s\033[0m\n", err)
 	}
 
+	// Clean up auto.json
+	activeWorktrees.removeAutoJSON()
+
 	fmt.Fprintf(os.Stderr, "\n\033[32m✓ All waves complete\033[0m (%.1fs total)\n", time.Since(startTime).Seconds())
 	return nil
 }
@@ -5257,14 +5282,29 @@ type worktreeEntry struct {
 // worktreeTracker keeps track of active worktrees for cleanup on interrupt.
 type worktreeTracker struct {
 	mu      sync.Mutex
+	root    string                   // project root for persisting auto.json
 	entries map[string]worktreeEntry // ID -> worktree entry
 	hooks   *worktreeHooks          // shared hooks config (nil if no worktree.json)
+}
+
+// autoJSON is the on-disk format for .belmont/auto.json, enabling belmont status
+// to discover active worktrees and read live feature state from them.
+type autoJSON struct {
+	Active    bool                       `json:"active"`
+	Started   string                     `json:"started"`
+	Worktrees map[string]autoJSONEntry   `json:"worktrees"`
+}
+
+type autoJSONEntry struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch"`
 }
 
 func (wt *worktreeTracker) add(id, path, branch string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 	wt.entries[id] = worktreeEntry{Path: path, Branch: branch}
+	wt.persistAutoJSON()
 }
 
 func (wt *worktreeTracker) setPort(id string, port int) {
@@ -5289,6 +5329,37 @@ func (wt *worktreeTracker) remove(id string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
 	delete(wt.entries, id)
+	wt.persistAutoJSON()
+}
+
+// persistAutoJSON writes .belmont/auto.json so belmont status can discover active worktrees.
+// Must be called with wt.mu held.
+func (wt *worktreeTracker) persistAutoJSON() {
+	if wt.root == "" {
+		return
+	}
+	aj := autoJSON{
+		Active:    len(wt.entries) > 0,
+		Started:   time.Now().UTC().Format(time.RFC3339),
+		Worktrees: make(map[string]autoJSONEntry),
+	}
+	for id, entry := range wt.entries {
+		aj.Worktrees[id] = autoJSONEntry{Path: entry.Path, Branch: entry.Branch}
+	}
+	data, err := json.MarshalIndent(aj, "", "  ")
+	if err != nil {
+		return
+	}
+	autoPath := filepath.Join(wt.root, ".belmont", "auto.json")
+	os.WriteFile(autoPath, data, 0644) // best-effort
+}
+
+// removeAutoJSON deletes .belmont/auto.json when auto is done.
+func (wt *worktreeTracker) removeAutoJSON() {
+	if wt.root == "" {
+		return
+	}
+	os.Remove(filepath.Join(wt.root, ".belmont", "auto.json"))
 }
 
 // teardownEntry runs teardown hooks for a worktree entry (if configured).
@@ -5432,18 +5503,10 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 			for _, remaining := range successes[i:] {
 				failures = append(failures, result{MilestoneID: remaining.MilestoneID, WorktreePath: remaining.WorktreePath, Err: fmt.Errorf("skipped: unclean merge state")})
 			}
-			// Revert feature state for skipped merges
-			revertFeatureState(cfg.Root, cfg.Feature)
 			break
 		}
 		if err := mergeWorktreeBranch(cfg, s.MilestoneID, s.Branch, s.WorktreePath, tracker); err != nil {
-			// Revert feature state — code didn't merge
-			revertFeatureState(cfg.Root, cfg.Feature)
 			return fmt.Errorf("auto: merge failed for %s: %w", s.MilestoneID, err)
-		}
-		// Merge succeeded — commit state
-		if err := commitBelmontState(cfg.Root); err != nil {
-			fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to commit .belmont/ state: %s\033[0m\n", err)
 		}
 	}
 
@@ -5477,17 +5540,13 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 		}
 	}
 
-	// Symlink .belmont in worktree to main repo's .belmont (shared state)
-	srcBelmont := filepath.Join(cfg.Root, ".belmont")
-	dstBelmont := filepath.Join(wtPath, ".belmont")
-	// Remove any existing .belmont (checked-out dir or stale symlink from previous run)
-	os.RemoveAll(dstBelmont)
-	if err := os.Symlink(srcBelmont, dstBelmont); err != nil {
-		return fmt.Errorf("symlink .belmont in worktree: %w", err)
+	// Copy .belmont state into worktree (isolated copy, not symlink)
+	if err := copyBelmontStateToWorktree(cfg.Root, wtPath, cfg.Feature); err != nil {
+		return fmt.Errorf("copy .belmont state to worktree: %w", err)
 	}
 
-	// Exclude .belmont/ via worktree-local git exclude (never committed, no merge conflicts)
-	excludeBelmontInWorktree(wtPath)
+	// Commit the initial feature state so the AI agent starts from a clean git state
+	commitWorktreeFeatureState(wtPath, cfg.Feature)
 
 	// Copy .env files (gitignored, so not present in fresh worktrees)
 	copyEnvFiles(cfg.Root, wtPath)
@@ -6060,6 +6119,115 @@ func excludeBelmontInWorktree(wtPath string) {
 	f.WriteString(".belmont/\n")
 }
 
+// copyBelmontStateToWorktree copies feature state and read-only context into a worktree.
+// The feature's own state (features/<slug>/) is copied as writable — the agent commits these.
+// Master context files (PRD.md, PROGRESS.md, etc.) are copied for reference but excluded from git.
+// A .worktree marker file is written so belmont sync can detect worktree context and no-op.
+func copyBelmontStateToWorktree(root, wtPath, slug string) error {
+	srcBelmont := filepath.Join(root, ".belmont")
+	dstBelmont := filepath.Join(wtPath, ".belmont")
+
+	// Clean slate — remove any existing .belmont (checked-out dir or stale symlink)
+	os.RemoveAll(dstBelmont)
+	if err := os.MkdirAll(dstBelmont, 0755); err != nil {
+		return fmt.Errorf("create .belmont dir in worktree: %w", err)
+	}
+
+	// 1. Copy feature's own state (writable — agent commits these)
+	srcFeature := filepath.Join(srcBelmont, "features", slug)
+	dstFeature := filepath.Join(dstBelmont, "features", slug)
+	if dirExists(srcFeature) {
+		if err := copyDir(srcFeature, dstFeature); err != nil {
+			return fmt.Errorf("copy feature state: %w", err)
+		}
+	}
+
+	// 2. Copy read-only context files (master PRD, PROGRESS, etc.)
+	contextFiles := []string{"PRD.md", "PROGRESS.md", "PR_FAQ.md", "TECH_PLAN.md", "worktree.json"}
+	for _, f := range contextFiles {
+		src := filepath.Join(srcBelmont, f)
+		if fileExists(src) {
+			copyFile(src, filepath.Join(dstBelmont, f)) // best-effort
+		}
+	}
+
+	// 3. Copy prompts/ if present (needed for AI decision templates)
+	promptsSrc := filepath.Join(srcBelmont, "prompts")
+	if dirExists(promptsSrc) {
+		copyDir(promptsSrc, filepath.Join(dstBelmont, "prompts")) // best-effort
+	}
+
+	// 4. Write .worktree marker file (used by sync to detect worktree context)
+	markerPath := filepath.Join(dstBelmont, ".worktree")
+	os.WriteFile(markerPath, []byte(slug+"\n"), 0644)
+
+	// 5. Write selective git excludes — exclude read-only context + marker, but NOT features/<slug>/
+	writeWorktreeGitExcludes(wtPath)
+
+	return nil
+}
+
+// writeWorktreeGitExcludes adds selective excludes to the worktree's .git/info/exclude.
+// Read-only context files and the .worktree marker are excluded; features/<slug>/ is committed.
+func writeWorktreeGitExcludes(wtPath string) {
+	gitFile := filepath.Join(wtPath, ".git")
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return
+	}
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "gitdir: ") {
+		return
+	}
+	gitDir := strings.TrimPrefix(line, "gitdir: ")
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(wtPath, gitDir)
+	}
+
+	infoDir := filepath.Join(gitDir, "info")
+	os.MkdirAll(infoDir, 0755)
+	excludePath := filepath.Join(infoDir, "exclude")
+
+	excludeEntries := []string{
+		".belmont/PRD.md",
+		".belmont/PROGRESS.md",
+		".belmont/PR_FAQ.md",
+		".belmont/TECH_PLAN.md",
+		".belmont/worktree.json",
+		".belmont/prompts/",
+		".belmont/.worktree",
+	}
+
+	existing, _ := os.ReadFile(excludePath)
+	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
+		f.WriteString("\n")
+	}
+	for _, entry := range excludeEntries {
+		if !strings.Contains(string(existing), entry) {
+			f.WriteString(entry + "\n")
+		}
+	}
+}
+
+// commitWorktreeFeatureState commits the initial .belmont/features/ state in a worktree
+// so the AI agent starts from a clean git state.
+func commitWorktreeFeatureState(wtPath, slug string) {
+	addCmd := exec.Command("git", "add", ".belmont/features/")
+	addCmd.Dir = wtPath
+	if _, err := addCmd.CombinedOutput(); err != nil {
+		return // best-effort
+	}
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("belmont: initialize feature state for %s", slug))
+	commitCmd.Dir = wtPath
+	commitCmd.CombinedOutput() // best-effort
+}
+
 // ensureGitignoreEntry adds an entry to .gitignore if not already present.
 func ensureGitignoreEntry(root, entry string) {
 	gitignorePath := filepath.Join(root, ".gitignore")
@@ -6085,25 +6253,7 @@ func ensureGitignoreEntry(root, entry string) {
 }
 
 // commitBelmontState commits any uncommitted .belmont/ state files in the main repo.
-// revertFeatureState discards uncommitted .belmont/ state changes for a specific feature.
-// Called when a feature's merge fails or execution fails, to prevent "phantom completion"
-// where state says ✅ but code was never merged.
-func revertFeatureState(root, slug string) {
-	featureDir := filepath.Join(".belmont", "features", slug)
-	cmd := exec.Command("git", "checkout", "HEAD", "--", featureDir)
-	cmd.Dir = root
-	if _, err := cmd.CombinedOutput(); err != nil {
-		// checkout may fail for new/untracked files — clean them up
-		cleanCmd := exec.Command("git", "clean", "-fd", featureDir)
-		cleanCmd.Dir = root
-		cleanCmd.Run()
-	}
-	fmt.Fprintf(os.Stderr, "  \033[33mReverted .belmont/ state for %s (code not merged)\033[0m\n", slug)
-}
-
-// This prevents "local changes would be overwritten by merge" errors when merging
-// feature/milestone branches, since .belmont/ is tracked in the main repo but modified
-// through symlinks from worktrees.
+// Used after belmont sync updates master PROGRESS.md.
 func commitBelmontState(root string) error {
 	// Don't try to commit if there's an in-progress merge — git commit would
 	// either fail or finalize the merge unintentionally
@@ -6189,10 +6339,6 @@ func parseOverwrittenFiles(output string) []string {
 // attemptMerge tries to merge a branch, handling various failure modes automatically.
 // It handles untracked file overwrites, dirty worktrees, and merge conflicts.
 func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
-	// Always commit .belmont/ state before merging — worktrees modify it via
-	// symlink, leaving dirty files on main that block merges.
-	commitBelmontState(cfg.Root) // best-effort, ignore errors
-
 	// Try the merge
 	cmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
 	cmd.Dir = cfg.Root
@@ -6260,30 +6406,8 @@ func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
 		return fmt.Errorf("merge failed for %s after stashing untracked files: %s", id, retryOutput)
 
 	case mergeDirtyWorktree:
-		// Phase 1: Try committing .belmont/ state first (most common cause)
-		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Local changes would be overwritten for %s — committing .belmont/ state...\033[0m\n", id)
-
-		if commitErr := commitBelmontState(cfg.Root); commitErr == nil {
-			retryCmd := exec.Command("git", "merge", "--no-ff", branch, "-m", commitMsg)
-			retryCmd.Dir = cfg.Root
-			retryOut, retryErr := retryCmd.CombinedOutput()
-			if retryErr == nil {
-				fmt.Fprintf(os.Stderr, "  \033[32m✓ Merge succeeded after committing .belmont/ state for %s\033[0m\n", id)
-				return nil
-			}
-			retryOutput := string(retryOut)
-			retryKind := classifyMergeError(retryOutput)
-			if retryKind == mergeConflict {
-				goto handleConflict
-			}
-			if retryKind != mergeDirtyWorktree {
-				return fmt.Errorf("merge failed for %s after committing state: %s", id, retryOutput)
-			}
-			// Still dirty (non-.belmont/ files) — fall through to stash
-		}
-
-		// Phase 2: Fall back to stash for non-.belmont/ dirty files
-		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Still dirty for %s — falling back to stash...\033[0m\n", id)
+		// Stash local changes and retry merge
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Local changes would be overwritten for %s — stashing...\033[0m\n", id)
 
 		stashCmd := exec.Command("git", "stash", "push", "--include-untracked", "-m", "belmont: pre-merge stash")
 		stashCmd.Dir = cfg.Root
@@ -6344,6 +6468,22 @@ func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
 	}
 
 handleConflict:
+	// Try auto-resolving .belmont/ conflicts first (common with parallel milestones)
+	if autoResolveBelmontConflicts(cfg.Root) {
+		// Check if all conflicts are resolved
+		checkCmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+		checkCmd.Dir = cfg.Root
+		if checkOut, err := checkCmd.Output(); err == nil && strings.TrimSpace(string(checkOut)) == "" {
+			// All conflicts resolved — commit the merge
+			commitCmd2 := exec.Command("git", "commit", "--no-edit")
+			commitCmd2.Dir = cfg.Root
+			if _, err := commitCmd2.CombinedOutput(); err == nil {
+				fmt.Fprintf(os.Stderr, "  \033[32m✓ Merge conflicts auto-resolved for %s\033[0m\n", id)
+				return nil
+			}
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "  \033[33m⚠ Merge conflict for %s — invoking reconciliation agent...\033[0m\n", id)
 
 	reconcileErr := runReconciliationAgent(cfg, id, branch)
@@ -6367,6 +6507,108 @@ handleConflict:
 
 	fmt.Fprintf(os.Stderr, "  \033[32m✓ Reconciliation resolved merge conflict for %s\033[0m\n", id)
 	return nil
+}
+
+// autoResolveBelmontConflicts attempts to auto-resolve merge conflicts on .belmont/ files.
+// For PROGRESS.md files, it takes the union of milestone completions (each milestone marks
+// only its own [x] status, so union is safe). Returns true if any conflicts were resolved.
+func autoResolveBelmontConflicts(root string) bool {
+	// Get list of conflicted files
+	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	resolved := false
+	for _, file := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		if !strings.HasPrefix(file, ".belmont/") {
+			continue
+		}
+
+		filePath := filepath.Join(root, file)
+
+		if strings.HasSuffix(file, "PROGRESS.md") {
+			// For PROGRESS.md: get both sides and merge milestone completions
+			if resolveProgressConflict(root, file, filePath) {
+				resolved = true
+			}
+		} else {
+			// For other .belmont/ files (e.g., MILESTONE.md): take "theirs" (the branch being merged)
+			checkoutCmd := exec.Command("git", "checkout", "--theirs", "--", file)
+			checkoutCmd.Dir = root
+			if _, err := checkoutCmd.CombinedOutput(); err == nil {
+				addCmd := exec.Command("git", "add", file)
+				addCmd.Dir = root
+				addCmd.Run()
+				resolved = true
+			}
+		}
+	}
+	return resolved
+}
+
+// resolveProgressConflict merges a conflicted PROGRESS.md by taking the union of
+// milestone completions from both sides. Returns true if successfully resolved.
+func resolveProgressConflict(root, relPath, filePath string) bool {
+	// Get "ours" version
+	oursCmd := exec.Command("git", "show", ":2:"+relPath)
+	oursCmd.Dir = root
+	oursOut, err := oursCmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Get "theirs" version
+	theirsCmd := exec.Command("git", "show", ":3:"+relPath)
+	theirsCmd.Dir = root
+	theirsOut, err := theirsCmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Parse milestone completions from both sides
+	oursLines := strings.Split(string(oursOut), "\n")
+	theirsLines := strings.Split(string(theirsOut), "\n")
+
+	// Build a map of milestone completions from "theirs"
+	theirsDone := make(map[string]bool)
+	milestoneRe := regexp.MustCompile(`^\|\s*\[([xX ])\]\s*\|\s*(M\d+)`)
+	for _, line := range theirsLines {
+		if m := milestoneRe.FindStringSubmatch(line); m != nil {
+			if strings.ToLower(m[1]) == "x" {
+				theirsDone[m[2]] = true
+			}
+		}
+	}
+
+	// Merge: start from "ours", upgrade any unchecked milestones that are done in "theirs"
+	var merged []string
+	for _, line := range oursLines {
+		if m := milestoneRe.FindStringSubmatch(line); m != nil {
+			msID := m[2]
+			if m[1] == " " && theirsDone[msID] {
+				// Upgrade from [ ] to [x]
+				line = strings.Replace(line, "[ ]", "[x]", 1)
+			}
+		}
+		merged = append(merged, line)
+	}
+
+	result := strings.Join(merged, "\n")
+	if err := os.WriteFile(filePath, []byte(result), 0644); err != nil {
+		return false
+	}
+
+	addCmd := exec.Command("git", "add", relPath)
+	addCmd.Dir = root
+	addCmd.Run()
+	return true
 }
 
 // listPreservedWorktrees finds worktrees under .belmont/worktrees/ that still exist.
@@ -6406,6 +6648,12 @@ func runSyncCmd(args []string) error {
 		return fmt.Errorf("sync: %w", err)
 	}
 	root, _ = filepath.Abs(root)
+
+	// If running in a worktree context (detected via .worktree marker), no-op.
+	// Worktrees have isolated state; sync only makes sense on the main repo.
+	if fileExists(filepath.Join(root, ".belmont", ".worktree")) {
+		return nil
+	}
 
 	featuresDir := filepath.Join(root, ".belmont", "features")
 	features := listFeatures(featuresDir, 50)

@@ -9,9 +9,26 @@ Each parallel worktree gets:
 - **`.env*` files copied** from the project root automatically (since they're gitignored and not present in fresh worktrees)
 - **A unique port** assigned automatically via `PORT` and `BELMONT_PORT` environment variables
 - **Its own file tree** — gitignored directories like `node_modules/`, `.next/`, `dist/` are local to each worktree
-- **Shared `.belmont/` state** via symlink for coordination
+- **Isolated `.belmont/` state** — each worktree gets its own copy of its feature's state files, committed to the feature branch. Read-only copies of master planning files are included for context but excluded from git
+- **Live status visibility** — `belmont status` reads live progress from active worktrees via `.belmont/auto.json`, so you can monitor all features from the main repo
 - **Process group isolation** — processes started by the AI agent are tracked and cleaned up when the worktree is removed
 - **Auto-detected dependency install** — if no `worktree.json` exists, Belmont detects your package manager and installs dependencies automatically
+
+## State Isolation
+
+Each worktree receives a **copy** (not symlink) of its feature's `.belmont/features/<slug>/` directory. The AI agent commits state changes as part of the feature branch, and state merges naturally when the feature branch is merged back.
+
+This approach ensures:
+- **No cross-feature interference** — one feature's state changes can't affect another
+- **No race conditions** — each agent has its own isolated files
+- **Clean git state** — the agent sees normal committed files, not symlinked/untracked files
+- **Automatic merge** — different features touch different paths, so no merge conflicts
+
+Master planning files (`PRD.md`, `PROGRESS.md`, etc.) are copied into the worktree for reference but excluded from git commits via `.git/info/exclude`.
+
+### Live Status
+
+While `belmont auto` is running, it writes `.belmont/auto.json` to track active worktrees. When you run `belmont status` from the main repo, it reads live state directly from active worktrees instead of the (stale) main repo copies. After features merge, status reads from the merged state on the main branch.
 
 ## Automatic Dependency Installation
 

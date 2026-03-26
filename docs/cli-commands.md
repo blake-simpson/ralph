@@ -17,7 +17,7 @@ belmont auto --feature auth --from M2 --to M4  # Milestone range
 belmont auto --features auth,payments    # Run multiple features in parallel
 belmont auto --all                       # Run all pending features in parallel
 belmont auto --all --max-parallel 2      # Cap concurrent features
-belmont sync                             # Sync master PROGRESS.md with feature states
+belmont sync                             # Sync master PROGRESS.md with feature states (explicit only, no longer auto-hooked)
 belmont recover                          # List preserved worktrees from failed merges
 belmont recover --list                   # Same as above
 belmont recover --merge auth             # Retry merge for a preserved worktree

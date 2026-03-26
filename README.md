@@ -297,7 +297,7 @@ See [Skills Reference](docs/skills-reference.md) for detailed descriptions of ea
 
 | Tool               | How Skills Are Wired                             | How to Use                                          |
 |--------------------|--------------------------------------------------|-----------------------------------------------------|
-| **Claude Code**    | Symlinked agents + copied commands + sync hook   | `/belmont:product-plan`, `/belmont:implement`, etc. |
+| **Claude Code**    | Symlinked agents + copied commands               | `/belmont:product-plan`, `/belmont:implement`, etc. |
 | **Codex**          | Copied to `.codex/belmont` + `AGENTS.md` routing | `belmont:implement` in prompt                       |
 | **Cursor**         | Per-file `.mdc` symlinks in `.cursor/rules/`     | Toggle in Settings > Rules                          |
 | **Windsurf**       | Directory symlink in `.windsurf/rules/`          | Reference in Cascade                                |
@@ -347,7 +347,7 @@ It uses a hybrid decision system: smart deterministic rules handle ~80% of cases
 
 Independent milestones can execute in parallel using git worktrees. Declare dependencies in PROGRESS.md with `(depends: M1, M2)` syntax, and milestones without unmet dependencies run concurrently up to `--max-parallel` (default 5). Multiple features can also run in parallel with `--features` or `--all`, each in its own worktree with automatic merge and conflict reconciliation. Feature-level dependencies declared in the master PRD's Dependencies column enable wave-based execution — independent features run in parallel, dependent features wait for their dependencies to complete first.
 
-Each worktree is automatically assigned a unique `PORT` to prevent dev server conflicts. Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Create `.belmont/worktree.json` to customize setup hooks, teardown, or environment variables. See [Worktree Isolation](docs/worktree-isolation.md) for details.
+Each worktree gets isolated `.belmont/` state (copy-based, not symlinked) so AI agents can commit state changes as part of their feature branch. Run `belmont status` from the main repo to see live progress across all active worktrees. Each worktree is automatically assigned a unique `PORT` to prevent dev server conflicts. Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Create `.belmont/worktree.json` to customize setup hooks, teardown, or environment variables. See [Worktree Isolation](docs/worktree-isolation.md) for details.
 
 Three checkpoint policies control human involvement:
 - `autonomous` (default) — only pauses on blockers or errors
