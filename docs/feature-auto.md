@@ -200,7 +200,7 @@ Milestones without a `(depends: ...)` declaration are treated as having no depen
 
 ### Worktree Lifecycle
 
-1. **Create**: A git worktree is created for each parallel milestone at `.belmont/worktrees/<feature>-<milestone>/`
+1. **Create**: A git worktree is created for each parallel milestone at `~/.belmont/worktrees/<project-name>/<feature>-<milestone>/`
 2. **Env files**: `.env*` files are copied from the project root (they're gitignored, so absent in fresh worktrees)
 3. **Port assignment**: A unique port is allocated and set as `PORT` and `BELMONT_PORT` environment variables
 4. **Setup hooks**: If `.belmont/worktree.json` exists, its `setup` commands run (e.g., `npm install`)
@@ -330,7 +330,7 @@ belmont auto --all (with dependencies)
       merge payments        merge dashboard
 ```
 
-1. Each feature gets its own git worktree at `.belmont/worktrees/<slug>/` on branch `belmont/auto/<slug>`
+1. Each feature gets its own git worktree at `~/.belmont/worktrees/<project-name>/<slug>/` on branch `belmont/auto/<slug>`
 2. Feature state (`.belmont/features/<slug>/`) is copied into the worktree
 3. `belmont install` runs in the worktree to set up the AI tool
 4. The full auto loop runs for each feature (sequential milestones)

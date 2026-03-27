@@ -186,6 +186,8 @@ type loopConfig struct {
 	DryRun        bool
 	Port          int                // assigned port for worktree isolation (0 = not in worktree)
 	WorktreeEnv   map[string]string  // extra env vars from worktree.json
+	Tracker       *worktreeTracker   // process group tracker for cleanup on interrupt
+	TrackerID     string             // worktree ID for tracker operations
 }
 
 // worktreeHooks defines lifecycle hooks for worktree isolation.
@@ -208,6 +210,23 @@ func loadWorktreeHooks(root string) *worktreeHooks {
 		return nil
 	}
 	return &hooks
+}
+
+// worktreeBasePath returns the directory for worktrees, stored in the user's home directory.
+// This avoids nesting worktrees inside the project where tools like Turbopack detect
+// multiple lockfiles and infer the wrong workspace root.
+// For /home/user/code/myapp -> ~/.belmont/worktrees/myapp/
+func worktreeBasePath(root string) string {
+	absRoot, _ := filepath.Abs(root)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback: use a sibling directory if home is unavailable
+		parent := filepath.Dir(absRoot)
+		name := filepath.Base(absRoot)
+		return filepath.Join(parent, ".belmont-worktrees", name)
+	}
+	name := filepath.Base(absRoot)
+	return filepath.Join(home, ".belmont", "worktrees", name)
 }
 
 // allocatePort asks the OS for a free TCP port by binding to :0.
@@ -313,6 +332,8 @@ type aiDecision struct {
 }
 
 type reconciliationFile struct {
+	Strategy          string `json:"strategy"`
+	PostResolveCmd    string `json:"post_resolve_command"`
 	File            string `json:"file"`
 	Confidence      string `json:"confidence"`
 	Reason          string `json:"reason"`
@@ -2956,7 +2977,8 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		}
 	}()
 
-	prepareWorktreesGitignore(cfg.Root)
+	// Ensure the sibling worktree base directory exists
+	os.MkdirAll(worktreeBasePath(cfg.Root), 0755)
 
 	// Build feature summaries with dependency info
 	featuresDir := filepath.Join(cfg.Root, ".belmont", "features")
@@ -3084,7 +3106,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 		preResolved := make(map[string]bool) // slug -> resumed
 		for _, f := range waveFeatures {
 			branch := fmt.Sprintf("belmont/auto/%s", f.Slug)
-			wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", f.Slug)
+			wtPath := filepath.Join(worktreeBasePath(cfg.Root), f.Slug)
 			resumed, err := handleStaleWorktree(cfg.Root, f.Slug, branch, wtPath)
 			if err != nil {
 				return err
@@ -3105,7 +3127,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 				defer func() { <-semaphore }()
 
 				branch := fmt.Sprintf("belmont/auto/%s", slug)
-				wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", slug)
+				wtPath := filepath.Join(worktreeBasePath(cfg.Root), slug)
 
 				activeWorktrees.add(slug, wtPath, branch)
 
@@ -3375,6 +3397,12 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 
 // mergeFeatureBranch merges a feature branch back to main and cleans up.
 func mergeFeatureBranch(cfg loopConfig, slug, branch, wtPath string, tracker *worktreeTracker) error {
+	// Commit any uncommitted CODE changes in the worktree before merging.
+	// .belmont/ is assume-unchanged so it won't be included in this commit.
+	if err := commitWorktreeChanges(wtPath, slug); err != nil {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to commit worktree changes for %s: %s\033[0m\n", slug, err)
+	}
+
 	commitMsg := fmt.Sprintf("belmont: merge feature %s", slug)
 
 	if err := attemptMerge(cfg, commitMsg, branch, slug); err != nil {
@@ -3385,6 +3413,11 @@ func mergeFeatureBranch(cfg loopConfig, slug, branch, wtPath string, tracker *wo
 		fmt.Fprintf(os.Stderr, "    Or use: belmont recover --merge %s\n", slug)
 		return err
 	}
+
+	// Copy the feature's updated state from the worktree back to the main repo.
+	// .belmont/ was excluded from the merge (assume-unchanged), so we sync it
+	// separately. This preserves other features' state on the main branch.
+	syncFeatureStateAfterMerge(cfg.Root, wtPath, slug)
 
 	// Clean up reconciliation report if it exists
 	os.Remove(filepath.Join(cfg.Root, ".belmont", "reconciliation-report.json"))
@@ -4005,10 +4038,33 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	}
 
 	start := time.Now()
-	err := cmd.Run()
+	if startErr := cmd.Start(); startErr != nil {
+		if stopTimer != nil {
+			close(stopTimer)
+		}
+		return executionResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to start: %s", startErr),
+		}
+	}
+
+	// Track the PGID so Ctrl-C cleanup works via worktreeTracker
+	pid := cmd.Process.Pid
+	if cfg.Tracker != nil && cfg.TrackerID != "" {
+		cfg.Tracker.setPgid(cfg.TrackerID, pid)
+	}
+
+	err := cmd.Wait()
 	if stopTimer != nil {
 		close(stopTimer)
 	}
+
+	// Kill the entire process group to clean up orphaned child processes
+	// (dev servers, test runners, etc.) that survive the AI tool exiting.
+	if cfg.Port != 0 {
+		killProcessGroup(pid)
+	}
+
 	durationMs := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -4102,10 +4158,31 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 	}
 
 	start := time.Now()
-	err := cmd.Run()
+	if startErr := cmd.Start(); startErr != nil {
+		if stopTimer != nil {
+			close(stopTimer)
+		}
+		return executionResult{
+			Success: false,
+			Error:   fmt.Sprintf("failed to start: %s", startErr),
+		}
+	}
+
+	pid := cmd.Process.Pid
+	if cfg.Tracker != nil && cfg.TrackerID != "" {
+		cfg.Tracker.setPgid(cfg.TrackerID, pid)
+	}
+
+	err := cmd.Wait()
 	if stopTimer != nil {
 		close(stopTimer)
 	}
+
+	// Kill orphaned child processes (dev servers, etc.)
+	if cfg.Port != 0 {
+		killProcessGroup(pid)
+	}
+
 	durationMs := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -4802,14 +4879,16 @@ Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"...
 
 // buildToolCommand creates an exec.Cmd for the given tool with a prompt.
 // Used by both AI decision calls and action execution.
-func buildToolCommand(tool, prompt, root string) *exec.Cmd {
+func buildToolCommand(tool, prompt, root string, extraFlags ...string) *exec.Cmd {
 	var cmd *exec.Cmd
 	switch tool {
 	case "claude":
-		cmd = exec.Command("claude", "-p", prompt,
+		args := []string{"-p", prompt,
 			"--permission-mode", "bypassPermissions",
 			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
-			"--output-format", "json")
+			"--output-format", "json"}
+		args = append(args, extraFlags...)
+		cmd = exec.Command("claude", args...)
 	case "codex":
 		cmd = exec.Command("codex", "exec", prompt,
 			"--dangerously-bypass-approvals-and-sandbox",
@@ -5190,8 +5269,10 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 		}
 	}()
 
-	// Ensure .belmont/worktrees/ is in .gitignore and committed before branching
-	prepareWorktreesGitignore(cfg.Root)
+	// Ensure the sibling worktree base directory exists
+	if err := os.MkdirAll(worktreeBasePath(cfg.Root), 0755); err != nil {
+		return fmt.Errorf("create worktree base dir: %w", err)
+	}
 
 	fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto (parallel) — %s\033[0m\n", cfg.Feature)
 	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Max parallel: %d\033[0m\n", cfg.Tool, cfg.MaxParallel)
@@ -5325,6 +5406,18 @@ func (wt *worktreeTracker) setPgid(id string, pgid int) {
 	}
 }
 
+// killProcessGroup sends SIGTERM then SIGKILL to clean up orphaned child processes
+// (dev servers, test runners, etc.) after an AI tool invocation finishes.
+// The pid is used as the PGID because Setpgid:true makes the child its own group leader.
+func killProcessGroup(pid int) {
+	if pid == 0 {
+		return
+	}
+	syscall.Kill(-pid, syscall.SIGTERM)
+	time.Sleep(500 * time.Millisecond)
+	syscall.Kill(-pid, syscall.SIGKILL)
+}
+
 func (wt *worktreeTracker) remove(id string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
@@ -5399,6 +5492,12 @@ func (wt *worktreeTracker) cleanupAll(root string) {
 		delCmd.Run() // best-effort
 	}
 	wt.entries = make(map[string]worktreeEntry)
+
+	// Clean up the worktree base directory if empty
+	baseDir := worktreeBasePath(root)
+	if entries, err := os.ReadDir(baseDir); err == nil && len(entries) == 0 {
+		os.Remove(baseDir)
+	}
 }
 
 // gracefulShutdown stops processes and releases resources but preserves worktrees
@@ -5440,7 +5539,7 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 	msPreResolved := make(map[string]bool) // milestone ID -> resumed
 	for _, m := range w.Milestones {
 		branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(m.ID))
-		wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(m.ID)))
+		wtPath := filepath.Join(worktreeBasePath(cfg.Root), fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(m.ID)))
 		resumed, err := handleStaleWorktree(cfg.Root, m.ID, branch, wtPath)
 		if err != nil {
 			return err
@@ -5456,7 +5555,7 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 			defer func() { <-semaphore }() // release
 
 			branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(ms.ID))
-			wtPath := filepath.Join(cfg.Root, ".belmont", "worktrees", fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(ms.ID)))
+			wtPath := filepath.Join(worktreeBasePath(cfg.Root), fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(ms.ID)))
 
 			tracker.add(ms.ID, wtPath, branch)
 
@@ -5596,6 +5695,8 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 	mCfg.From = ms.ID
 	mCfg.To = ms.ID
 	mCfg.Port = port
+	mCfg.Tracker = tracker
+	mCfg.TrackerID = ms.ID
 	if hooks != nil {
 		mCfg.WorktreeEnv = hooks.Env
 	}
@@ -5617,6 +5718,11 @@ func mergeWorktreeBranch(cfg loopConfig, milestoneID, branch, wtPath string, tra
 		}
 	}
 
+	// Commit any uncommitted changes in the worktree before merging
+	if err := commitWorktreeChanges(wtPath, milestoneID); err != nil {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to commit worktree changes for %s: %s\033[0m\n", milestoneID, err)
+	}
+
 	commitMsg := fmt.Sprintf("belmont: merge %s (%s)", milestoneID, msName)
 
 	if err := attemptMerge(cfg, commitMsg, branch, milestoneID); err != nil {
@@ -5627,6 +5733,9 @@ func mergeWorktreeBranch(cfg loopConfig, milestoneID, branch, wtPath string, tra
 		fmt.Fprintf(os.Stderr, "    Or use: belmont recover --merge %s\n", filepath.Base(wtPath))
 		return err
 	}
+
+	// Copy the feature's updated state from the worktree back to the main repo
+	syncFeatureStateAfterMerge(cfg.Root, wtPath, cfg.Feature)
 
 	// Clean up reconciliation report if it exists
 	os.Remove(filepath.Join(cfg.Root, ".belmont", "reconciliation-report.json"))
@@ -5701,19 +5810,29 @@ func runReconciliationAgent(cfg loopConfig, milestoneID, branch string) error {
 
 // runReconciliationAnalysis invokes the AI to analyze conflicts and write a JSON report.
 func runReconciliationAnalysis(cfg loopConfig, milestoneID, branch, conflictedFiles, reportPath string) error {
-	prompt := fmt.Sprintf(`You are a merge conflict analysis agent. Analyze all merge conflicts and write a structured JSON report.
+	prompt := fmt.Sprintf(`You are a merge conflict analysis agent. Read the reconciliation-agent instructions first, then analyze all merge conflicts.
+
+CRITICAL: Read the file .agents/belmont/reconciliation-agent.md (or agents/belmont/reconciliation-agent.md) for your full instructions and merge strategies by file type. Those instructions are authoritative.
+
+CORE PRINCIPLE: Every merge MUST produce a strictly better state than either side alone. Both branches represent intentional, completed, tested work. You are COMBINING parallel features — never choosing between them. If a resolution would lose ANY code, functionality, dependencies, or tracking state from either side, mark it as "unresolvable" instead of attempting a lossy merge. A blocked merge is ALWAYS preferable to a destructive one.
 
 Conflicted files:
 %s
 
-Milestone: %s
+Milestone/Feature: %s
 Branch: %s
 
-TASK: For each conflicted file, read it, analyze the conflict, and classify your confidence in resolving it.
+TASK: For each conflicted file:
+1. Read the file to see the conflict markers
+2. Understand what each side intended (both sides are valid completed work)
+3. Determine the merge strategy based on file type (see agent instructions)
+4. Combine BOTH sides — verify nothing is lost
+5. Classify your confidence
 
-CONFIDENCE CRITERIA:
-- "high": Import merges, non-overlapping function additions, additive changes to different sections, formatting/comment changes
-- "low": Same function body modified by both sides, conflicting config values, structural changes to same type/interface, changes with potential semantic interaction
+CONFIDENCE LEVELS:
+- "high": Both sides combined with certainty nothing is lost (import unions, additive functions, config entries from different features)
+- "low": Both sides combined but semantic interaction possible (same function modified, overlapping config). Operator will review.
+- "unresolvable": Cannot combine without losing something. Leave resolved_content empty. Merge will abort.
 
 Write a JSON file to: %s
 
@@ -5722,24 +5841,30 @@ The JSON must have this exact structure:
   "files": [
     {
       "file": "path/to/file",
-      "confidence": "high" or "low",
+      "confidence": "high",
+      "strategy": "brief strategy label (e.g. import-union, package-manifest-union, additive-functions, lock-regen)",
       "reason": "Why this confidence level",
       "conflict_summary": "Brief: what Side A did vs what Side B did",
-      "resolved_content": "The complete resolved file content (no conflict markers)"
+      "resolved_content": "The complete resolved file content (no conflict markers)",
+      "post_resolve_command": "optional: shell command to run after (e.g. npm install, npx prisma generate)"
     }
   ]
 }
 
 RULES:
-1. Combine both sides — never choose one side over the other
-2. Include all imports from both sides (remove duplicates)
-3. Never delete functionality from either side
-4. The resolved_content must be the COMPLETE file with conflicts resolved
-5. Do NOT modify any files on disk — only write the JSON report
-6. Do NOT run git add — only write the report
-7. Include ALL conflicted files in the report`, conflictedFiles, milestoneID, branch, reportPath)
+1. ALWAYS combine both sides — never choose one side over the other. This is non-negotiable.
+2. Include all imports from both sides (remove exact duplicates only)
+3. Never delete functionality from either side — all completed work must survive
+4. For lock files (package-lock.json, yarn.lock, etc.): set resolved_content to empty string and post_resolve_command to the install command
+5. For package manifests: take the union of all dependency additions from both sides
+6. The resolved_content must be the COMPLETE file with conflicts resolved
+7. Do NOT modify any files on disk — only write the JSON report
+8. Do NOT run git add — only write the report
+9. Include ALL conflicted files in the report
+10. When in doubt, mark "unresolvable" — blocking is safer than losing work`, conflictedFiles, milestoneID, branch, reportPath)
 
-	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	// Use Opus for reconciliation — needs strong reasoning for merge conflict analysis
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, "--model", "claude-opus-4-6")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
@@ -5768,11 +5893,11 @@ func parseReconciliationReport(reportPath string) (reconciliationReport, error) 
 		if f.File == "" {
 			return report, fmt.Errorf("file entry %d missing file path", i)
 		}
-		if f.Confidence != "high" && f.Confidence != "low" {
+		if f.Confidence != "high" && f.Confidence != "low" && f.Confidence != "unresolvable" {
 			return report, fmt.Errorf("file %q has invalid confidence %q", f.File, f.Confidence)
 		}
-		if f.ResolvedContent == "" {
-			return report, fmt.Errorf("file %q has empty resolved_content", f.File)
+		if f.ResolvedContent == "" && f.Confidence != "unresolvable" && f.PostResolveCmd == "" {
+			return report, fmt.Errorf("file %q has empty resolved_content (mark as unresolvable if it cannot be resolved)", f.File)
 		}
 	}
 
@@ -5782,17 +5907,31 @@ func parseReconciliationReport(reportPath string) (reconciliationReport, error) 
 // applyReconciliationReport applies resolved content from the report.
 // High-confidence files are auto-applied. Low-confidence files are shown
 // to the user interactively (if terminal) or auto-applied (if non-interactive).
+// If ANY file is unresolvable, the entire merge is aborted.
 func applyReconciliationReport(cfg loopConfig, report reconciliationReport) error {
 	interactive := isTerminal(os.Stdin)
 	autoAll := false
 
+	// Check for unresolvable files first — abort before applying anything
+	var unresolvable []reconciliationFile
 	var highCount, lowCount int
 	for _, f := range report.Files {
-		if f.Confidence == "high" {
+		switch f.Confidence {
+		case "unresolvable":
+			unresolvable = append(unresolvable, f)
+		case "high":
 			highCount++
-		} else {
+		default:
 			lowCount++
 		}
+	}
+
+	if len(unresolvable) > 0 {
+		fmt.Fprintf(os.Stderr, "  \033[31m✗ %d file(s) marked unresolvable — aborting merge:\033[0m\n", len(unresolvable))
+		for _, f := range unresolvable {
+			fmt.Fprintf(os.Stderr, "    %s: %s\n", f.File, f.Reason)
+		}
+		return fmt.Errorf("unresolvable conflicts in %d file(s)", len(unresolvable))
 	}
 
 	if highCount > 0 {
@@ -5802,8 +5941,29 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 		fmt.Fprintf(os.Stderr, "  \033[33m⚠ %d file(s) need review\033[0m\n", lowCount)
 	}
 
+	// Collect post-resolve commands (deduped, ordered)
+	var postCmds []string
+	seenCmds := make(map[string]bool)
+
 	for _, f := range report.Files {
 		filePath := filepath.Join(cfg.Root, f.File)
+
+		// Track post-resolve commands
+		if f.PostResolveCmd != "" && !seenCmds[f.PostResolveCmd] {
+			postCmds = append(postCmds, f.PostResolveCmd)
+			seenCmds[f.PostResolveCmd] = true
+		}
+
+		// Skip writing files that will be regenerated by post-resolve commands
+		// (e.g., lock files with empty resolved_content)
+		if f.ResolvedContent == "" && f.PostResolveCmd != "" {
+			// Delete the conflicted file so the post-resolve command regenerates it
+			os.Remove(filePath)
+			addCmd := exec.Command("git", "add", f.File)
+			addCmd.Dir = cfg.Root
+			addCmd.Run()
+			continue
+		}
 
 		if f.Confidence == "high" || !interactive || autoAll {
 			// Auto-apply
@@ -5849,6 +6009,24 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 				return fmt.Errorf("git add %s: %w", f.File, err)
 			}
 		}
+	}
+
+	// Run post-resolve commands (e.g., npm install to regen lock files)
+	if len(postCmds) > 0 {
+		for _, cmd := range postCmds {
+			fmt.Fprintf(os.Stderr, "  \033[2mRunning post-resolve: %s\033[0m\n", cmd)
+			parts := strings.Fields(cmd)
+			postCmd := exec.Command(parts[0], parts[1:]...)
+			postCmd.Dir = cfg.Root
+			if out, err := postCmd.CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "  \033[33m⚠ Post-resolve command failed: %s\n%s\033[0m\n", cmd, strings.TrimSpace(string(out)))
+				// Don't fail the merge — the operator can fix this
+			}
+		}
+		// Stage any files generated by post-resolve commands
+		addCmd := exec.Command("git", "add", "-A")
+		addCmd.Dir = cfg.Root
+		addCmd.Run()
 	}
 
 	return nil
@@ -5945,25 +6123,33 @@ func verifyNoConflictMarkers(root string, files []string) error {
 
 // runLegacyReconciliation is the fallback: AI resolves everything directly on disk.
 func runLegacyReconciliation(cfg loopConfig, milestoneID, branch, conflictedFiles string) error {
-	prompt := fmt.Sprintf(`You are a merge conflict reconciliation agent. Resolve all merge conflicts in the following files:
+	prompt := fmt.Sprintf(`You are a merge conflict reconciliation agent. Read your instructions first, then resolve all merge conflicts.
+
+CRITICAL: Read the file .agents/belmont/reconciliation-agent.md (or agents/belmont/reconciliation-agent.md) for full instructions and merge strategies by file type.
+
+CORE PRINCIPLE: Every merge MUST produce a strictly better state than either side alone. Both branches are intentional, completed, tested work. You are COMBINING parallel features — never choosing between them. If resolving a file would lose ANY code, functionality, dependencies, or state from either side, leave it conflicted and report the failure. A blocked merge is ALWAYS preferable to a destructive one.
 
 Conflicted files:
 %s
 
-Milestone: %s
+Milestone/Feature: %s
 Branch: %s
 
 Rules:
-1. Combine both sides — never choose one side over the other
-2. Include all imports from both sides (remove duplicates)
-3. Never delete functionality from either side
+1. ALWAYS combine both sides — never choose one side over the other. This is non-negotiable.
+2. Include all imports from both sides (remove exact duplicates only)
+3. Never delete functionality from either side — all completed work must survive
 4. Only modify conflicted files
-5. After resolving each file, run "git add <file>"
-6. Do NOT commit — the caller handles the commit
+5. For lock files (package-lock.json, yarn.lock, etc.): delete the conflicted lock, resolve the manifest, then run the package manager to regenerate
+6. For package manifests: take the union of ALL dependency additions from both sides
+7. After resolving each file, run "git add <file>"
+8. Do NOT commit — the caller handles the commit
+9. If you cannot safely resolve a file without losing work, leave it conflicted and report which files could not be resolved
 
-Read each conflicted file, resolve the conflict markers, write the resolved version, and git add it.`, conflictedFiles, milestoneID, branch)
+Read each conflicted file, resolve the conflict markers by combining both sides, write the resolved version, and git add it.`, conflictedFiles, milestoneID, branch)
 
-	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	// Use Opus for reconciliation — needs strong reasoning for merge conflict analysis
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, "--model", "claude-opus-4-6")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
@@ -6056,10 +6242,11 @@ func ensureCleanMergeState(root string) error {
 	return nil
 }
 
-// prepareWorktreesGitignore adds .belmont/worktrees/ to .gitignore and commits the change.
+// prepareWorktreesGitignore adds .belmont/worktrees/ and .belmont/auto.json to .gitignore and commits the change.
 // This must happen before creating worktrees so they branch from a clean HEAD with the entry.
 func prepareWorktreesGitignore(root string) {
 	ensureGitignoreEntry(root, ".belmont/worktrees/")
+	ensureGitignoreEntry(root, ".belmont/auto.json")
 
 	// Check if .gitignore was modified
 	statusCmd := exec.Command("git", "status", "--porcelain", ".gitignore")
@@ -6127,16 +6314,24 @@ func copyBelmontStateToWorktree(root, wtPath, slug string) error {
 	srcBelmont := filepath.Join(root, ".belmont")
 	dstBelmont := filepath.Join(wtPath, ".belmont")
 
-	// Clean slate — remove any existing .belmont (checked-out dir or stale symlink)
-	os.RemoveAll(dstBelmont)
+	// IMPORTANT: Do NOT remove the existing .belmont/ directory. The worktree
+	// inherits the full .belmont/ from HEAD, including all features' state.
+	// Removing it would cause git to see those deletions, and merging the
+	// worktree branch back would delete other features' state from the main branch.
+	//
+	// Instead, we overlay the current feature's latest state on top and use git
+	// excludes to prevent the worktree from committing changes to other features.
 	if err := os.MkdirAll(dstBelmont, 0755); err != nil {
 		return fmt.Errorf("create .belmont dir in worktree: %w", err)
 	}
 
 	// 1. Copy feature's own state (writable — agent commits these)
+	// This overlays the latest state on top of whatever was checked out from HEAD
 	srcFeature := filepath.Join(srcBelmont, "features", slug)
 	dstFeature := filepath.Join(dstBelmont, "features", slug)
 	if dirExists(srcFeature) {
+		// Remove just this feature's dir to get a clean copy
+		os.RemoveAll(dstFeature)
 		if err := copyDir(srcFeature, dstFeature); err != nil {
 			return fmt.Errorf("copy feature state: %w", err)
 		}
@@ -6161,14 +6356,23 @@ func copyBelmontStateToWorktree(root, wtPath, slug string) error {
 	markerPath := filepath.Join(dstBelmont, ".worktree")
 	os.WriteFile(markerPath, []byte(slug+"\n"), 0644)
 
-	// 5. Write selective git excludes — exclude read-only context + marker, but NOT features/<slug>/
+	// 5. Write git excludes — exclude all .belmont/ except this feature's state.
+	// This prevents the worktree from accidentally committing changes to (or
+	// deletions of) other features' state, read-only context files, etc.
 	writeWorktreeGitExcludes(wtPath)
+
+	// 6. Mark all .belmont/ files as assume-unchanged so git ignores them entirely.
+	// This prevents the worktree from committing .belmont/ changes (which would
+	// delete other features' state when merged back). The files remain on disk
+	// so the AI agent can read cross-feature state.
+	untrackBelmontInWorktree(wtPath, slug)
 
 	return nil
 }
 
-// writeWorktreeGitExcludes adds selective excludes to the worktree's .git/info/exclude.
-// Read-only context files and the .worktree marker are excluded; features/<slug>/ is committed.
+// writeWorktreeGitExcludes adds .belmont/ to the worktree's .git/info/exclude.
+// This prevents new .belmont/ files from being tracked. Combined with
+// assume-unchanged on existing files, it fully isolates .belmont/ from git.
 func writeWorktreeGitExcludes(wtPath string) {
 	gitFile := filepath.Join(wtPath, ".git")
 	data, err := os.ReadFile(gitFile)
@@ -6188,17 +6392,18 @@ func writeWorktreeGitExcludes(wtPath string) {
 	os.MkdirAll(infoDir, 0755)
 	excludePath := filepath.Join(infoDir, "exclude")
 
-	excludeEntries := []string{
-		".belmont/PRD.md",
-		".belmont/PROGRESS.md",
-		".belmont/PR_FAQ.md",
-		".belmont/TECH_PLAN.md",
-		".belmont/worktree.json",
-		".belmont/prompts/",
-		".belmont/.worktree",
-	}
+	// Exclude all .belmont/ from git in this worktree. Combined with
+	// assume-unchanged on already-tracked files, this ensures no .belmont/
+	// state leaks into commits or merges. State is synced by the orchestrator.
+	excludeContent := "# belmont worktree excludes — all .belmont/ state managed by orchestrator\n" +
+		".belmont/\n"
 
 	existing, _ := os.ReadFile(excludePath)
+	// If we've already written our excludes, skip
+	if strings.Contains(string(existing), "belmont worktree excludes") {
+		return
+	}
+
 	f, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return
@@ -6208,24 +6413,40 @@ func writeWorktreeGitExcludes(wtPath string) {
 	if len(existing) > 0 && existing[len(existing)-1] != '\n' {
 		f.WriteString("\n")
 	}
-	for _, entry := range excludeEntries {
-		if !strings.Contains(string(existing), entry) {
-			f.WriteString(entry + "\n")
+	f.WriteString(excludeContent)
+}
+
+// untrackBelmontInWorktree marks all .belmont/ files as assume-unchanged in the
+// worktree's git index. This prevents git from detecting modifications or deletions
+// of .belmont/ files, so they won't be included in commits or merges. The files
+// remain on disk for the AI agent to read (cross-feature visibility).
+func untrackBelmontInWorktree(wtPath, slug string) {
+	// Get list of all .belmont/ files currently in git's index
+	lsCmd := exec.Command("git", "ls-files", ".belmont/")
+	lsCmd.Dir = wtPath
+	out, err := lsCmd.Output()
+	if err != nil {
+		return
+	}
+
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
 		}
+		// Mark every .belmont/ file as assume-unchanged so git ignores
+		// any modifications or deletions in this worktree
+		cmd := exec.Command("git", "update-index", "--assume-unchanged", line)
+		cmd.Dir = wtPath
+		cmd.Run() // best-effort
 	}
 }
 
 // commitWorktreeFeatureState commits the initial .belmont/features/ state in a worktree
 // so the AI agent starts from a clean git state.
 func commitWorktreeFeatureState(wtPath, slug string) {
-	addCmd := exec.Command("git", "add", ".belmont/features/")
-	addCmd.Dir = wtPath
-	if _, err := addCmd.CombinedOutput(); err != nil {
-		return // best-effort
-	}
-	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("belmont: initialize feature state for %s", slug))
-	commitCmd.Dir = wtPath
-	commitCmd.CombinedOutput() // best-effort
+	// .belmont/ is marked assume-unchanged to prevent worktree merges from
+	// deleting other features' state. No .belmont/ commit needed here —
+	// the orchestrator copies feature state back after merge.
 }
 
 // ensureGitignoreEntry adds an entry to .gitignore if not already present.
@@ -6250,6 +6471,58 @@ func ensureGitignoreEntry(root, entry string) {
 		f.WriteString("\n")
 	}
 	f.WriteString(entry + "\n")
+}
+
+// syncFeatureStateAfterMerge copies the feature's .belmont/ state from a worktree
+// back to the main repo after a successful merge. Since .belmont/ is excluded from
+// git tracking in worktrees (assume-unchanged), state must be synced separately.
+func syncFeatureStateAfterMerge(mainRoot, wtPath, slug string) {
+	srcFeature := filepath.Join(wtPath, ".belmont", "features", slug)
+	dstFeature := filepath.Join(mainRoot, ".belmont", "features", slug)
+
+	if !dirExists(srcFeature) {
+		return
+	}
+
+	// Replace the main repo's feature state with the worktree's version
+	os.RemoveAll(dstFeature)
+	if err := copyDir(srcFeature, dstFeature); err != nil {
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to sync feature state for %s: %s\033[0m\n", slug, err)
+	}
+}
+
+// commitWorktreeChanges commits all uncommitted changes in a worktree before merge.
+// AI agents may leave uncommitted work (code changes, state files) when the loop
+// completes. Without this, git merge --no-ff only sees committed changes and the
+// worktree's working directory changes are silently lost.
+func commitWorktreeChanges(wtPath, label string) error {
+	// Check for any uncommitted changes (tracked + untracked)
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = wtPath
+	out, err := statusCmd.Output()
+	if err != nil {
+		return nil // can't check, skip gracefully
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return nil // nothing to commit
+	}
+
+	// Stage everything
+	addCmd := exec.Command("git", "add", "-A")
+	addCmd.Dir = wtPath
+	if _, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add -A in worktree: %w", err)
+	}
+
+	// Commit
+	commitCmd := exec.Command("git", "commit", "-m", fmt.Sprintf("belmont: finalize %s", label))
+	commitCmd.Dir = wtPath
+	if _, err := commitCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit in worktree: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "  \033[2m(committed uncommitted changes for %s)\033[0m\n", label)
+	return nil
 }
 
 // commitBelmontState commits any uncommitted .belmont/ state files in the main repo.
@@ -6301,7 +6574,7 @@ func classifyMergeError(output string) mergeFailureKind {
 	if strings.Contains(output, "untracked working tree files would be overwritten") {
 		return mergeUntrackedOverwrite
 	}
-	if strings.Contains(output, "local changes would be overwritten") {
+	if strings.Contains(output, "Your local changes to the following files would be overwritten") {
 		return mergeDirtyWorktree
 	}
 	if strings.Contains(output, "CONFLICT") || strings.Contains(output, "Automatic merge failed") {
@@ -6423,10 +6696,7 @@ func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
 		popCmd := exec.Command("git", "stash", "pop")
 		popCmd.Dir = cfg.Root
 		if popOut, popErr := popCmd.CombinedOutput(); popErr != nil {
-			fmt.Fprintf(os.Stderr, "  \033[33m⚠ stash pop failed for %s — dropping stash: %s\033[0m\n", id, strings.TrimSpace(string(popOut)))
-			dropCmd := exec.Command("git", "stash", "drop")
-			dropCmd.Dir = cfg.Root
-			dropCmd.Run()
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ stash pop had conflicts for %s — your local changes are preserved in 'git stash list', resolve with 'git stash pop': %s\033[0m\n", id, strings.TrimSpace(string(popOut)))
 		}
 
 		if retryErr2 == nil {
@@ -6469,8 +6739,13 @@ func attemptMerge(cfg loopConfig, commitMsg, branch, id string) error {
 
 handleConflict:
 	// Try auto-resolving .belmont/ conflicts first (common with parallel milestones)
-	if autoResolveBelmontConflicts(cfg.Root) {
-		// Check if all conflicts are resolved
+	autoResolveBelmontConflicts(cfg.Root)
+
+	// Try auto-resolving lock files (delete + regenerate via package manager)
+	autoResolveLockFiles(cfg.Root)
+
+	// Check if all conflicts are now resolved
+	{
 		checkCmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
 		checkCmd.Dir = cfg.Root
 		if checkOut, err := checkCmd.Output(); err == nil && strings.TrimSpace(string(checkOut)) == "" {
@@ -6554,7 +6829,8 @@ func autoResolveBelmontConflicts(root string) bool {
 }
 
 // resolveProgressConflict merges a conflicted PROGRESS.md by taking the union of
-// milestone completions from both sides. Returns true if successfully resolved.
+// completions from both sides. Handles milestone tables, task-level checkboxes,
+// status lines, and activity entries. Returns true if successfully resolved.
 func resolveProgressConflict(root, relPath, filePath string) bool {
 	// Get "ours" version
 	oursCmd := exec.Command("git", "show", ":2:"+relPath)
@@ -6572,31 +6848,116 @@ func resolveProgressConflict(root, relPath, filePath string) bool {
 		return false
 	}
 
-	// Parse milestone completions from both sides
 	oursLines := strings.Split(string(oursOut), "\n")
 	theirsLines := strings.Split(string(theirsOut), "\n")
 
-	// Build a map of milestone completions from "theirs"
+	// Build sets of completed items from "theirs"
 	theirsDone := make(map[string]bool)
+
+	// Match milestone table rows: | [x] | M1 ...
 	milestoneRe := regexp.MustCompile(`^\|\s*\[([xX ])\]\s*\|\s*(M\d+)`)
+	// Match task checkboxes: - [x] P0-1: ... or - [x] DS-1: ...
+	taskRe := regexp.MustCompile(`^-\s*\[([xX ])\]\s*([A-Z][A-Z0-9]+-\d+[\w-]*)`)
+	// Match milestone headers: ### ✅ M1: ... or ### ⬜ M1: ...
+	milestoneHeaderRe := regexp.MustCompile(`^###\s*(✅|⬜|🔄)\s*(M\d+):`)
+
 	for _, line := range theirsLines {
 		if m := milestoneRe.FindStringSubmatch(line); m != nil {
 			if strings.ToLower(m[1]) == "x" {
-				theirsDone[m[2]] = true
+				theirsDone["ms:"+m[2]] = true
+			}
+		}
+		if m := taskRe.FindStringSubmatch(line); m != nil {
+			if strings.ToLower(m[1]) == "x" {
+				theirsDone["task:"+m[2]] = true
+			}
+		}
+		if m := milestoneHeaderRe.FindStringSubmatch(line); m != nil {
+			if m[1] == "✅" {
+				theirsDone["header:"+m[2]] = true
 			}
 		}
 	}
 
-	// Merge: start from "ours", upgrade any unchecked milestones that are done in "theirs"
+	// Collect unique activity entries from "theirs" (table rows starting with |)
+	theirsActivityLines := make(map[string]bool)
+	inActivity := false
+	for _, line := range theirsLines {
+		if strings.Contains(line, "## Recent Activity") || strings.Contains(line, "## Activity") {
+			inActivity = true
+			continue
+		}
+		if inActivity && strings.HasPrefix(line, "##") {
+			inActivity = false
+		}
+		if inActivity && strings.HasPrefix(strings.TrimSpace(line), "|") && !strings.Contains(line, "---") {
+			theirsActivityLines[strings.TrimSpace(line)] = true
+		}
+	}
+
+	// Status priority for the Status line
+	statusPriority := map[string]int{"🔴 Not Started": 0, "🟡 In Progress": 1, "✅ Done": 2, "✅ Complete": 2}
+	theirsStatus := ""
+	statusRe := regexp.MustCompile(`^## Status:\s*(.+)`)
+	for _, line := range theirsLines {
+		if m := statusRe.FindStringSubmatch(line); m != nil {
+			theirsStatus = strings.TrimSpace(m[1])
+		}
+	}
+
+	// Merge: start from "ours", upgrade completions from "theirs"
 	var merged []string
+	inActivitySection := false
+	activityInserted := make(map[string]bool)
+
 	for _, line := range oursLines {
+		// Upgrade milestone table checkboxes
 		if m := milestoneRe.FindStringSubmatch(line); m != nil {
-			msID := m[2]
-			if m[1] == " " && theirsDone[msID] {
-				// Upgrade from [ ] to [x]
+			if m[1] == " " && theirsDone["ms:"+m[2]] {
 				line = strings.Replace(line, "[ ]", "[x]", 1)
 			}
 		}
+
+		// Upgrade task checkboxes
+		if m := taskRe.FindStringSubmatch(line); m != nil {
+			if m[1] == " " && theirsDone["task:"+m[2]] {
+				line = strings.Replace(line, "[ ]", "[x]", 1)
+			}
+		}
+
+		// Upgrade milestone headers
+		if m := milestoneHeaderRe.FindStringSubmatch(line); m != nil {
+			if m[1] != "✅" && theirsDone["header:"+m[2]] {
+				line = strings.Replace(line, m[1], "✅", 1)
+			}
+		}
+
+		// Take the more-complete status
+		if m := statusRe.FindStringSubmatch(line); m != nil && theirsStatus != "" {
+			oursStatus := strings.TrimSpace(m[1])
+			if statusPriority[theirsStatus] > statusPriority[oursStatus] {
+				line = "## Status: " + theirsStatus
+			}
+		}
+
+		// Track activity section for merging entries
+		if strings.Contains(line, "## Recent Activity") || strings.Contains(line, "## Activity") {
+			inActivitySection = true
+		} else if inActivitySection && strings.HasPrefix(line, "##") {
+			// End of activity section — insert any theirs-only entries before the next section
+			for theirsLine := range theirsActivityLines {
+				if !activityInserted[theirsLine] {
+					merged = append(merged, theirsLine)
+					activityInserted[theirsLine] = true
+				}
+			}
+			inActivitySection = false
+		}
+
+		if inActivitySection && strings.HasPrefix(strings.TrimSpace(line), "|") && !strings.Contains(line, "---") {
+			activityInserted[strings.TrimSpace(line)] = true
+		}
+
 		merged = append(merged, line)
 	}
 
@@ -6611,9 +6972,95 @@ func resolveProgressConflict(root, relPath, filePath string) bool {
 	return true
 }
 
-// listPreservedWorktrees finds worktrees under .belmont/worktrees/ that still exist.
+// autoResolveLockFiles detects conflicted lock files and regenerates them.
+// Only handles lock files whose corresponding manifest is NOT conflicted
+// (if the manifest is also conflicted, the AI agent needs to handle both together).
+func autoResolveLockFiles(root string) {
+	cmd := exec.Command("git", "diff", "--name-only", "--diff-filter=U")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+
+	// Map lock file → (package manager install command, manifest file)
+	lockFileMap := map[string]struct {
+		installCmd string
+		manifest   string
+	}{
+		"package-lock.json": {"npm install", "package.json"},
+		"pnpm-lock.yaml":    {"pnpm install", "package.json"},
+		"yarn.lock":         {"yarn install", "package.json"},
+		"bun.lockb":         {"bun install", "package.json"},
+		"Cargo.lock":        {"cargo generate-lockfile", "Cargo.toml"},
+		"go.sum":            {"go mod tidy", "go.mod"},
+		"Gemfile.lock":      {"bundle install", "Gemfile"},
+		"poetry.lock":       {"poetry lock --no-update", "pyproject.toml"},
+	}
+
+	conflicted := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			conflicted[line] = true
+		}
+	}
+
+	for _, file := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		file = strings.TrimSpace(file)
+		// Only handle lock files in the repo root (basename match)
+		baseName := filepath.Base(file)
+		info, isLock := lockFileMap[baseName]
+		if !isLock {
+			continue
+		}
+
+		// Check if the corresponding manifest is also conflicted
+		manifestPath := filepath.Join(filepath.Dir(file), info.manifest)
+		if conflicted[manifestPath] {
+			// Both conflicted — leave for the AI agent to handle together
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "  \033[2mAuto-resolving %s via %s\033[0m\n", file, info.installCmd)
+
+		// Delete the conflicted lock file
+		os.Remove(filepath.Join(root, file))
+
+		// Run the package manager to regenerate
+		parts := strings.Fields(info.installCmd)
+		installCmd := exec.Command(parts[0], parts[1:]...)
+		installCmd.Dir = root
+		if installOut, err := installCmd.CombinedOutput(); err != nil {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ Failed to regenerate %s: %s\033[0m\n", file, strings.TrimSpace(string(installOut)))
+			// Restore the conflicted version so git knows it's still unresolved
+			checkoutCmd := exec.Command("git", "checkout", "--merge", "--", file)
+			checkoutCmd.Dir = root
+			checkoutCmd.Run()
+			continue
+		}
+
+		// Stage the regenerated lock file
+		addCmd := exec.Command("git", "add", file)
+		addCmd.Dir = root
+		addCmd.Run()
+	}
+}
+
+// listPreservedWorktrees finds worktrees that still exist.
+// Checks both the new sibling location and the legacy .belmont/worktrees/ path.
 func listPreservedWorktrees(root string) []worktreeEntry {
-	wtDir := filepath.Join(root, ".belmont", "worktrees")
+	var result []worktreeEntry
+	// New location: sibling directory
+	result = append(result, scanWorktreeDir(worktreeBasePath(root))...)
+	// Legacy location: inside project
+	legacyDir := filepath.Join(root, ".belmont", "worktrees")
+	result = append(result, scanWorktreeDir(legacyDir)...)
+	return result
+}
+
+// scanWorktreeDir scans a directory for preserved git worktrees.
+func scanWorktreeDir(wtDir string) []worktreeEntry {
 	entries, err := os.ReadDir(wtDir)
 	if err != nil {
 		return nil
@@ -6630,11 +7077,29 @@ func listPreservedWorktrees(root string) []worktreeEntry {
 		if _, err := os.Stat(gitFile); err != nil {
 			continue
 		}
-		// Try to find the branch
-		branch := "belmont/" + e.Name()
+		// Detect the actual branch from the worktree's HEAD
+		branch := detectWorktreeBranch(wtPath)
+		if branch == "" {
+			branch = "belmont/auto/" + e.Name() // fallback
+		}
 		result = append(result, worktreeEntry{Path: wtPath, Branch: branch})
 	}
 	return result
+}
+
+// detectWorktreeBranch reads the actual branch name from a git worktree.
+func detectWorktreeBranch(wtPath string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = wtPath
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "" || branch == "HEAD" {
+		return ""
+	}
+	return branch
 }
 
 // runSyncCmd handles the "belmont sync" command.

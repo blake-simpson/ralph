@@ -6,12 +6,13 @@ When `belmont auto` runs multiple features or milestones in parallel, each one e
 
 Each parallel worktree gets:
 
+- **Created outside the project** — worktrees are placed in `~/.belmont/worktrees/<project-name>/` to avoid interfering with tools that walk up the directory tree (e.g. Turbopack detecting multiple lockfiles)
 - **`.env*` files copied** from the project root automatically (since they're gitignored and not present in fresh worktrees)
 - **A unique port** assigned automatically via `PORT` and `BELMONT_PORT` environment variables
 - **Its own file tree** — gitignored directories like `node_modules/`, `.next/`, `dist/` are local to each worktree
 - **Isolated `.belmont/` state** — each worktree gets its own copy of its feature's state files, committed to the feature branch. Read-only copies of master planning files are included for context but excluded from git
 - **Live status visibility** — `belmont status` reads live progress from active worktrees via `.belmont/auto.json`, so you can monitor all features from the main repo
-- **Process group isolation** — processes started by the AI agent are tracked and cleaned up when the worktree is removed
+- **Process group cleanup** — after each AI tool invocation, all child processes (dev servers, test runners, etc.) are killed to prevent port conflicts between implementation and verification phases
 - **Auto-detected dependency install** — if no `worktree.json` exists, Belmont detects your package manager and installs dependencies automatically
 
 ## State Isolation
