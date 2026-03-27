@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.0
+
+**Released:** 2026-03-27
+
+### Changes since v0.7.6.1
+
+- Improvements to auto-merging capability
+- Move all Belmont tracking inside worktree
+- Improved auto detection and install of dependencies, when worktree.json missing
+- Add setup concept for Belmont auto features
+
+
+
 ## v0.7.6.1
 
 **Released:** 2026-03-24
