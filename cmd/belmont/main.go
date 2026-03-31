@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -22,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"text/template"
 	"time"
 )
@@ -3049,7 +3047,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	// Set up worktree tracker and signal handler
 	activeWorktrees := &worktreeTracker{root: cfg.Root, entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	notifySignals(sigCh)
 	go func() {
 		<-sigCh
 		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — preserving worktrees for resume...\033[0m\n")
@@ -3999,7 +3997,7 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	// Worktree isolation: inject env vars and set process group
 	if cfg.Port != 0 {
 		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		setSysProcAttr(cmd)
 	}
 
 	var prefix string
@@ -4119,7 +4117,7 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 	// Worktree isolation: inject env vars and set process group
 	if cfg.Port != 0 {
 		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		setSysProcAttr(cmd)
 	}
 
 	var triagePrefix string
@@ -5305,7 +5303,7 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	// Set up signal handler for cleanup
 	activeWorktrees := &worktreeTracker{root: cfg.Root, entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	notifySignals(sigCh)
 	go func() {
 		<-sigCh
 		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ Interrupted — preserving worktrees for resume...\033[0m\n")
@@ -5406,18 +5404,6 @@ func (wt *worktreeTracker) setPgid(id string, pgid int) {
 	}
 }
 
-// killProcessGroup sends SIGTERM then SIGKILL to clean up orphaned child processes
-// (dev servers, test runners, etc.) after an AI tool invocation finishes.
-// The pid is used as the PGID because Setpgid:true makes the child its own group leader.
-func killProcessGroup(pid int) {
-	if pid == 0 {
-		return
-	}
-	syscall.Kill(-pid, syscall.SIGTERM)
-	time.Sleep(500 * time.Millisecond)
-	syscall.Kill(-pid, syscall.SIGKILL)
-}
-
 func (wt *worktreeTracker) remove(id string) {
 	wt.mu.Lock()
 	defer wt.mu.Unlock()
@@ -5465,7 +5451,7 @@ func (wt *worktreeTracker) teardownEntry(id string) {
 		return
 	}
 	if entry.Pgid != 0 {
-		syscall.Kill(-entry.Pgid, syscall.SIGTERM)
+		signalProcessGroup(entry.Pgid)
 	}
 	if hooks != nil && len(hooks.Teardown) > 0 {
 		_ = runWorktreeHookCommands(hooks.Teardown, entry.Path, entry.Port, hooks.Env)
@@ -5479,7 +5465,7 @@ func (wt *worktreeTracker) cleanupAll(root string) {
 		fmt.Fprintf(os.Stderr, "  Cleaning up worktree for %s...\n", id)
 		// Kill process group if running
 		if entry.Pgid != 0 {
-			syscall.Kill(-entry.Pgid, syscall.SIGTERM)
+			signalProcessGroup(entry.Pgid)
 		}
 		// Run teardown hooks
 		if wt.hooks != nil && len(wt.hooks.Teardown) > 0 {
@@ -5508,7 +5494,7 @@ func (wt *worktreeTracker) gracefulShutdown(root string) {
 	for id, entry := range wt.entries {
 		// Kill process group if running
 		if entry.Pgid != 0 {
-			syscall.Kill(-entry.Pgid, syscall.SIGTERM)
+			signalProcessGroup(entry.Pgid)
 		}
 		// Run teardown hooks (release ports, stop dev servers)
 		if wt.hooks != nil && len(wt.hooks.Teardown) > 0 {
