@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.2.1
+
+**Released:** 2026-03-31
+
+### Changes since v0.8.2
+
+- Fix next skill archiving MILESTONE files with task ID instead of milestone ID
+
+
+
 ## v0.8.2
 
 **Released:** 2026-03-31
