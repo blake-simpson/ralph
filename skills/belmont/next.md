@@ -99,10 +99,10 @@ Task:      [Task ID]: [Task Name]
 Create `{base}/MILESTONE.md` with a focused, lightweight version of the milestone file. Since this is a single-task shortcut, you fill in the context directly instead of spawning analysis agents.
 
 ```markdown
-# Milestone: [ID] — [Name] (Single Task)
+# Milestone: [MilestoneID] — [Milestone Name] (Single Task)
 
 ## Status
-- **Milestone**: [e.g., M2: Core Features]
+- **Milestone**: [MilestoneID]: [Milestone Name] (e.g., M2: Core Features)
 - **Git Baseline**: [Run `git rev-parse HEAD` and record the SHA here — this is used by verification agents to distinguish new code from pre-existing code]
 - **Mode**: Lightweight (next skill — single task, no analysis agents)
 - **Created**: [timestamp]
@@ -187,7 +187,7 @@ After the implementation agent completes:
 
 ## Step 5: Clean Up MILESTONE File
 
-Archive the MILESTONE file: `{base}/MILESTONE.md` → `{base}/MILESTONE-[TaskID].done.md` (e.g., `MILESTONE-P1-3.done.md`)
+Archive the MILESTONE file: `{base}/MILESTONE.md` → `{base}/MILESTONE-[MilestoneID].done.md` (e.g., `MILESTONE-M2.done.md`). Use the **milestone ID** (M1, M2, etc.), NOT the task ID. If a file with that name already exists (from a previous task in the same milestone), overwrite it.
 
 This prevents stale context from bleeding into the next run.
 
