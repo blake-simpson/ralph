@@ -3473,6 +3473,8 @@ func runLoop(cfg loopConfig) error {
 
 		// 2. Derive extra signals
 		hasFwlup := detectFwlupTasks(cfg.Root, cfg.Feature, report)
+		currentMsID := lastMilestoneID(history)
+		hasMsFwlup := currentMsID != "" && detectFwlupTasksForMilestone(cfg.Root, cfg.Feature, report, currentMsID)
 		pendingTasks := hasPendingTasks(report)
 		msStates := buildMilestoneLoopStates(history, report.Milestones)
 
@@ -3484,7 +3486,7 @@ func runLoop(cfg loopConfig) error {
 
 		// 4. If no guardrail triggered, try smart rules first
 		if action == nil {
-			action = decideLoopActionSmart(report, history, cfg, hasFwlup, pendingTasks, msStates)
+			action = decideLoopActionSmart(report, history, cfg, hasFwlup, hasMsFwlup, pendingTasks, msStates)
 		}
 
 		// 4b. If smart rules returned nil, check stuck detection before AI
@@ -3586,10 +3588,10 @@ func runLoop(cfg loopConfig) error {
 				action.ReverifyScope = td.ReverifyScope
 				fmt.Fprintf(os.Stderr, "\033[2m  Triage: %s (%s)\033[0m\n", td.Decision, td.Reason)
 			} else {
-				fmt.Fprintf(os.Stderr, "\033[33m  Warning: could not parse triage decision from output\033[0m\n")
-				// Default to fix_and_reverify if parsing fails
-				action.TriageDecision = "fix_and_reverify"
-				action.ReverifyScope = "focused"
+				fmt.Fprintf(os.Stderr, "\033[33m  Warning: could not parse triage decision from output — deferring\033[0m\n")
+				// Default to defer_and_proceed if parsing fails — avoids expensive fix-all + re-verify loops
+				action.TriageDecision = "defer_and_proceed"
+				action.ReverifyScope = ""
 			}
 		}
 
@@ -4207,6 +4209,9 @@ func buildLoopPrompt(action loopAction, feature string) string {
 		return fmt.Sprintf("/belmont:next --feature %s", feature)
 	case actionVerify:
 		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
+		if action.MilestoneID != "" {
+			prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.", action.MilestoneID, action.MilestoneID)
+		}
 		if action.ReverifyScope == "focused" {
 			prompt += "\n\nFOCUSED RE-VERIFICATION: This is a re-verify after follow-up fixes. Only verify: (1) the specific FWLUP tasks that were just fixed, (2) build/test pass, (3) any previously-failing acceptance criteria. Do NOT re-run Lighthouse. Do NOT re-check visual specs unless a FWLUP specifically addressed UI. Do NOT create new Polish-level issues."
 		}
@@ -4216,7 +4221,11 @@ func buildLoopPrompt(action loopAction, feature string) string {
 	case actionDebug:
 		return fmt.Sprintf("/belmont:debug-auto --feature %s", feature)
 	case actionFixAll:
-		return fmt.Sprintf("/belmont:next --feature %s\n\nBATCH MODE: Implement ALL pending FWLUP tasks in the current milestone sequentially. For each task: find it, create MILESTONE file, dispatch to implementation agent, process results, archive MILESTONE, then loop to the next pending FWLUP. Stop when no FWLUP tasks remain in the milestone.\n\nIMPORTANT: Only work on FWLUP tasks (tasks with \"FWLUP\" in their ID). If there are NO pending FWLUP tasks in the current milestone, stop immediately and report \"No FWLUP tasks to fix.\" Do NOT implement regular tasks — those require the full implementation pipeline.", feature)
+		milestoneClause := "the current milestone"
+		if action.MilestoneID != "" {
+			milestoneClause = action.MilestoneID
+		}
+		return fmt.Sprintf("/belmont:next --feature %s\n\nBATCH MODE: Implement ALL pending FWLUP tasks in %s sequentially. For each task: find it, create MILESTONE file, dispatch to implementation agent, process results, archive MILESTONE, then loop to the next pending FWLUP. Stop when no FWLUP tasks remain in %s.\n\nIMPORTANT: Only work on FWLUP tasks (tasks with \"FWLUP\" in their ID) that belong to %s. If there are NO pending FWLUP tasks in %s, stop immediately and report \"No FWLUP tasks to fix.\" Do NOT implement regular tasks — those require the full implementation pipeline.", feature, milestoneClause, milestoneClause, milestoneClause, milestoneClause)
 	case actionTriage:
 		// Triage uses its own prompt template — handled in executeLoopAction
 		return ""
@@ -4470,9 +4479,19 @@ func buildMilestoneLoopStates(history []historyEntry, milestones []milestone) ma
 	return states
 }
 
+// lastMilestoneID walks backward through history and returns the most recent non-empty MilestoneID.
+func lastMilestoneID(history []historyEntry) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		if history[i].Action.MilestoneID != "" {
+			return history[i].Action.MilestoneID
+		}
+	}
+	return ""
+}
+
 // decideLoopActionSmart applies deterministic rules for ~80% of cases.
 // Returns nil for ambiguous cases that should fall through to AI.
-func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, pendingTasks bool, msStates map[string]*milestoneLoopState) *loopAction {
+func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, hasMsFwlup bool, pendingTasks bool, msStates map[string]*milestoneLoopState) *loopAction {
 	if len(history) == 0 {
 		// First iteration: implement first undone milestone in range
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
@@ -4525,11 +4544,11 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			return &loopAction{Type: actionImplementNext, Reason: "Docs-only milestone done, fixing follow-ups"}
 		}
 		// Everything else: verify
-		return &loopAction{Type: actionVerify, Reason: "Verifying completed milestone"}
+		return &loopAction{Type: actionVerify, Reason: "Verifying completed milestone", MilestoneID: last.Action.MilestoneID}
 	}
 
-	// Rule 2: After VERIFY success + no follow-ups → next undone milestone or COMPLETE
-	if lastType == actionVerify && lastSuccess && !hasFwlup {
+	// Rule 2: After VERIFY success + no follow-ups in this milestone → next undone milestone or COMPLETE
+	if lastType == actionVerify && lastSuccess && !hasMsFwlup {
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
@@ -4539,12 +4558,17 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		if pendingTasks {
 			return &loopAction{Type: actionImplementNext, Reason: "All milestones marked done but tasks still pending after verification"}
 		}
+		// If this was a milestone-scoped verify, do a full-feature verify before completing
+		if last.Action.MilestoneID != "" {
+			return &loopAction{Type: actionVerify, Reason: "Final full-feature verification before completion"}
+		}
 		return &loopAction{Type: actionComplete, Reason: "All milestones verified and complete"}
 	}
 
-	// Rule 3: After VERIFY success + follow-ups exist → TRIAGE (AI reads the actual FWLUPs)
-	if lastType == actionVerify && lastSuccess && hasFwlup {
-		return &loopAction{Type: actionTriage, Reason: "Triaging follow-up tasks after verification"}
+	// Rule 3: After VERIFY success + follow-ups exist in this milestone → TRIAGE (AI reads the actual FWLUPs)
+	if lastType == actionVerify && lastSuccess && hasMsFwlup {
+		msID := lastMilestoneID(history)
+		return &loopAction{Type: actionTriage, Reason: "Triaging follow-up tasks after verification", MilestoneID: msID}
 	}
 
 	// Rule 3b: After TRIAGE → decide based on triage decision
@@ -4564,12 +4588,12 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			}
 			return &loopAction{Type: actionComplete, Reason: "All milestones complete (remaining items deferred as polish)"}
 		case "fix_and_proceed":
-			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will skip re-verification)", TriageDecision: "fix_and_proceed"}
+			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will skip re-verification)", TriageDecision: "fix_and_proceed", MilestoneID: last.Action.MilestoneID}
 		case "fix_and_reverify":
-			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will re-verify after)", TriageDecision: "fix_and_reverify", ReverifyScope: last.Action.ReverifyScope}
+			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will re-verify after)", TriageDecision: "fix_and_reverify", ReverifyScope: last.Action.ReverifyScope, MilestoneID: last.Action.MilestoneID}
 		default:
 			// Unknown triage decision — fall back to fix-all with re-verify
-			return &loopAction{Type: actionFixAll, Reason: "Fixing follow-ups after triage", TriageDecision: "fix_and_reverify", ReverifyScope: "focused"}
+			return &loopAction{Type: actionFixAll, Reason: "Fixing follow-ups after triage", TriageDecision: "fix_and_reverify", ReverifyScope: "focused", MilestoneID: last.Action.MilestoneID}
 		}
 	}
 
@@ -4581,7 +4605,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			if scope == "" {
 				scope = "focused"
 			}
-			return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Re-verifying after follow-up fixes (scope: %s)", scope), ReverifyScope: scope}
+			return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Re-verifying after follow-up fixes (scope: %s)", scope), ReverifyScope: scope, MilestoneID: last.Action.MilestoneID}
 		}
 		// fix_and_proceed: skip re-verification, move to next milestone
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
@@ -4601,7 +4625,8 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 
 	// Rule 4: After IMPLEMENT_NEXT success → VERIFY (re-verify) — kept for non-auto invocations
 	if lastType == actionImplementNext && lastSuccess {
-		return &loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix"}
+		msID := lastMilestoneID(history)
+		return &loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix", MilestoneID: msID}
 	}
 
 	// Rule 5: After VERIFY failure — check verify failure count
@@ -4651,6 +4676,10 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		}
 	}
 	if allDone && allVerified && !hasFwlup && !pendingTasks {
+		// If the last verify was milestone-scoped, do a full-feature verify before completing
+		if lastType == actionVerify && lastSuccess && last.Action.MilestoneID != "" {
+			return &loopAction{Type: actionVerify, Reason: "Final full-feature verification before completion"}
+		}
 		return &loopAction{Type: actionComplete, Reason: "All milestones implemented, verified, and no follow-ups"}
 	}
 	if allDone && allVerified && !hasFwlup && pendingTasks {
@@ -5011,6 +5040,43 @@ func detectFwlupTasks(root, feature string, report statusReport) bool {
 		if t.Status == taskPending || t.Status == taskInProgress {
 			if fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name) {
 				return true
+			}
+		}
+	}
+	return false
+}
+
+// extractMilestoneFromTaskID extracts the milestone ID from a task ID like "P5-M5-FWLUP-1" → "M5".
+func extractMilestoneFromTaskID(taskID string) string {
+	re := regexp.MustCompile(`P\d+-M(\d+)`)
+	m := re.FindStringSubmatch(taskID)
+	if len(m) >= 2 {
+		return "M" + m[1]
+	}
+	return ""
+}
+
+// detectFwlupTasksForMilestone checks for pending FWLUP tasks scoped to a specific milestone.
+func detectFwlupTasksForMilestone(root, feature string, report statusReport, milestoneID string) bool {
+	if milestoneID == "" {
+		return false
+	}
+	prdPath := filepath.Join(root, ".belmont", "features", feature, "PRD.md")
+	prdContent, err := os.ReadFile(prdPath)
+	if err != nil {
+		return false
+	}
+	prd := string(prdContent)
+	fwlupRe := regexp.MustCompile(`(?i)FWLUP`)
+	if !fwlupRe.MatchString(prd) {
+		return false
+	}
+	for _, t := range report.Tasks {
+		if t.Status == taskPending || t.Status == taskInProgress {
+			if fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name) {
+				if extractMilestoneFromTaskID(t.ID) == milestoneID {
+					return true
+				}
 			}
 		}
 	}
