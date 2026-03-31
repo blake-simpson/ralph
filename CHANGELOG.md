@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.1
+
+**Released:** 2026-03-31
+
+### Changes since v0.8.0
+
+- Fix master PROGRESS task counts drifting after tech-plan
+
+
+
 ## v0.8.0
 
 **Released:** 2026-03-27
