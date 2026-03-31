@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.1.1
+
+**Released:** 2026-03-31
+
+### Changes since v0.8.1
+
+- Fix Windows build: extract platform-specific syscall usage
+
+
+
 ## v0.8.1
 
 **Released:** 2026-03-31
