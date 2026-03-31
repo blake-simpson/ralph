@@ -169,12 +169,13 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
+<!-- @include state-reconciliation.md -->
 <!-- @include commit-belmont-changes.md commit_context="after technical planning" -->
 
 - Say: "Tech plan complete."
 - STOP. Do not continue. Do not implement anything.
-- Final: Prompt user to "/clear" and "/belmont:implement"
-    - If you are Codex, instead prompt: "/new" and then "belmont:implement"
+- Final: Prompt user to "/clear" and "/belmont:implement" (also mention `/belmont:review-plans` is recommended for safety before implementation)
+    - If you are Codex, instead prompt: "/new" and then "belmont:implement" and "belmont:review-plans"
 
 ## Master TECH_PLAN.md Format
 
@@ -187,13 +188,13 @@ Write to `.belmont/TECH_PLAN.md` with this structure:
 [2-3 sentences on the product-level technical vision]
 
 ## Stack & Tooling
-| Category | Choice | Rationale |
-|----------|--------|-----------|
-| Framework | e.g. Next.js 15 | [why] |
-| Package Manager | e.g. pnpm | [why] |
-| Styling | e.g. Tailwind CSS 4 | [why] |
-| Deployment | e.g. Vercel | [why] |
-| Testing | e.g. Vitest + Playwright | [why] |
+| Category        | Choice                   | Rationale |
+|-----------------|--------------------------|-----------|
+| Framework       | e.g. Next.js 15          | [why]     |
+| Package Manager | e.g. pnpm                | [why]     |
+| Styling         | e.g. Tailwind CSS 4      | [why]     |
+| Deployment      | e.g. Vercel              | [why]     |
+| Testing         | e.g. Vitest + Playwright | [why]     |
 
 ## Project Structure
 ```

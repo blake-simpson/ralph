@@ -206,6 +206,41 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
+### Reconcile State Files
+
+Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and fix any discrepancies:
+
+1. **Task ↔ checkbox sync** — For each task in PROGRESS.md milestone sections:
+   - Find the matching `### P...:` header in PRD.md by task ID
+   - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
+   - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
+
+2. **Milestone status sync** — For each milestone heading in PROGRESS.md:
+   - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
+   - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
+
+3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
+   - Remove entries whose referenced task ID is now marked ✅ in PRD.md
+   - Remove entries that reference other features (e.g. "Depends on X feature") if that feature's status is `✅ Complete` in `.belmont/PROGRESS.md`'s Features table
+   - If section becomes empty, set to `None`
+
+4. **Overall status line** — Update `## Status:` in PROGRESS.md:
+   - All milestones ✅ → `## Status: ✅ Complete`
+   - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
+   - All ⬜ → `## Status: 🔴 Not Started`
+
+5. **Feature dependency sync** (master PRD only) — In the `## Features` table of `.belmont/PRD.md`:
+   - Verify all dependency slugs reference existing feature slugs in the table
+   - If a feature row is removed, remove its slug from other features' Dependencies columns
+   - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
+
+6. **Master PROGRESS sync** — After reconciling the feature-level files:
+   - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
+   - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
+   - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
+   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
+
+Only fix actual discrepancies — if files already agree, make no changes.
 ### Commit Planning File Changes
 
 After completing all updates to `.belmont/` planning files, commit them:
@@ -229,8 +264,8 @@ After completing all updates to `.belmont/` planning files, commit them:
 
 - Say: "Tech plan complete."
 - STOP. Do not continue. Do not implement anything.
-- Final: Prompt user to "/clear" and "/belmont:implement"
-    - If you are Codex, instead prompt: "/new" and then "belmont:implement"
+- Final: Prompt user to "/clear" and "/belmont:implement" (also mention `/belmont:review-plans` is recommended for safety before implementation)
+    - If you are Codex, instead prompt: "/new" and then "belmont:implement" and "belmont:review-plans"
 
 ## Master TECH_PLAN.md Format
 
@@ -243,13 +278,13 @@ Write to `.belmont/TECH_PLAN.md` with this structure:
 [2-3 sentences on the product-level technical vision]
 
 ## Stack & Tooling
-| Category | Choice | Rationale |
-|----------|--------|-----------|
-| Framework | e.g. Next.js 15 | [why] |
-| Package Manager | e.g. pnpm | [why] |
-| Styling | e.g. Tailwind CSS 4 | [why] |
-| Deployment | e.g. Vercel | [why] |
-| Testing | e.g. Vitest + Playwright | [why] |
+| Category        | Choice                   | Rationale |
+|-----------------|--------------------------|-----------|
+| Framework       | e.g. Next.js 15          | [why]     |
+| Package Manager | e.g. pnpm                | [why]     |
+| Styling         | e.g. Tailwind CSS 4      | [why]     |
+| Deployment      | e.g. Vercel              | [why]     |
+| Testing         | e.g. Vitest + Playwright | [why]     |
 
 ## Project Structure
 ```
