@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.2
+
+**Released:** 2026-03-31
+
+### Changes since v0.8.1.1
+
+- Fix auto mode triage/fix-all loop and milestone-scoped verification
+
+
+
 ## v0.8.1.1
 
 **Released:** 2026-03-31
