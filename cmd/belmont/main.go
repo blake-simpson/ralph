@@ -3333,15 +3333,15 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git worktree add: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
-	}
 
-	// Copy .belmont state into worktree (isolated copy, not symlink)
-	if err := copyBelmontStateToWorktree(cfg.Root, wtPath, slug); err != nil {
-		return fmt.Errorf("copy .belmont state to worktree: %w", err)
-	}
+		// Copy .belmont state into worktree (isolated copy, not symlink)
+		if err := copyBelmontStateToWorktree(cfg.Root, wtPath, slug); err != nil {
+			return fmt.Errorf("copy .belmont state to worktree: %w", err)
+		}
 
-	// Commit the initial feature state so the AI agent starts from a clean git state
-	commitWorktreeFeatureState(wtPath, slug)
+		// Commit the initial feature state so the AI agent starts from a clean git state
+		commitWorktreeFeatureState(wtPath, slug)
+	}
 
 	// Copy .env files (gitignored, so not present in fresh worktrees)
 	copyEnvFiles(cfg.Root, wtPath)
