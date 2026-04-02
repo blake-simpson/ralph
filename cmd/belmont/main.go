@@ -2154,6 +2154,10 @@ func ensureStateFiles(projectRoot string) error {
 		return err
 	}
 
+	// Ensure auto-mode artifacts are gitignored
+	ensureGitignoreEntry(projectRoot, ".belmont/auto.json")
+	ensureGitignoreEntry(projectRoot, ".belmont/worktrees/")
+
 	// Create features directory
 	featuresDir := filepath.Join(stateDir, "features")
 	if !dirExists(featuresDir) {
