@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.3
+
+**Released:** 2026-04-02
+
+### Changes since v0.8.2.1
+
+- Fix auto mode resume overwriting worktree progress
+- Ensure auto.json is added to gitignore on install
+
+
+
 ## v0.8.2.1
 
 **Released:** 2026-03-31
