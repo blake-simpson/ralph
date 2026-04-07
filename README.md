@@ -211,6 +211,7 @@ For products with multiple features, Belmont supports a **sub-feature directory 
 - **Master files** persist at the product level — the PR/FAQ, master PRD (feature catalog), and master tech plan (cross-cutting architecture)
 - **Feature directories** contain the detailed planning state for each feature — isolated PRDs, tech plans, progress tracking, and milestone files
 - **Skills prompt for feature selection** — when running any skill, you select or create the feature to work on
+- **Cleanup reduces bloat** — archive completed features into slim summaries, remove stale milestone files, trim notes, and audit convention files
 - **Reset is granular** — reset a single feature, all features, or everything including masters
 
 ---
@@ -286,6 +287,7 @@ go run ./cmd/belmont install --source . --project /tmp/test-project --no-prompt
 | `debug-auto`        | Auto debug loop with agent verification           |
 | `debug-manual`      | Manual debug loop with user verification          |
 | `review-plans`      | Document alignment and drift detection            |
+| `cleanup`           | Archive completed features, reduce token bloat    |
 | `status`            | Read-only progress report                         |
 | `reset`             | Reset state and start fresh                       |
 

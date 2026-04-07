@@ -128,6 +128,19 @@ Reviews alignment between planning documents and the codebase. Detects drift, co
 
 **When to use**: After implementation sessions, before major milestones, or periodically to keep plans aligned with reality.
 
+## `cleanup`
+
+Reduce input token bloat by archiving completed features, removing stale milestone files, trimming notes, and auditing convention files.
+
+- Scans all `.belmont/` state and identifies completed features, archived milestones, stale notes
+- Presents each item individually — user chooses to archive, keep, delete, or skip per item
+- Archives completed features into slim `ARCHIVE.md` summaries (~0.5 KB vs ~5-15 KB original)
+- Audits CLAUDE.md, AGENTS.md, `.cursorrules`, `.windsurfrules` for stale file paths and outdated conventions
+- Checks tool directories (`.claude/`, `.codex/`, `.cursor/`, etc.) for stale copies or broken symlinks
+- Does NOT modify source code or tool directories — only `.belmont/` state and convention files
+
+**When to use**: After completing a batch of features, when context windows feel bloated, or periodically during long-running projects.
+
 ## `reset`
 
 Reset belmont state. In feature mode, choose to reset a specific feature, all features, or everything including masters and PR/FAQ.

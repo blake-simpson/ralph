@@ -32,6 +32,7 @@ Skills become native slash commands:
 /belmont:debug-manual  Manual debug loop (user-verified, faster)
 /belmont:status         View progress
 /belmont:review-plans   Review document alignment and detect drift
+/belmont:cleanup        Archive completed features, reduce token bloat
 /belmont:reset          Reset state and start fresh
 ```
 
@@ -49,7 +50,7 @@ Skills are copied into `.codex/belmont/`, and Belmont adds/updates a small secti
 Skills are installed as rules (`.mdc` files). To use them:
 
 1. Open **Settings > Cursor Settings > Rules**
-2. You'll see the belmont rules listed (product-plan, tech-plan, implement, next, verify, status, reset)
+2. You'll see the belmont rules listed (product-plan, tech-plan, implement, next, verify, status, cleanup, reset)
 3. Enable the one you want to activate
 4. Start a Composer or Agent session -- the rule will be loaded as context
 5. Or reference them directly: *"Follow the belmont implement workflow"*

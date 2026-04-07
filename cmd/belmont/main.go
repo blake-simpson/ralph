@@ -158,6 +158,7 @@ type milestoneLoopState struct {
 	Implemented     bool
 	Verified        bool
 	VerifyFailed    int
+	VerifySucceeded int // how many times verification passed for this milestone
 	WorkType        workType
 	FilesChanged    int
 	FwlupFixRounds  int // how many triage+fix cycles have run for this milestone
@@ -1627,6 +1628,7 @@ func runInstall(args []string) error {
 	fmt.Println("  5. Verify     - Run verification and code review")
 	fmt.Println("  6. Status     - View progress")
 	fmt.Println("  7. Reset      - Reset state and start fresh")
+	fmt.Println("  8. Cleanup    - Archive completed features, reduce token bloat")
 	fmt.Println("")
 
 	// Hint about worktree auto-install if project has a lockfile but no worktree config
@@ -2227,7 +2229,7 @@ func codexAgentsGuidanceSection() string {
 		"- Belmont skills are local markdown files in `.agents/skills/belmont/` (and mirrored in `.codex/belmont/`).",
 		"- If the user says `belmont:<skill>` or \"Use the belmont:<skill> skill\", treat it as a skill reference, not a shell command.",
 		"- Load `.agents/skills/belmont/<skill>.md` first (fallback to `.codex/belmont/<skill>.md`) and follow that workflow.",
-		"- Known Belmont skills: `working-backwards`, `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `debug`, `debug-auto`, `debug-manual`, `status`, `reset`, `note`.",
+		"- Known Belmont skills: `working-backwards`, `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `debug`, `debug-auto`, `debug-manual`, `status`, `reset`, `note`, `review-plans`, `cleanup`.",
 		"- If a requested skill file is missing, list available files in those directories and continue with the closest matching Belmont skill.",
 		codexAgentsGuidanceEnd,
 	}
@@ -3452,6 +3454,18 @@ func runLoop(cfg loopConfig) error {
 	var history []historyEntry
 	var lastOutput string
 
+	// Write auto.json for status visibility when running standalone (not from parallel mode).
+	// In parallel mode, the worktreeTracker manages auto.json separately.
+	var autoCleanup func()
+	if cfg.Port == 0 {
+		autoPath := filepath.Join(cfg.Root, ".belmont", "auto.json")
+		writeLoopAutoJSON(autoPath, cfg)
+		autoCleanup = func() { os.Remove(autoPath) }
+	}
+	if autoCleanup != nil {
+		defer autoCleanup()
+	}
+
 	fmt.Fprintf(os.Stderr, "\033[1mBelmont Auto — %s\033[0m\n", cfg.Feature)
 	fmt.Fprintf(os.Stderr, "\033[2mTool: %s | Policy: %s | Max iterations: %d\033[0m\n", cfg.Tool, cfg.Policy, cfg.MaxIterations)
 	if cfg.From != "" || cfg.To != "" {
@@ -3479,8 +3493,11 @@ func runLoop(cfg loopConfig) error {
 		hasFwlup := detectFwlupTasks(cfg.Root, cfg.Feature, report)
 		currentMsID := lastMilestoneID(history)
 		hasMsFwlup := currentMsID != "" && detectFwlupTasksForMilestone(cfg.Root, cfg.Feature, report, currentMsID)
-		pendingTasks := hasPendingTasks(report)
 		msStates := buildMilestoneLoopStates(history, report.Milestones)
+
+		// Range-scoped signals: only consider tasks/FWLUPs under milestones within --from/--to
+		pendingInRange := pendingTasksInRange(cfg.Root, cfg.Feature, cfg.From, cfg.To)
+		fwlupInRange := fwlupTasksInRange(cfg.Root, cfg.Feature, report, cfg.From, cfg.To)
 
 		// Print state summary
 		printLoopState(report, hasFwlup)
@@ -3490,7 +3507,7 @@ func runLoop(cfg loopConfig) error {
 
 		// 4. If no guardrail triggered, try smart rules first
 		if action == nil {
-			action = decideLoopActionSmart(report, history, cfg, hasFwlup, hasMsFwlup, pendingTasks, msStates)
+			action = decideLoopActionSmart(report, history, cfg, hasFwlup, hasMsFwlup, pendingInRange, fwlupInRange, msStates)
 		}
 
 		// 4b. If smart rules returned nil, check stuck detection before AI
@@ -3503,7 +3520,7 @@ func runLoop(cfg loopConfig) error {
 			aiAction, err := decideLoopActionAI(report, history, cfg, hasFwlup, lastOutput, msStates)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\033[33m  AI decision failed: %s — falling back to rules\033[0m\n", err)
-				decided := decideLoopAction(report, history, cfg, hasFwlup, pendingTasks)
+				decided := decideLoopAction(report, history, cfg, fwlupInRange, pendingInRange)
 				action = &decided
 			} else {
 				action = aiAction
@@ -3900,8 +3917,8 @@ func toolSummary(name string, input map[string]interface{}) string {
 		}
 	case "Bash":
 		if cmd, ok := input["command"].(string); ok {
-			if len(cmd) > 60 {
-				cmd = cmd[:60] + "…"
+			if len(cmd) > 120 {
+				cmd = cmd[:120] + "…"
 			}
 			return name + " " + cmd
 		}
@@ -3915,8 +3932,8 @@ func toolSummary(name string, input map[string]interface{}) string {
 		}
 	case "Agent":
 		if desc, ok := input["description"].(string); ok {
-			if len(desc) > 60 {
-				desc = desc[:60] + "…"
+			if len(desc) > 120 {
+				desc = desc[:120] + "…"
 			}
 			return name + " " + desc
 		}
@@ -4007,8 +4024,12 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	}
 
 	var prefix string
-	if cfg.Port != 0 && cfg.Feature != "" {
-		prefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", cfg.Feature)
+	if cfg.Feature != "" {
+		if action.MilestoneID != "" {
+			prefix = fmt.Sprintf("\033[36m[%s][%s]\033[0m: ", cfg.Feature, action.MilestoneID)
+		} else {
+			prefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", cfg.Feature)
+		}
 	}
 
 	var tw *tailWriter
@@ -4210,7 +4231,11 @@ func buildLoopPrompt(action loopAction, feature string) string {
 	case actionImplementMilestone:
 		return fmt.Sprintf("/belmont:implement --feature %s", feature)
 	case actionImplementNext:
-		return fmt.Sprintf("/belmont:next --feature %s", feature)
+		prompt := fmt.Sprintf("/belmont:next --feature %s", feature)
+		if action.MilestoneID != "" {
+			prompt += fmt.Sprintf("\n\nSCOPE: Only work on tasks within milestone %s. Do NOT implement tasks from other milestones.", action.MilestoneID)
+		}
+		return prompt
 	case actionVerify:
 		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
 		if action.MilestoneID != "" {
@@ -4465,6 +4490,7 @@ func buildMilestoneLoopStates(history []historyEntry, milestones []milestone) ma
 					if h.Result != nil {
 						if h.Result.Success {
 							s.Verified = true
+							s.VerifySucceeded++
 						} else {
 							s.VerifyFailed++
 						}
@@ -4495,7 +4521,8 @@ func lastMilestoneID(history []historyEntry) string {
 
 // decideLoopActionSmart applies deterministic rules for ~80% of cases.
 // Returns nil for ambiguous cases that should fall through to AI.
-func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, hasMsFwlup bool, pendingTasks bool, msStates map[string]*milestoneLoopState) *loopAction {
+// pendingInRange and fwlupInRange are scoped to the --from/--to milestone range.
+func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, hasMsFwlup bool, pendingInRange bool, fwlupInRange bool, msStates map[string]*milestoneLoopState) *loopAction {
 	if len(history) == 0 {
 		// First iteration: implement first undone milestone in range
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
@@ -4504,19 +4531,20 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("First iteration — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
-		// All milestones marked done — but verify against actual task counts
-		if pendingTasks {
-			// State drift: milestones marked ✅ but tasks still pending
+		// All milestones marked done — but verify against actual task counts (range-scoped)
+		if pendingInRange {
+			// State drift: milestones marked ✅ but tasks still pending within range
 			lastMS := inRange[len(inRange)-1]
-			if hasFwlup {
-				return &loopAction{Type: actionFixAll, Reason: fmt.Sprintf("State drift: %s marked complete but FWLUP tasks pending — fixing", lastMS.ID)}
+			if fwlupInRange {
+				return &loopAction{Type: actionFixAll, Reason: fmt.Sprintf("State drift: %s marked complete but FWLUP tasks pending — fixing", lastMS.ID), MilestoneID: lastMS.ID}
 			}
 			return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("State drift: %s marked complete but tasks still pending — reimplementing", lastMS.ID), MilestoneID: lastMS.ID}
 		}
-		if !hasFwlup {
-			return &loopAction{Type: actionComplete, Reason: "All milestones already complete"}
+		if !fwlupInRange {
+			return &loopAction{Type: actionComplete, Reason: "All milestones in range already complete"}
 		}
-		return &loopAction{Type: actionImplementNext, Reason: "All milestones done but follow-up tasks remain"}
+		msID := lastMilestoneID(history)
+		return &loopAction{Type: actionImplementNext, Reason: "All milestones done but follow-up tasks remain in range", MilestoneID: msID}
 	}
 
 	last := history[len(history)-1]
@@ -4529,7 +4557,8 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		fc := last.FilesChanged
 		// Skip verify only for: 0 files changed, pure docs, or non-critical config ≤2 files
 		if fc == 0 {
-			return &loopAction{Type: actionImplementNext, Reason: "No files changed — skipping verification"}
+			msID := last.Action.MilestoneID
+			return &loopAction{Type: actionImplementNext, Reason: "No files changed — skipping verification", MilestoneID: msID}
 		}
 		if wt == workDocs {
 			// Docs-only: skip verification, move to next milestone
@@ -4539,13 +4568,15 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Docs-only milestone — moving to %s", m.ID), MilestoneID: m.ID}
 				}
 			}
-			if pendingTasks {
-				return &loopAction{Type: actionImplementNext, Reason: "Docs-only done but tasks still pending"}
+			if pendingInRange {
+				msID := last.Action.MilestoneID
+				return &loopAction{Type: actionImplementNext, Reason: "Docs-only done but tasks still pending in range", MilestoneID: msID}
 			}
-			if !hasFwlup {
-				return &loopAction{Type: actionComplete, Reason: "All milestones complete (last was docs-only)"}
+			if !fwlupInRange {
+				return &loopAction{Type: actionComplete, Reason: "All milestones in range complete (last was docs-only)"}
 			}
-			return &loopAction{Type: actionImplementNext, Reason: "Docs-only milestone done, fixing follow-ups"}
+			msID := last.Action.MilestoneID
+			return &loopAction{Type: actionImplementNext, Reason: "Docs-only milestone done, fixing follow-ups in range", MilestoneID: msID}
 		}
 		// Everything else: verify
 		return &loopAction{Type: actionVerify, Reason: "Verifying completed milestone", MilestoneID: last.Action.MilestoneID}
@@ -4559,14 +4590,12 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Verification passed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
-		if pendingTasks {
-			return &loopAction{Type: actionImplementNext, Reason: "All milestones marked done but tasks still pending after verification"}
+		if pendingInRange {
+			msID := lastMilestoneID(history)
+			return &loopAction{Type: actionImplementNext, Reason: "All milestones marked done but tasks still pending in range after verification", MilestoneID: msID}
 		}
-		// If this was a milestone-scoped verify, do a full-feature verify before completing
-		if last.Action.MilestoneID != "" {
-			return &loopAction{Type: actionVerify, Reason: "Final full-feature verification before completion"}
-		}
-		return &loopAction{Type: actionComplete, Reason: "All milestones verified and complete"}
+		// All in-range milestones done and verified — complete
+		return &loopAction{Type: actionComplete, Reason: "All milestones in range verified and complete"}
 	}
 
 	// Rule 3: After VERIFY success + follow-ups exist in this milestone → TRIAGE (AI reads the actual FWLUPs)
@@ -4587,10 +4616,11 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Triage deferred polish items — implementing %s", m.ID), MilestoneID: m.ID}
 				}
 			}
-			if pendingTasks {
-				return &loopAction{Type: actionImplementNext, Reason: "Triage deferred polish but tasks still pending"}
+			if pendingInRange {
+				msID := lastMilestoneID(history)
+				return &loopAction{Type: actionImplementNext, Reason: "Triage deferred polish but tasks still pending in range", MilestoneID: msID}
 			}
-			return &loopAction{Type: actionComplete, Reason: "All milestones complete (remaining items deferred as polish)"}
+			return &loopAction{Type: actionComplete, Reason: "All milestones in range complete (remaining items deferred as polish)"}
 		case "fix_and_proceed":
 			return &loopAction{Type: actionFixAll, Reason: "Fixing all blocking follow-ups (will skip re-verification)", TriageDecision: "fix_and_proceed", MilestoneID: last.Action.MilestoneID}
 		case "fix_and_reverify":
@@ -4618,19 +4648,37 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Follow-ups fixed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
-		if pendingTasks {
-			return &loopAction{Type: actionImplementNext, Reason: "Follow-ups fixed but tasks still pending"}
+		if pendingInRange {
+			msID := lastMilestoneID(history)
+			return &loopAction{Type: actionImplementNext, Reason: "Follow-ups fixed but tasks still pending in range", MilestoneID: msID}
 		}
-		if !hasFwlup {
-			return &loopAction{Type: actionComplete, Reason: "All milestones complete after follow-up fixes"}
+		if !fwlupInRange {
+			return &loopAction{Type: actionComplete, Reason: "All milestones in range complete after follow-up fixes"}
 		}
-		return &loopAction{Type: actionTriage, Reason: "Follow-ups remain after fix-all — re-triaging"}
+		return &loopAction{Type: actionTriage, Reason: "Follow-ups remain in range after fix-all — re-triaging"}
 	}
 
-	// Rule 4: After IMPLEMENT_NEXT success → VERIFY (re-verify) — kept for non-auto invocations
+	// Rule 4: After IMPLEMENT_NEXT success → verify only if milestone hasn't been verified yet
 	if lastType == actionImplementNext && lastSuccess {
 		msID := lastMilestoneID(history)
-		return &loopAction{Type: actionVerify, Reason: "Re-verifying after follow-up fix", MilestoneID: msID}
+		// If this milestone already had a clean verify pass, skip re-verification
+		if msID != "" {
+			if s, ok := msStates[msID]; ok && s.VerifySucceeded >= 1 {
+				// Move to next undone milestone or complete
+				inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
+				for _, m := range inRange {
+					if !m.Done {
+						return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Milestone %s already verified — moving to %s", msID, m.ID), MilestoneID: m.ID}
+					}
+				}
+				if !pendingInRange && !fwlupInRange {
+					return &loopAction{Type: actionComplete, Reason: "All milestones in range complete (already verified)"}
+				}
+				// Still pending in range — continue fixing within scope
+				return &loopAction{Type: actionImplementNext, Reason: "Fixing remaining in-range tasks", MilestoneID: msID}
+			}
+		}
+		return &loopAction{Type: actionVerify, Reason: "Verifying after follow-up fix", MilestoneID: msID}
 	}
 
 	// Rule 5: After VERIFY failure — check verify failure count
@@ -4655,8 +4703,8 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			// Delegate to AI for REPLAN/DEBUG decision
 			return nil
 		}
-		// First failure: try fixing
-		return &loopAction{Type: actionImplementNext, Reason: "Verification failed — fixing issues"}
+		// First failure: try fixing (scoped to the target milestone)
+		return &loopAction{Type: actionImplementNext, Reason: "Verification failed — fixing issues", MilestoneID: targetMS}
 	}
 
 	// Rule 6: After DEBUG success → VERIFY
@@ -4664,7 +4712,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		return &loopAction{Type: actionVerify, Reason: "Re-verifying after debug"}
 	}
 
-	// Rule 7: All milestones done + verified + no follow-ups → COMPLETE
+	// Rule 7: All milestones done + verified + no follow-ups in range → COMPLETE
 	inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 	allDone := true
 	allVerified := true
@@ -4674,30 +4722,33 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			break
 		}
 		if s, ok := msStates[m.ID]; ok {
-			if !s.Verified {
+			if s.VerifySucceeded == 0 {
 				allVerified = false
 			}
 		}
 	}
-	if allDone && allVerified && !hasFwlup && !pendingTasks {
-		// If the last verify was milestone-scoped, do a full-feature verify before completing
-		if lastType == actionVerify && lastSuccess && last.Action.MilestoneID != "" {
-			return &loopAction{Type: actionVerify, Reason: "Final full-feature verification before completion"}
+	if allDone && allVerified && !fwlupInRange && !pendingInRange {
+		return &loopAction{Type: actionComplete, Reason: "All milestones in range implemented, verified, and no follow-ups"}
+	}
+	if allDone && allVerified && !fwlupInRange && pendingInRange {
+		msID := lastMilestoneID(history)
+		return &loopAction{Type: actionImplementNext, Reason: "All milestones in range marked done and verified but tasks still pending", MilestoneID: msID}
+	}
+
+	// Rule 8: All done but not all verified → VERIFY (only milestones never successfully verified)
+	if allDone && !allVerified && !fwlupInRange {
+		for _, m := range inRange {
+			if s, ok := msStates[m.ID]; ok && s.VerifySucceeded == 0 {
+				return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Verifying %s (not yet verified)", m.ID), MilestoneID: m.ID}
+			}
 		}
-		return &loopAction{Type: actionComplete, Reason: "All milestones implemented, verified, and no follow-ups"}
-	}
-	if allDone && allVerified && !hasFwlup && pendingTasks {
-		return &loopAction{Type: actionImplementNext, Reason: "All milestones marked done and verified but tasks still pending"}
+		// All have been verified at least once — complete
+		return &loopAction{Type: actionComplete, Reason: "All milestones in range verified at least once"}
 	}
 
-	// Rule 8: All done but not all verified → VERIFY
-	if allDone && !allVerified && !hasFwlup {
-		return &loopAction{Type: actionVerify, Reason: "All milestones done but not all verified"}
-	}
-
-	// Rule 9: All done but follow-ups remain → TRIAGE
-	if allDone && hasFwlup {
-		return &loopAction{Type: actionTriage, Reason: "Triaging remaining follow-up tasks"}
+	// Rule 9: All done but follow-ups remain in range → TRIAGE
+	if allDone && fwlupInRange {
+		return &loopAction{Type: actionTriage, Reason: "Triaging remaining follow-up tasks in range"}
 	}
 
 	// Rule 10: Next undone milestone
@@ -4739,8 +4790,9 @@ func decideLoopActionAI(report statusReport, history []historyEntry, cfg loopCon
 		Done           bool   `json:"done"`
 		Implemented    bool   `json:"implemented"`
 		Verified       bool   `json:"verified"`
-		VerifyFailures int    `json:"verify_failures,omitempty"`
-		WorkType       string `json:"work_type,omitempty"`
+		VerifyFailures  int    `json:"verify_failures,omitempty"`
+		VerifySuccesses int    `json:"verify_successes,omitempty"`
+		WorkType        string `json:"work_type,omitempty"`
 		FilesChanged   int    `json:"files_changed,omitempty"`
 	}
 	var milestones []msStateJSON
@@ -4750,6 +4802,7 @@ func decideLoopActionAI(report statusReport, history []historyEntry, cfg loopCon
 			ms.Implemented = s.Implemented
 			ms.Verified = s.Verified
 			ms.VerifyFailures = s.VerifyFailed
+			ms.VerifySuccesses = s.VerifySucceeded
 			ms.WorkType = string(s.WorkType)
 			ms.FilesChanged = s.FilesChanged
 		}
@@ -5092,6 +5145,71 @@ func detectFwlupTasksForMilestone(root, feature string, report statusReport, mil
 func hasPendingTasks(report statusReport) bool {
 	for _, t := range report.Tasks {
 		if t.Status == taskPending || t.Status == taskInProgress {
+			return true
+		}
+	}
+	return false
+}
+
+// pendingTasksInRange checks for unchecked task checkboxes under milestones
+// that fall within the from/to range in the feature's PROGRESS.md.
+// When from and to are both empty, falls back to checking all milestones.
+func pendingTasksInRange(root, feature, from, to string) bool {
+	progressPath := filepath.Join(root, ".belmont", "features", feature, "PROGRESS.md")
+	data, err := os.ReadFile(progressPath)
+	if err != nil {
+		return false
+	}
+
+	fromNum := parseMilestoneNum(from)
+	toNum := parseMilestoneNum(to)
+
+	lines := strings.Split(string(data), "\n")
+	msRe := regexp.MustCompile(`(?i)^###\s+[✅⬜🔄🚫]?\s*M(\d+):`)
+	taskRe := regexp.MustCompile(`^\s*-\s+\[ \]`)
+
+	inRange := fromNum < 0 && toNum < 0 // if no range, all milestones are in range
+	for _, line := range lines {
+		if m := msRe.FindStringSubmatch(line); len(m) >= 2 {
+			num, _ := strconv.Atoi(m[1])
+			inRange = (fromNum < 0 || num >= fromNum) && (toNum < 0 || num <= toNum)
+			continue
+		}
+		if inRange && taskRe.MatchString(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// fwlupTasksInRange checks for unchecked FWLUP tasks under milestones within the from/to range.
+// When from and to are both empty, falls back to the global detectFwlupTasks.
+func fwlupTasksInRange(root, feature string, report statusReport, from, to string) bool {
+	if from == "" && to == "" {
+		return detectFwlupTasks(root, feature, report)
+	}
+
+	progressPath := filepath.Join(root, ".belmont", "features", feature, "PROGRESS.md")
+	data, err := os.ReadFile(progressPath)
+	if err != nil {
+		return false
+	}
+
+	fromNum := parseMilestoneNum(from)
+	toNum := parseMilestoneNum(to)
+
+	lines := strings.Split(string(data), "\n")
+	msRe := regexp.MustCompile(`(?i)^###\s+[✅⬜🔄🚫]?\s*M(\d+):`)
+	fwlupTaskRe := regexp.MustCompile(`(?i)^\s*-\s+\[ \].*FWLUP`)
+
+	inRange := false
+	for _, line := range lines {
+		if m := msRe.FindStringSubmatch(line); len(m) >= 2 {
+			num, _ := strconv.Atoi(m[1])
+			inRange = (fromNum < 0 || num >= fromNum) && (toNum < 0 || num <= toNum)
+			continue
+		}
+		if inRange && fwlupTaskRe.MatchString(line) {
 			return true
 		}
 	}
@@ -5441,6 +5559,10 @@ type worktreeTracker struct {
 type autoJSON struct {
 	Active    bool                       `json:"active"`
 	Started   string                     `json:"started"`
+	Mode      string                     `json:"mode,omitempty"`    // "single-feature" or "parallel" or "multi-feature"
+	Feature   string                     `json:"feature,omitempty"` // active feature slug (single-feature mode)
+	From      string                     `json:"from,omitempty"`    // milestone range start
+	To        string                     `json:"to,omitempty"`      // milestone range end
 	Worktrees map[string]autoJSONEntry   `json:"worktrees"`
 }
 
@@ -5500,6 +5622,25 @@ func (wt *worktreeTracker) persistAutoJSON() {
 		return
 	}
 	autoPath := filepath.Join(wt.root, ".belmont", "auto.json")
+	os.WriteFile(autoPath, data, 0644) // best-effort
+}
+
+// writeLoopAutoJSON writes a minimal auto.json for single-feature runLoop mode,
+// enabling belmont status to show what's being worked on.
+func writeLoopAutoJSON(autoPath string, cfg loopConfig) {
+	aj := autoJSON{
+		Active:    true,
+		Started:   time.Now().UTC().Format(time.RFC3339),
+		Mode:      "single-feature",
+		Feature:   cfg.Feature,
+		From:      cfg.From,
+		To:        cfg.To,
+		Worktrees: make(map[string]autoJSONEntry),
+	}
+	data, err := json.MarshalIndent(aj, "", "  ")
+	if err != nil {
+		return
+	}
 	os.WriteFile(autoPath, data, 0644) // best-effort
 }
 

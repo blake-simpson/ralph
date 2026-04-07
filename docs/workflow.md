@@ -158,7 +158,24 @@ After implementing a milestone:
 - Run `/belmont:status` to check progress
 - Continue until all milestones are complete
 
-## 10. Start Fresh
+## 10. Cleanup
+
+When your project has accumulated completed features and stale state:
+
+```
+Claude Code:  /belmont:cleanup
+Cursor:       Enable the belmont cleanup rule, then: "Clean up completed features"
+Other:        Load skills/belmont/cleanup.md as context
+```
+
+**What happens:**
+- Scans all state files and identifies completed features, archived milestones, stale notes
+- Presents each item individually — you choose to archive, keep, delete, or skip
+- Archives completed features into slim summaries, removes milestone archives, trims notes
+- Audits CLAUDE.md and AGENTS.md for stale file paths and outdated conventions
+- Checks tool directories for stale copies or broken symlinks
+
+## 11. Start Fresh
 
 When you're done with a feature and want to plan something new:
 

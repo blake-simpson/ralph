@@ -262,6 +262,7 @@ Suggested next steps:
 - /belmont:tech-plan to update tech plans
 - /belmont:implement to address follow-up tasks
 - /belmont:next to quickly fix individual review tasks
+- /belmont:cleanup to archive completed features and reduce token bloat
 ```
 
 ### Reconcile State Files

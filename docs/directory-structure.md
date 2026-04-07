@@ -25,6 +25,7 @@ belmont/
 │       ├── debug-manual.md     # Manual debug loop (generated)
 │       ├── status.md            # Status skill
 │       ├── review-plans.md      # Alignment review skill
+│       ├── cleanup.md           # Archive completed features, reduce bloat
 │       └── reset.md             # Reset state skill
 ├── agents/
 │   └── belmont/
@@ -73,6 +74,7 @@ your-project/
 │           ├── debug-manual.md
 │           ├── status.md
 │           ├── review-plans.md
+│           ├── cleanup.md
 │           └── reset.md
 ├── .belmont/                    # Planning & state (commit to share with team)
 │   ├── PR_FAQ.md
