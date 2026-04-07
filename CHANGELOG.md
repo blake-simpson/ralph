@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.4
+
+**Released:** 2026-04-07
+
+### Changes since v0.8.3
+
+- Improvements to workflow: Cleanup skill, Five Whys method, fixes for "single-feature" auto mode
+
+
+
 ## v0.8.3
 
 **Released:** 2026-04-02
