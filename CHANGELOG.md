@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.5
+
+**Released:** 2026-04-08
+
+### Changes since v0.8.4
+
+- Add `belmont reverify` command and `auto --reverify` mode
+- Strengthen rules around Playwright MCP usage
+
+
+
 ## v0.8.4
 
 **Released:** 2026-04-07
