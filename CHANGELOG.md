@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.5.2
+
+**Released:** 2026-04-08
+
+### Changes since v0.8.5.1
+
+- Fix recover --clean slug in interrupt preservation message
+
+
+
 ## v0.8.5.1
 
 **Released:** 2026-04-08
