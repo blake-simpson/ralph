@@ -2790,8 +2790,19 @@ func runAutoCmd(args []string) error {
 			}
 			fmt.Fprintf(os.Stderr, "\033[1mReverify mode\033[0m: queued %d milestone(s) for re-verification\n", count)
 		} else {
-			fmt.Fprintln(os.Stderr, "Reverify mode: no completed milestones in range to re-verify")
-			return nil
+			// Check if milestones are already ⬜ (e.g. user ran `belmont reverify` first)
+			hasPending := false
+			for _, m := range inRange {
+				if !m.Done {
+					hasPending = true
+					break
+				}
+			}
+			if !hasPending {
+				fmt.Fprintln(os.Stderr, "Reverify mode: no completed or pending milestones in range to re-verify")
+				return nil
+			}
+			fmt.Fprintf(os.Stderr, "\033[1mReverify mode\033[0m: milestones already queued for re-verification\n")
 		}
 	}
 
