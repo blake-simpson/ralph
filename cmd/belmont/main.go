@@ -5776,9 +5776,10 @@ func (wt *worktreeTracker) gracefulShutdown(root string) {
 			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env)
 		}
 		// Preserve worktree and branch for resume
+		recoverSlug := filepath.Base(entry.Path)
 		fmt.Fprintf(os.Stderr, "  Worktree preserved for %s at %s\n", id, entry.Path)
 		fmt.Fprintf(os.Stderr, "    Resume with: belmont auto (will prompt to resume)\n")
-		fmt.Fprintf(os.Stderr, "    Or clean up: belmont recover --clean %s\n", id)
+		fmt.Fprintf(os.Stderr, "    Or clean up: belmont recover --clean %s\n", recoverSlug)
 	}
 	wt.entries = make(map[string]worktreeEntry)
 }
