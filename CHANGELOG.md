@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.5.1
+
+**Released:** 2026-04-08
+
+### Changes since v0.8.5
+
+- Fix auto --reverify exiting early when milestones already flipped
+
+
+
 ## v0.8.5
 
 **Released:** 2026-04-08
