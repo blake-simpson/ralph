@@ -183,6 +183,7 @@ type loopConfig struct {
 	MaxFailures   int
 	MaxParallel   int
 	DryRun        bool
+	Reverify      bool               // reverify mode: send milestones to VERIFY instead of IMPLEMENT
 	Port          int                // assigned port for worktree isolation (0 = not in worktree)
 	WorktreeEnv   map[string]string  // extra env vars from worktree.json
 	Tracker       *worktreeTracker   // process group tracker for cleanup on interrupt
@@ -371,6 +372,8 @@ func main() {
 		must(runUpdate(os.Args[2:]))
 	case "recover":
 		must(runRecover(os.Args[2:]))
+	case "reverify":
+		must(runReverifyCmd(os.Args[2:]))
 	case "sync":
 		must(runSyncCmd(os.Args[2:]))
 	case "version":
@@ -394,6 +397,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json]")
 	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--root PATH]")
 	fmt.Fprintln(w, "    (alias: belmont loop)")
+	fmt.Fprintln(w, "  belmont reverify [--feature SLUG] [--from M1] [--to M5] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont sync [--root PATH]")
 	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont version")
@@ -2678,6 +2682,7 @@ func runAutoCmd(args []string) error {
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
 	fs.IntVar(&cfg.MaxParallel, "max-parallel", 5, "max concurrent goroutines for parallel execution")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "show execution plan without running")
+	fs.BoolVar(&cfg.Reverify, "reverify", false, "re-verify completed milestones instead of implementing")
 	fs.StringVar(&cfg.Root, "root", ".", "project root")
 
 	if err := fs.Parse(args); err != nil {
@@ -2753,6 +2758,42 @@ func runAutoCmd(args []string) error {
 	}
 	milestones := parseMilestones(string(progressContent))
 	inRange := milestonesInRange(milestones, cfg.From, cfg.To)
+
+	// Reverify mode: flip completed milestones in range back to pending
+	if cfg.Reverify {
+		modified := false
+		content := string(progressContent)
+		for _, m := range inRange {
+			if m.Done {
+				// Replace ✅ with ⬜ for this milestone heading
+				old := "### ✅ " + m.ID + ":"
+				new := "### ⬜ " + m.ID + ":"
+				if strings.Contains(content, old) {
+					content = strings.Replace(content, old, new, 1)
+					modified = true
+				}
+			}
+		}
+		if modified {
+			if err := os.WriteFile(progressPath, []byte(content), 0644); err != nil {
+				return fmt.Errorf("auto --reverify: failed to update PROGRESS.md: %w", err)
+			}
+			// Re-read milestones after modification
+			milestones = parseMilestones(content)
+			inRange = milestonesInRange(milestones, cfg.From, cfg.To)
+			// Count how many were flipped
+			count := 0
+			for _, m := range inRange {
+				if !m.Done {
+					count++
+				}
+			}
+			fmt.Fprintf(os.Stderr, "\033[1mReverify mode\033[0m: queued %d milestone(s) for re-verification\n", count)
+		} else {
+			fmt.Fprintln(os.Stderr, "Reverify mode: no completed milestones in range to re-verify")
+			return nil
+		}
+	}
 
 	// Interactive milestone selection when stdin is a terminal and no --from/--to
 	if cfg.From == "" && cfg.To == "" && isTerminal(os.Stdin) {
@@ -4524,10 +4565,13 @@ func lastMilestoneID(history []historyEntry) string {
 // pendingInRange and fwlupInRange are scoped to the --from/--to milestone range.
 func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, hasMsFwlup bool, pendingInRange bool, fwlupInRange bool, msStates map[string]*milestoneLoopState) *loopAction {
 	if len(history) == 0 {
-		// First iteration: implement first undone milestone in range
+		// First iteration: implement (or re-verify) first undone milestone in range
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
+				if cfg.Reverify {
+					return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("First iteration — re-verifying %s", m.ID), MilestoneID: m.ID}
+				}
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("First iteration — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4587,6 +4631,9 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
+				if cfg.Reverify {
+					return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Verification passed — re-verifying %s", m.ID), MilestoneID: m.ID}
+				}
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Verification passed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4613,6 +4660,9 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 			for _, m := range inRange {
 				if !m.Done {
+					if cfg.Reverify {
+						return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Triage deferred polish items — re-verifying %s", m.ID), MilestoneID: m.ID}
+					}
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Triage deferred polish items — implementing %s", m.ID), MilestoneID: m.ID}
 				}
 			}
@@ -4645,6 +4695,9 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
+				if cfg.Reverify {
+					return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Follow-ups fixed — re-verifying %s", m.ID), MilestoneID: m.ID}
+				}
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Follow-ups fixed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -7301,6 +7354,108 @@ func detectWorktreeBranch(wtPath string) string {
 
 // runSyncCmd handles the "belmont sync" command.
 // Syncs master .belmont/PROGRESS.md with computed feature-level states.
+func runReverifyCmd(args []string) error {
+	fs := flag.NewFlagSet("reverify", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var root, feature, from, to, format string
+	fs.StringVar(&root, "root", ".", "project root")
+	fs.StringVar(&feature, "feature", "", "feature slug")
+	fs.StringVar(&from, "from", "", "start milestone (e.g. M3)")
+	fs.StringVar(&to, "to", "", "end milestone (e.g. M10)")
+	fs.StringVar(&format, "format", "text", "output format (text|json)")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("reverify: %w", err)
+	}
+	root, _ = filepath.Abs(root)
+
+	// Resolve feature — auto-detect if only one exists
+	featuresDir := filepath.Join(root, ".belmont", "features")
+	if feature == "" {
+		entries, err := os.ReadDir(featuresDir)
+		if err != nil {
+			return fmt.Errorf("reverify: no features directory at %s", featuresDir)
+		}
+		var dirs []string
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, e.Name())
+			}
+		}
+		if len(dirs) == 0 {
+			return fmt.Errorf("reverify: no features found")
+		}
+		if len(dirs) > 1 {
+			return fmt.Errorf("reverify: multiple features found, use --feature to specify one: %s", strings.Join(dirs, ", "))
+		}
+		feature = dirs[0]
+	}
+
+	progressPath := filepath.Join(featuresDir, feature, "PROGRESS.md")
+	progressContent, err := os.ReadFile(progressPath)
+	if err != nil {
+		return fmt.Errorf("reverify: cannot read %s: %w", progressPath, err)
+	}
+
+	milestones := parseMilestones(string(progressContent))
+	inRange := milestonesInRange(milestones, from, to)
+
+	// Find completed milestones to flip
+	var targets []milestone
+	for _, m := range inRange {
+		if m.Done {
+			targets = append(targets, m)
+		}
+	}
+
+	if len(targets) == 0 {
+		if format == "json" {
+			fmt.Println(`{"queued":0,"milestones":[]}`)
+		} else {
+			fmt.Fprintln(os.Stderr, "No completed milestones to re-verify in the specified range.")
+		}
+		return nil
+	}
+
+	// Flip ✅ → ⬜ in PROGRESS.md
+	content := string(progressContent)
+	for _, m := range targets {
+		old := "### ✅ " + m.ID + ":"
+		new := "### ⬜ " + m.ID + ":"
+		content = strings.Replace(content, old, new, 1)
+	}
+	if err := os.WriteFile(progressPath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("reverify: failed to write %s: %w", progressPath, err)
+	}
+
+	// Output
+	if format == "json" {
+		ids := make([]string, len(targets))
+		for i, m := range targets {
+			ids[i] = m.ID
+		}
+		fmt.Printf(`{"queued":%d,"milestones":[%s],"feature":%q}`+"\n",
+			len(targets),
+			`"`+strings.Join(ids, `","`)+`"`,
+			feature)
+	} else {
+		ids := make([]string, len(targets))
+		for i, m := range targets {
+			ids[i] = m.ID
+		}
+		fmt.Fprintf(os.Stderr, "Queued %d milestone(s) for re-verification: %s\n", len(targets), strings.Join(ids, ", "))
+		fmt.Fprintf(os.Stderr, "\nRun: belmont auto --feature %s --reverify", feature)
+		if from != "" {
+			fmt.Fprintf(os.Stderr, " --from %s", from)
+		}
+		if to != "" {
+			fmt.Fprintf(os.Stderr, " --to %s", to)
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+
+	return nil
+}
+
 func runSyncCmd(args []string) error {
 	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

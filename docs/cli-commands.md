@@ -17,6 +17,9 @@ belmont auto --feature auth --from M2 --to M4  # Milestone range
 belmont auto --features auth,payments    # Run multiple features in parallel
 belmont auto --all                       # Run all pending features in parallel
 belmont auto --all --max-parallel 2      # Cap concurrent features
+belmont reverify --feature my-feature     # Queue all completed milestones for re-verification
+belmont reverify --feature my-feature --from M3 --to M10  # Queue specific range
+belmont auto --feature my-feature --reverify  # Run auto in reverify mode (VERIFY instead of IMPLEMENT)
 belmont sync                             # Sync master PROGRESS.md with feature states (explicit only, no longer auto-hooked)
 belmont recover                          # List preserved worktrees from failed merges
 belmont recover --list                   # Same as above

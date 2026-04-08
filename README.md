@@ -339,6 +339,11 @@ belmont auto --feature my-feature --policy milestone
 # Cap concurrent features or milestones
 belmont auto --all --max-parallel 2
 
+# Re-verify completed milestones (e.g. after upgrading agents)
+belmont reverify --feature my-feature
+belmont reverify --feature my-feature --from M3 --to M10
+belmont auto --feature my-feature --reverify
+
 # Sync master PROGRESS.md with actual feature states
 belmont sync
 ```
