@@ -215,7 +215,9 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 > Read `{base}/TECH_PLAN.md` for technical specifications (if it exists).
 > Check for archived MILESTONE files (`{base}/MILESTONE-*.done.md`) for implementation context.
 >
-> Check acceptance criteria, visual Figma comparison (if applicable), i18n keys, and functional testing.
+> Check acceptance criteria, visual Figma comparison, i18n keys, and functional testing.
+>
+> **Visual Verification**: For any task with visual output, you MUST use Playwright MCP to verify the implementation — start the project's preview tool, navigate to the relevant UI, take screenshots, and compare against Figma designs. Do NOT silently skip this step.
 >
 > Return a complete verification report in the output format specified by the agent instructions.
 

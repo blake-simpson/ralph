@@ -49,12 +49,16 @@ For each acceptance criterion from the PRD:
 
 ### Phase 2: Visual Verification (if UI task)
 
-If the task involved UI changes, you MUST:
+If the task involved UI changes (pages, components, layouts, styles, design tokens, or any visual output), you MUST perform visual verification:
 
 1. **Load Figma Design** - Get the reference design
-2. **Start Dev Server** - Run the application. If `$BELMONT_PORT` is set, pass it as the port flag (e.g., `--port $BELMONT_PORT`, `-p $BELMONT_PORT`). Otherwise use the project's default port.
-3. **Use Playwright** - You MUST attempt to use the playwright MCP (if installed) to navigate to the implemented UI
-4. **Screenshot Comparison** - Compare against Figma (you will clean these up in Phase 6)
+2. **Start the project's preview tool** - You need a running application to navigate to:
+   - Check `package.json` scripts (or equivalent) for the project's dev server or component preview tool (e.g., `dev`, `storybook`, `start`)
+   - For component-only tasks (no full page), prefer a component preview tool if available (e.g., Storybook) — it renders components in isolation
+   - If `$BELMONT_PORT` is set, pass it as the port flag (e.g., `--port $BELMONT_PORT`, `-p $BELMONT_PORT`). Otherwise use the project's default port.
+   - Wait for the server to be ready before proceeding
+3. **Use Playwright MCP** - Navigate to the implemented UI using `mcp__playwright__browser_navigate`. This is NOT optional — you MUST attempt it. If the Playwright MCP tools fail or are unavailable, document the failure explicitly in your report (do NOT silently skip).
+4. **Screenshot Comparison** - Take screenshots with `mcp__playwright__browser_take_screenshot` and compare against Figma reference screenshots (you will clean these up in Phase 6)
 5. **Check Pixel Accuracy**:
    - Colors match exactly
    - Spacing matches

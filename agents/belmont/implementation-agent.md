@@ -148,17 +148,19 @@ For each acceptance criterion listed in this task's definition (from the MILESTO
 - **Document pass/fail** for each criterion.
 - If any criterion fails, fix immediately and re-run Step 3 (typecheck/lint/test).
 
-**2. Visual Validation (UI tasks only)**
+**2. Visual Validation**
 
-Skip this section entirely for backend, utility, API, infrastructure, or non-visual tasks.
+Skip this section for tasks with zero visual output (CLI tools, API routes, database migrations, config files, build scripts, pure backend logic).
 
-If this task creates or modifies user-facing components:
-1. Start the dev server if not already running. Respect `$BELMONT_PORT` / `$PORT` if set.
-2. Use Playwright MCP (`mcp__playwright__browser_navigate`) to open the relevant page or Storybook story.
-3. Take a screenshot (`mcp__playwright__browser_take_screenshot`).
+If this task creates or modifies anything visual (pages, components, layouts, styles, design tokens):
+1. **Start the project's preview tool** if not already running. Check `package.json` scripts (or equivalent) for the dev server or component preview tool. For component-only tasks, prefer a component preview tool if available (e.g., Storybook). Respect `$BELMONT_PORT` / `$PORT` if set. Wait for it to be ready.
+2. **Navigate with Playwright MCP** (`mcp__playwright__browser_navigate`) to the relevant page or component story.
+3. **Take a screenshot** (`mcp__playwright__browser_take_screenshot`).
 4. If Figma design context exists in the MILESTONE file's `## Design Specifications`, get the reference screenshot (`mcp__plugin_figma_figma__get_screenshot`) and compare: colors, spacing, typography, layout, component states.
 5. Fix any visual discrepancies, then re-run Step 3.
 6. Clean up any screenshot files created during validation.
+
+If Playwright MCP is unavailable (tools not found or connection fails), document this in the Implementation Log as "Visual validation skipped: Playwright MCP unavailable" — do NOT silently skip.
 
 **3. Self-Validation Gate**
 
