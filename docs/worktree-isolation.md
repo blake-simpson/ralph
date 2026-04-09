@@ -60,9 +60,11 @@ These are automatically set for every worktree:
 
 | Variable | Description |
 |----------|-------------|
-| `PORT` | A unique free port assigned to this worktree. Most frameworks (Next.js, Vite, Express, Rails, Django) respect this automatically. |
+| `PORT` | A unique free port assigned to this worktree for the **primary dev server**. Most frameworks (Next.js, Vite, Express, Rails, Django) respect this automatically. |
 | `BELMONT_PORT` | Same value as `PORT`. Use this in skills/agents for explicit port references. |
 | `BELMONT_WORKTREE` | Set to `1` when running in a worktree. Use to detect worktree context. |
+
+**Additional servers** (Storybook, Prisma Studio, etc.) should NOT use `PORT`/`BELMONT_PORT`. Instead, AI agents are instructed to dynamically find a free port at runtime for any non-primary server. This avoids port conflicts between parallel worktrees without requiring additional configuration.
 
 ## Worktree Hooks
 
@@ -189,7 +191,7 @@ Create `.belmont/worktree.json` in your project to configure lifecycle hooks:
 
 ### Port Conflicts
 
-Handled automatically. Each worktree gets a unique `PORT` from the OS. Most web frameworks respect the `PORT` environment variable by default. The AI agents are also instructed to use `$PORT` when starting dev servers.
+Handled automatically. Each worktree gets a unique `PORT` from the OS for the primary dev server. Most web frameworks respect the `PORT` environment variable by default. For additional servers (Storybook, Prisma Studio, documentation tools, etc.), AI agents dynamically allocate free ports at runtime — they never use hardcoded ports from `package.json` scripts, preventing conflicts between parallel worktrees.
 
 ### Dependency Isolation
 

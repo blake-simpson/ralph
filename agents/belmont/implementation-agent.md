@@ -109,7 +109,11 @@ Execute in this order:
 
 #### Step 3: Verification
 
-**Port awareness**: If `$BELMONT_PORT` is set (worktree mode), use it when starting dev servers or running commands that need a port (e.g., `next dev -p $BELMONT_PORT`, `vite --port $BELMONT_PORT`). Do NOT hardcode port numbers.
+**Port awareness**: If `$BELMONT_PORT` is set (worktree mode), use it when starting the **primary dev server** (e.g., `next dev -p $BELMONT_PORT`, `vite --port $BELMONT_PORT`). Do NOT hardcode port numbers. For any **other server** (Storybook, Prisma Studio, etc.), dynamically find a free port — NEVER use ports from `package.json` scripts:
+```bash
+FREE_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+npx storybook dev -p $FREE_PORT --no-open
+```
 
 **Detect the project's package manager** from the `## Codebase Analysis` section, or check in this order:
 1. `pnpm-lock.yaml` exists → use `pnpm`
@@ -153,7 +157,7 @@ For each acceptance criterion listed in this task's definition (from the MILESTO
 Skip this section for tasks with zero visual output (CLI tools, API routes, database migrations, config files, build scripts, pure backend logic).
 
 If this task creates or modifies anything visual (pages, components, layouts, styles, design tokens):
-1. **Start the project's preview tool** if not already running. Check `package.json` scripts (or equivalent) for the dev server or component preview tool. For component-only tasks, prefer a component preview tool if available (e.g., Storybook). Respect `$BELMONT_PORT` / `$PORT` if set. Wait for it to be ready.
+1. **Start the project's preview tool** if not already running. Check `package.json` scripts (or equivalent) for the dev server or component preview tool. For component-only tasks, prefer a component preview tool if available (e.g., Storybook). For the primary dev server, use `$BELMONT_PORT` / `$PORT` if set. For any other server (Storybook, Prisma Studio, etc.), dynamically find a free port — NEVER use hardcoded ports from package.json scripts. Wait for it to be ready.
 2. **Navigate with Playwright MCP** (`mcp__playwright__browser_navigate`) to the relevant page or component story.
 3. **Take a screenshot** (`mcp__playwright__browser_take_screenshot`).
 4. If Figma design context exists in the MILESTONE file's `## Design Specifications`, get the reference screenshot (`mcp__plugin_figma_figma__get_screenshot`) and compare: colors, spacing, typography, layout, component states.

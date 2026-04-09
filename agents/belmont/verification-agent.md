@@ -52,11 +52,18 @@ For each acceptance criterion from the PRD:
 If the task involved UI changes (pages, components, layouts, styles, design tokens, or any visual output), you MUST perform visual verification:
 
 1. **Load Figma Design** - Get the reference design
-2. **Start the project's preview tool** - You need a running application to navigate to:
-   - Check `package.json` scripts (or equivalent) for the project's dev server or component preview tool (e.g., `dev`, `storybook`, `start`)
+2. **Start the project's preview tool** - You need a running server to navigate to:
+   - Check `package.json` scripts (or equivalent) for available preview tools (e.g., `dev`, `storybook`, `start`)
    - For component-only tasks (no full page), prefer a component preview tool if available (e.g., Storybook) — it renders components in isolation
-   - If `$BELMONT_PORT` is set, pass it as the port flag (e.g., `--port $BELMONT_PORT`, `-p $BELMONT_PORT`). Otherwise use the project's default port.
-   - Wait for the server to be ready before proceeding
+   - **Port selection — CRITICAL**:
+     - For the primary dev server: use `$BELMONT_PORT` if set, otherwise the project default. Example: `next dev -p $BELMONT_PORT`
+     - For ANY other server (Storybook, Prisma Studio, etc.): find a free port dynamically. **NEVER use the port from package.json** — it will conflict with other worktrees:
+       ```bash
+       FREE_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+       npx storybook dev -p $FREE_PORT --no-open
+       ```
+     - **NEVER run `npm run storybook`** or similar scripts that hardcode ports — invoke the underlying CLI directly with your chosen port
+   - Wait for the server to be ready before proceeding (poll with `curl -s -o /dev/null -w "%{http_code}" http://localhost:$FREE_PORT` in a loop, max 60s)
 3. **Use Playwright MCP** - Navigate to the implemented UI using `mcp__playwright__browser_navigate`. This is NOT optional — you MUST attempt it. If the Playwright MCP tools fail or are unavailable, document the failure explicitly in your report (do NOT silently skip).
 4. **Screenshot Comparison** - Take screenshots with `mcp__playwright__browser_take_screenshot` and compare against Figma reference screenshots (you will clean these up in Phase 6)
 5. **Check Pixel Accuracy**:
