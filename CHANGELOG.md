@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.7
+
+**Released:** 2026-04-09
+
+### Changes since v0.8.6.1
+
+- Make reverify a standalone command instead of auto mode flag
+
+
+
 ## v0.8.6.1
 
 **Released:** 2026-04-09
