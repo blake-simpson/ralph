@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.6
+
+**Released:** 2026-04-09
+
+### Changes since v0.8.5.2
+
+- Enable --reverify in multi-feature auto mode
+- Instruct agents to dynamically allocate ports for non-primary servers
+
+
+
 ## v0.8.5.2
 
 **Released:** 2026-04-08
