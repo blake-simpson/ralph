@@ -68,6 +68,11 @@ git push origin main --tags
 #   - Create a GitHub Release with all binaries
 ```
 
+## Design Decisions
+
+- **`--from`/`--to` is single-feature only**: Milestone range flags (`--from`, `--to`) are blocked in multi-feature mode (`--features`, `--all`) because milestone IDs (M1, M3, etc.) are local to each feature — the same ID means different things across features. Multi-feature `--reverify` always reverifies all milestones for each feature.
+- **Ports: primary vs additional servers**: `PORT`/`BELMONT_PORT` is allocated by the Go CLI for the primary dev server (frameworks auto-detect it). All other servers (Storybook, Prisma Studio, etc.) must dynamically allocate their own free port at runtime — this is handled by agent instructions, not Go code. See `_partials/worktree-awareness.md`.
+
 ## Architecture
 
 Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **skills** (workflow prompts) and **agents** (sub-agent instructions) into any AI coding tool's project directory.

@@ -3439,6 +3439,38 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		}
 	}
 
+	// Reverify mode: flip completed milestones in the worktree's PROGRESS.md
+	// (Single-feature mode flips in the main repo before copying; multi-feature mode
+	// skips that step, so we flip here on the worktree copy. Already-flipped milestones
+	// are safely ignored since the string replace won't match.)
+	if cfg.Reverify {
+		progressPath := filepath.Join(wtPath, ".belmont", "features", slug, "PROGRESS.md")
+		if data, err := os.ReadFile(progressPath); err == nil {
+			content := string(data)
+			modified := false
+			for _, m := range parseMilestones(content) {
+				if m.Done {
+					old := "### ✅ " + m.ID + ":"
+					repl := "### ⬜ " + m.ID + ":"
+					if strings.Contains(content, old) {
+						content = strings.Replace(content, old, repl, 1)
+						modified = true
+					}
+				}
+			}
+			if modified {
+				os.WriteFile(progressPath, []byte(content), 0644)
+				count := 0
+				for _, m := range parseMilestones(content) {
+					if !m.Done {
+						count++
+					}
+				}
+				fmt.Fprintf(os.Stderr, "  \033[1mReverify mode\033[0m: queued %d milestone(s) for %s\n", count, slug)
+			}
+		}
+	}
+
 	// Run loop for this feature (all milestones)
 	mCfg := cfg
 	mCfg.Root = wtPath
