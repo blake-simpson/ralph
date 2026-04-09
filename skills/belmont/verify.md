@@ -415,7 +415,7 @@ Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and 
    - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
    - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
 
-2. **Milestone status sync** — For each milestone heading in PROGRESS.md:
+2. **Milestone status sync** — Only for the milestone(s) you were asked to verify or implement (your scoped milestone). Do NOT touch other milestones' headings — they may be `⬜` intentionally (e.g., queued for re-verification):
    - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
    - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
 

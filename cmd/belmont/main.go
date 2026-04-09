@@ -4323,7 +4323,7 @@ func buildLoopPrompt(action loopAction, feature string) string {
 	case actionVerify:
 		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
 		if action.MilestoneID != "" {
-			prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.", action.MilestoneID, action.MilestoneID)
+			prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nCRITICAL: Do NOT modify the status of ANY other milestone in PROGRESS.md. Only update the heading for %s. Other milestones may be marked ⬜ intentionally (queued for re-verification) — do NOT flip them to ✅.", action.MilestoneID, action.MilestoneID, action.MilestoneID)
 		}
 		if action.ReverifyScope == "focused" {
 			prompt += "\n\nFOCUSED RE-VERIFICATION: This is a re-verify after follow-up fixes. Only verify: (1) the specific FWLUP tasks that were just fixed, (2) build/test pass, (3) any previously-failing acceptance criteria. Do NOT re-run Lighthouse. Do NOT re-check visual specs unless a FWLUP specifically addressed UI. Do NOT create new Polish-level issues."
