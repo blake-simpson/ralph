@@ -183,7 +183,6 @@ type loopConfig struct {
 	MaxFailures   int
 	MaxParallel   int
 	DryRun        bool
-	Reverify      bool               // reverify mode: send milestones to VERIFY instead of IMPLEMENT
 	Port          int                // assigned port for worktree isolation (0 = not in worktree)
 	WorktreeEnv   map[string]string  // extra env vars from worktree.json
 	Tracker       *worktreeTracker   // process group tracker for cleanup on interrupt
@@ -2682,7 +2681,6 @@ func runAutoCmd(args []string) error {
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
 	fs.IntVar(&cfg.MaxParallel, "max-parallel", 5, "max concurrent goroutines for parallel execution")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "show execution plan without running")
-	fs.BoolVar(&cfg.Reverify, "reverify", false, "re-verify completed milestones instead of implementing")
 	fs.StringVar(&cfg.Root, "root", ".", "project root")
 
 	if err := fs.Parse(args); err != nil {
@@ -2758,53 +2756,6 @@ func runAutoCmd(args []string) error {
 	}
 	milestones := parseMilestones(string(progressContent))
 	inRange := milestonesInRange(milestones, cfg.From, cfg.To)
-
-	// Reverify mode: flip completed milestones in range back to pending
-	if cfg.Reverify {
-		modified := false
-		content := string(progressContent)
-		for _, m := range inRange {
-			if m.Done {
-				// Replace ✅ with ⬜ for this milestone heading
-				old := "### ✅ " + m.ID + ":"
-				new := "### ⬜ " + m.ID + ":"
-				if strings.Contains(content, old) {
-					content = strings.Replace(content, old, new, 1)
-					modified = true
-				}
-			}
-		}
-		if modified {
-			if err := os.WriteFile(progressPath, []byte(content), 0644); err != nil {
-				return fmt.Errorf("auto --reverify: failed to update PROGRESS.md: %w", err)
-			}
-			// Re-read milestones after modification
-			milestones = parseMilestones(content)
-			inRange = milestonesInRange(milestones, cfg.From, cfg.To)
-			// Count how many were flipped
-			count := 0
-			for _, m := range inRange {
-				if !m.Done {
-					count++
-				}
-			}
-			fmt.Fprintf(os.Stderr, "\033[1mReverify mode\033[0m: queued %d milestone(s) for re-verification\n", count)
-		} else {
-			// Check if milestones are already ⬜ (e.g. user ran `belmont reverify` first)
-			hasPending := false
-			for _, m := range inRange {
-				if !m.Done {
-					hasPending = true
-					break
-				}
-			}
-			if !hasPending {
-				fmt.Fprintln(os.Stderr, "Reverify mode: no completed or pending milestones in range to re-verify")
-				return nil
-			}
-			fmt.Fprintf(os.Stderr, "\033[1mReverify mode\033[0m: milestones already queued for re-verification\n")
-		}
-	}
 
 	// Interactive milestone selection when stdin is a terminal and no --from/--to
 	if cfg.From == "" && cfg.To == "" && isTerminal(os.Stdin) {
@@ -3435,38 +3386,6 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 			fmt.Fprintf(os.Stderr, "  Auto-installing dependencies for %s (%s)...\n", slug, strings.Join(cmds, ", "))
 			if err := runWorktreeHookCommands(cmds, wtPath, port, nil); err != nil {
 				fmt.Fprintf(os.Stderr, "  \033[33m⚠ Auto-install failed for %s: %s (continuing)\033[0m\n", slug, err)
-			}
-		}
-	}
-
-	// Reverify mode: flip completed milestones in the worktree's PROGRESS.md
-	// (Single-feature mode flips in the main repo before copying; multi-feature mode
-	// skips that step, so we flip here on the worktree copy. Already-flipped milestones
-	// are safely ignored since the string replace won't match.)
-	if cfg.Reverify {
-		progressPath := filepath.Join(wtPath, ".belmont", "features", slug, "PROGRESS.md")
-		if data, err := os.ReadFile(progressPath); err == nil {
-			content := string(data)
-			modified := false
-			for _, m := range parseMilestones(content) {
-				if m.Done {
-					old := "### ✅ " + m.ID + ":"
-					repl := "### ⬜ " + m.ID + ":"
-					if strings.Contains(content, old) {
-						content = strings.Replace(content, old, repl, 1)
-						modified = true
-					}
-				}
-			}
-			if modified {
-				os.WriteFile(progressPath, []byte(content), 0644)
-				count := 0
-				for _, m := range parseMilestones(content) {
-					if !m.Done {
-						count++
-					}
-				}
-				fmt.Fprintf(os.Stderr, "  \033[1mReverify mode\033[0m: queued %d milestone(s) for %s\n", count, slug)
 			}
 		}
 	}
@@ -4608,13 +4527,10 @@ func lastMilestoneID(history []historyEntry) string {
 // pendingInRange and fwlupInRange are scoped to the --from/--to milestone range.
 func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, hasMsFwlup bool, pendingInRange bool, fwlupInRange bool, msStates map[string]*milestoneLoopState) *loopAction {
 	if len(history) == 0 {
-		// First iteration: implement (or re-verify) first undone milestone in range
+		// First iteration: implement first undone milestone in range
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
-				if cfg.Reverify {
-					return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("First iteration — re-verifying %s", m.ID), MilestoneID: m.ID}
-				}
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("First iteration — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4674,9 +4590,6 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
-				if cfg.Reverify {
-					return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Verification passed — re-verifying %s", m.ID), MilestoneID: m.ID}
-				}
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Verification passed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4703,9 +4616,6 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 			for _, m := range inRange {
 				if !m.Done {
-					if cfg.Reverify {
-						return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Triage deferred polish items — re-verifying %s", m.ID), MilestoneID: m.ID}
-					}
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Triage deferred polish items — implementing %s", m.ID), MilestoneID: m.ID}
 				}
 			}
@@ -4738,9 +4648,6 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
 			if !m.Done {
-				if cfg.Reverify {
-					return &loopAction{Type: actionVerify, Reason: fmt.Sprintf("Follow-ups fixed — re-verifying %s", m.ID), MilestoneID: m.ID}
-				}
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Follow-ups fixed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -7396,21 +7303,31 @@ func detectWorktreeBranch(wtPath string) string {
 	return branch
 }
 
-// runSyncCmd handles the "belmont sync" command.
-// Syncs master .belmont/PROGRESS.md with computed feature-level states.
+// runReverifyCmd handles the "belmont reverify" command.
+// Walks through completed milestones and runs verification on each sequentially.
+// Reports which milestones passed and which had follow-up tasks created.
 func runReverifyCmd(args []string) error {
 	fs := flag.NewFlagSet("reverify", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var root, feature, from, to, format string
+	var root, feature, from, to, format, tool string
 	fs.StringVar(&root, "root", ".", "project root")
 	fs.StringVar(&feature, "feature", "", "feature slug")
 	fs.StringVar(&from, "from", "", "start milestone (e.g. M3)")
 	fs.StringVar(&to, "to", "", "end milestone (e.g. M10)")
 	fs.StringVar(&format, "format", "text", "output format (text|json)")
+	fs.StringVar(&tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("reverify: %w", err)
 	}
 	root, _ = filepath.Abs(root)
+
+	// Auto-detect tool if not specified
+	if tool == "" {
+		tool = detectTool()
+		if tool == "" {
+			return fmt.Errorf("reverify: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+		}
+	}
 
 	// Resolve feature — auto-detect if only one exists
 	featuresDir := filepath.Join(root, ".belmont", "features")
@@ -7443,7 +7360,7 @@ func runReverifyCmd(args []string) error {
 	milestones := parseMilestones(string(progressContent))
 	inRange := milestonesInRange(milestones, from, to)
 
-	// Find completed milestones to flip
+	// Find completed milestones to verify
 	var targets []milestone
 	for _, m := range inRange {
 		if m.Done {
@@ -7453,48 +7370,175 @@ func runReverifyCmd(args []string) error {
 
 	if len(targets) == 0 {
 		if format == "json" {
-			fmt.Println(`{"queued":0,"milestones":[]}`)
+			fmt.Println(`{"verified":0,"results":[]}`)
 		} else {
 			fmt.Fprintln(os.Stderr, "No completed milestones to re-verify in the specified range.")
 		}
 		return nil
 	}
 
-	// Flip ✅ → ⬜ in PROGRESS.md
-	content := string(progressContent)
-	for _, m := range targets {
-		old := "### ✅ " + m.ID + ":"
-		new := "### ⬜ " + m.ID + ":"
-		content = strings.Replace(content, old, new, 1)
+	// Print header
+	ids := make([]string, len(targets))
+	for i, m := range targets {
+		ids[i] = m.ID
 	}
-	if err := os.WriteFile(progressPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("reverify: failed to write %s: %w", progressPath, err)
+	msWord := "milestones"
+	if len(targets) == 1 {
+		msWord = "milestone"
+	}
+	fmt.Fprintf(os.Stderr, "\033[1mBelmont Reverify\033[0m — %s (%d %s)\n", feature, len(targets), msWord)
+	fmt.Fprintf(os.Stderr, "Tool: %s | Milestones: %s\n\n", tool, strings.Join(ids, ", "))
+
+	// Walk milestones sequentially, running verification on each
+	type msResult struct {
+		ID       string   `json:"id"`
+		Name     string   `json:"name"`
+		Passed   bool     `json:"passed"`
+		Fwlups   []string `json:"fwlups,omitempty"`
+		Duration float64  `json:"duration_s"`
+		Error    string   `json:"error,omitempty"`
+	}
+	results := make([]msResult, 0, len(targets))
+
+	for i, m := range targets {
+		fmt.Fprintf(os.Stderr, "━━ [%d/%d] VERIFY ━━ %s › %s: %s ━━\n", i+1, len(targets), feature, m.ID, m.Name)
+
+		// Build milestone-scoped verify prompt
+		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
+		prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nCRITICAL: Do NOT modify the status of ANY other milestone in PROGRESS.md. Only update the heading for %s.", m.ID, m.ID, m.ID)
+
+		// Build and run the tool command
+		var cmd *exec.Cmd
+		switch tool {
+		case "claude":
+			cmd = exec.Command("claude", "-p", prompt,
+				"--permission-mode", "bypassPermissions",
+				"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
+				"--output-format", "stream-json", "--verbose")
+		case "codex":
+			cmd = exec.Command("codex", "exec", prompt,
+				"--dangerously-bypass-approvals-and-sandbox",
+				"--json", "-C", root)
+		case "gemini":
+			cmd = exec.Command("gemini", prompt,
+				"--yolo", "--output-format", "json")
+		case "copilot":
+			cmd = exec.Command("copilot", "-p", prompt, "--yolo")
+		case "cursor":
+			cmd = exec.Command("cursor", "agent", "-p", prompt,
+				"--force", "--output-format", "json")
+		default:
+			return fmt.Errorf("reverify: unsupported tool: %s", tool)
+		}
+		cmd.Dir = root
+
+		prefix := fmt.Sprintf("\033[36m[%s][%s]\033[0m: ", feature, m.ID)
+		var tw *tailWriter
+		if tool == "claude" {
+			tw = newTailWriter(os.Stderr, 1500, "")
+			cmd.Stdout = &claudeStreamWriter{tw: tw, prefix: prefix}
+			cmd.Stderr = tw
+		} else {
+			tw = newTailWriter(os.Stderr, 1500, prefix)
+			cmd.Stdout = tw
+			cmd.Stderr = tw
+		}
+
+		start := time.Now()
+		runErr := cmd.Run()
+		duration := time.Since(start)
+
+		res := msResult{
+			ID:       m.ID,
+			Name:     m.Name,
+			Duration: duration.Seconds(),
+		}
+
+		if runErr != nil {
+			res.Passed = false
+			res.Error = runErr.Error()
+			fmt.Fprintf(os.Stderr, "\n\033[31m  ✗ %s failed (%.1fs): %s\033[0m\n\n", m.ID, res.Duration, runErr)
+		} else {
+			fmt.Fprintf(os.Stderr, "\n\033[32m  ✓ %s (%.1fs)\033[0m\n", m.ID, res.Duration)
+
+			// Re-read status to detect new FWLUPs for this milestone
+			report, statusErr := buildStatus(root, 55, feature)
+			if statusErr == nil {
+				var fwlups []string
+				fwlupRe := regexp.MustCompile(`(?i)FWLUP`)
+				for _, t := range report.Tasks {
+					if (t.Status == taskPending || t.Status == taskInProgress) &&
+						(fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name)) &&
+						extractMilestoneFromTaskID(t.ID) == m.ID {
+						fwlups = append(fwlups, t.ID)
+					}
+				}
+				res.Fwlups = fwlups
+				res.Passed = len(fwlups) == 0
+			} else {
+				res.Passed = true // assume passed if we can't check
+			}
+
+			if len(res.Fwlups) > 0 {
+				fmt.Fprintf(os.Stderr, "  \033[33m  %d follow-up(s): %s\033[0m\n\n", len(res.Fwlups), strings.Join(res.Fwlups, ", "))
+			} else {
+				fmt.Fprintln(os.Stderr)
+			}
+		}
+
+		results = append(results, res)
 	}
 
-	// Output
+	// Print summary
+	passed := 0
+	var allFwlups []string
+	for _, r := range results {
+		if r.Passed {
+			passed++
+		}
+		allFwlups = append(allFwlups, r.Fwlups...)
+	}
+
 	if format == "json" {
-		ids := make([]string, len(targets))
-		for i, m := range targets {
-			ids[i] = m.ID
+		// Build JSON manually to avoid importing encoding/json just for this
+		fmt.Printf(`{"feature":%q,"verified":%d,"passed":%d,"total_fwlups":%d,"results":[`, feature, len(results), passed, len(allFwlups))
+		for i, r := range results {
+			if i > 0 {
+				fmt.Print(",")
+			}
+			fwlupsJSON := "[]"
+			if len(r.Fwlups) > 0 {
+				fwlupsJSON = `["` + strings.Join(r.Fwlups, `","`) + `"]`
+			}
+			errJSON := "null"
+			if r.Error != "" {
+				errJSON = fmt.Sprintf("%q", r.Error)
+			}
+			fmt.Printf(`{"id":%q,"name":%q,"passed":%t,"fwlups":%s,"duration_s":%.1f,"error":%s}`,
+				r.ID, r.Name, r.Passed, fwlupsJSON, r.Duration, errJSON)
 		}
-		fmt.Printf(`{"queued":%d,"milestones":[%s],"feature":%q}`+"\n",
-			len(targets),
-			`"`+strings.Join(ids, `","`)+`"`,
-			feature)
+		fmt.Println("]}")
 	} else {
-		ids := make([]string, len(targets))
-		for i, m := range targets {
-			ids[i] = m.ID
+		fmt.Fprintln(os.Stderr, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		fmt.Fprintf(os.Stderr, "\033[1mReverify Summary\033[0m — %s\n\n", feature)
+		for _, r := range results {
+			if r.Error != "" {
+				fmt.Fprintf(os.Stderr, "  \033[31m✗\033[0m %s: %s — error: %s\n", r.ID, r.Name, r.Error)
+			} else if !r.Passed {
+				fmt.Fprintf(os.Stderr, "  \033[33m⚠\033[0m %s: %s — %d follow-up(s): %s\n", r.ID, r.Name, len(r.Fwlups), strings.Join(r.Fwlups, ", "))
+			} else {
+				fmt.Fprintf(os.Stderr, "  \033[32m✓\033[0m %s: %s\n", r.ID, r.Name)
+			}
 		}
-		fmt.Fprintf(os.Stderr, "Queued %d milestone(s) for re-verification: %s\n", len(targets), strings.Join(ids, ", "))
-		fmt.Fprintf(os.Stderr, "\nRun: belmont auto --feature %s --reverify", feature)
-		if from != "" {
-			fmt.Fprintf(os.Stderr, " --from %s", from)
-		}
-		if to != "" {
-			fmt.Fprintf(os.Stderr, " --to %s", to)
+		fmt.Fprintf(os.Stderr, "\n  %d/%d passed", passed, len(results))
+		if len(allFwlups) > 0 {
+			fmt.Fprintf(os.Stderr, ", %d follow-up task(s) created", len(allFwlups))
 		}
 		fmt.Fprintln(os.Stderr)
+
+		if len(allFwlups) > 0 {
+			fmt.Fprintf(os.Stderr, "\nTo fix follow-ups: belmont auto --feature %s\n", feature)
+		}
 	}
 
 	return nil
