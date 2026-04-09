@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.8.6.1
+
+**Released:** 2026-04-09
+
+### Changes since v0.8.6
+
+- Fix reverify loop stopping after first milestone
+
+
+
 ## v0.8.6
 
 **Released:** 2026-04-09
