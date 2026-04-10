@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.0
+
+**Released:** 2026-04-10
+
+### Changes since v0.8.7
+
+- Fully rebuild Belmont tracking system
+
+
+
 ## v0.8.7
 
 **Released:** 2026-04-09
