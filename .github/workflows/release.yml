@@ -63,6 +63,12 @@ jobs:
           cd release/
           sha256sum belmont-* > checksums.txt
 
+      - name: Package Claude Code plugin
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./scripts/generate-plugin.sh "$VERSION"
+          tar -czf release/belmont-plugin-${GITHUB_REF_NAME}.tar.gz -C plugin .
+
       - name: Extract changelog entry
         id: changelog
         run: |

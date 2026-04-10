@@ -16,6 +16,36 @@ Strong guardrails are in place to keep the agent focused and on task.
 
 ## Quick Start
 
+### Claude Code (Plugin)
+
+Install Belmont directly as a Claude Code plugin -- no CLI required:
+
+```bash
+claude plugin marketplace add blake-simpson/belmont
+claude plugin install belmont@belmont
+```
+
+Then use the skills:
+
+```
+/belmont:product-plan
+/belmont:implement
+/belmont:next
+/belmont:status
+```
+
+**Optional: Install the Belmont CLI** for auto mode -- automated end-to-end feature implementation with headless AI agents, worktree parallelism, and milestone dependency tracking:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/blake-simpson/belmont/main/install.sh | sh
+```
+
+The plugin and CLI work independently. The plugin gives you the full manual workflow; the CLI adds automation on top.
+
+### All AI Tools (CLI)
+
+The CLI installer supports Claude Code, Codex, Cursor, Windsurf, Gemini, and GitHub Copilot:
+
 ```bash
 # Install belmont (one-time)
 curl -fsSL https://raw.githubusercontent.com/blake-simpson/belmont/main/install.sh | sh
@@ -25,16 +55,7 @@ cd ~/your-project
 belmont install
 ```
 
-The installer detects which AI tools you have (Claude Code, Codex, Cursor, Windsurf, etc.) and installs skills to `.agents/skills/belmont/`, then links or copies them into each tool's native directory. Agents are installed to `.agents/belmont/`.
-
-Then use the skills in your AI tool of choice. For example, in Claude Code:
-
-```
-/belmont:product-plan
-/belmont:implement
-/belmont:next
-/belmont:status
-```
+The installer detects which AI tools you have and installs skills to `.agents/skills/belmont/`, then links or copies them into each tool's native directory. Agents are installed to `.agents/belmont/`.
 
 ---
 

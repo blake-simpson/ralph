@@ -29,6 +29,9 @@ echo "Building belmont ${VERSION} (${TARGET_GOOS}/${TARGET_GOARCH})..."
 # Regenerate skills from partials
 "$SCRIPT_DIR/generate-skills.sh"
 
+# Generate Claude Code plugin
+"$SCRIPT_DIR/generate-plugin.sh" "$VERSION"
+
 # Copy skills, agents, and prompts into cmd/belmont/ for go:embed
 cp -r "$ROOT/skills" "$ROOT/cmd/belmont/skills"
 cp -r "$ROOT/agents" "$ROOT/cmd/belmont/agents"

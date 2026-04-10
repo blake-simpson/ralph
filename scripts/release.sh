@@ -38,11 +38,20 @@ if ! git diff --quiet; then
     exit 1
 fi
 
-# Check for uncommitted changes
+# Check for uncommitted changes (excluding plugin/ which we'll regenerate)
 if ! git diff --quiet || ! git diff --cached --quiet; then
     echo "Error: uncommitted changes detected. Commit or stash before releasing."
     exit 1
 fi
+
+# Generate Claude Code plugin
+echo "Generating Claude Code plugin..."
+"$SCRIPT_DIR/generate-plugin.sh" "$VERSION"
+
+# Update marketplace.json version
+echo "Updating marketplace.json version..."
+sed -i.bak "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$ROOT/marketplace.json"
+rm -f "$ROOT/marketplace.json.bak"
 
 # Verify the build succeeds before tagging
 echo "Verifying build..."
@@ -92,7 +101,7 @@ fi
 echo "Updated CHANGELOG.md"
 
 # Commit and tag
-git add CHANGELOG.md
+git add CHANGELOG.md marketplace.json plugin/
 git commit -m "Release ${TAG}"
 git tag -a "$TAG" -m "Release ${TAG}"
 
