@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.1
+
+**Released:** 2026-04-10
+
+### Changes since v0.9.0
+
+- Add belmont to Homebrew
+- Add Belmont to Claude Marketplace
+
+
+
 ## v0.9.0
 
 **Released:** 2026-04-10
