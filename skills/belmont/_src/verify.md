@@ -30,11 +30,11 @@ If the invoking prompt contains "FOCUSED RE-VERIFICATION" or similar instruction
 
 1. **Still run both agents** (verification + code review) to catch regressions
 2. **Scope the verification to**:
-   - The specific FWLUP tasks that were just fixed (check recently completed tasks)
+   - The specific follow-up tasks that were just fixed (check recently completed tasks)
    - Build and test verification (always run fully)
    - Any previously-failing acceptance criteria
-3. **Do NOT** re-run Lighthouse audit unless a FWLUP specifically addressed performance
-4. **Do NOT** re-check visual specs against Figma unless a FWLUP specifically addressed UI changes
+3. **Do NOT** re-run Lighthouse audit unless a follow-up task specifically addressed performance
+4. **Do NOT** re-check visual specs against Figma unless a follow-up task specifically addressed UI changes
 5. **Do NOT** create new Polish-level issues — only report Critical and Warning issues found during focused verification
 6. **Include the scoping instructions** when dispatching to the sub-agents so they also focus their review
 
@@ -42,9 +42,9 @@ This mode reduces token waste by avoiding full re-audits when only small fixes w
 
 ## Step 1: Identify Completed Tasks
 
-1. Read `{base}/PRD.md` and find all tasks marked with ✅
+1. Read `{base}/PROGRESS.md` and find all tasks marked with `[x]` (done, not yet verified)
 2. These are the tasks that need verification
-3. If no tasks are completed, report "No completed tasks to verify" and stop
+3. If no tasks are marked `[x]`, report "No completed tasks to verify" and stop
 
 ## Sub-Agent Dispatch Strategy
 
@@ -76,8 +76,8 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 >
 > ---
 > [List each completed task ID and header, e.g.:
-> - P0-1: Set up authentication ✅
-> - P0-2: Database schema ✅]
+> - P0-1: Set up authentication [x]
+> - P0-2: Database schema [x]]
 > ---
 >
 > Read `{base}/PRD.md` for acceptance criteria and task details.
@@ -106,8 +106,8 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 >
 > ---
 > [List each completed task ID and header, e.g.:
-> - P0-1: Set up authentication ✅
-> - P0-2: Database schema ✅]
+> - P0-1: Set up authentication [x]
+> - P0-2: Database schema [x]]
 > ---
 >
 > Read `{base}/PRD.md` for task details and planned solution.
@@ -136,49 +136,39 @@ After both agents complete:
 
 ### Create Follow-up Tasks
 
-> **⚠️ FOLLOW-UP PLACEMENT RULE — READ THIS BEFORE MODIFYING PROGRESS.md:**
+> **FOLLOW-UP PLACEMENT RULE — READ THIS BEFORE MODIFYING PROGRESS.md:**
 >
-> Follow-up tasks go into their **source milestone** (the milestone where the issue was found). You MUST NOT create new milestones. Even if existing PROGRESS.md shows a pattern of follow-up milestones (e.g., "M19: Follow-ups"), that pattern is WRONG — do not replicate it. Insert follow-ups directly into the original milestone and revert its ✅ to ⬜.
+> Follow-up tasks go into their **source milestone** (the milestone where the issue was found). You MUST NOT create new milestones. Even if existing PROGRESS.md shows a pattern of follow-up milestones (e.g., "M19: Follow-ups"), that pattern is WRONG — do not replicate it. Insert follow-ups directly into the original milestone as new `[ ]` tasks.
 
-**Scope violation safeguard**: For scope violation issues specifically, only create "revert" FWLUPs for code that was **newly added by the current task**. If the scope violation involves pre-existing code from other features or milestones, do NOT create a FWLUP to delete it — instead note it in the summary as "pre-existing code outside current scope, no action needed." Deleting pre-existing features is catastrophic and must be prevented.
+**Scope violation safeguard**: For scope violation issues specifically, only create "revert" follow-up tasks for code that was **newly added by the current task**. If the scope violation involves pre-existing code from other features or milestones, do NOT create a follow-up task to delete it — instead note it in the summary as "pre-existing code outside current scope, no action needed." Deleting pre-existing features is catastrophic and must be prevented.
+
+If **all tasks pass verification** (no Critical or Warning issues):
+1. Mark each verified task as `[v]` in `{base}/PROGRESS.md` (change `[x]` to `[v]`)
 
 If **Critical or Warning** issues were found by either agent:
-1. Add new tasks to `{base}/PRD.md` for each Critical or Warning issue only. **Do NOT create FWLUP tasks for Polish or Suggestion items.** Use the **source milestone's ID** in the task ID (e.g., if the issue was found in M17, use `P1-M17-FWLUP-X`):
-   ```markdown
-   ### P1-M17-FWLUP-1: [Issue Description] 🔵
-   **Severity**: [Based on issue category]
-   **Source**: [verification-agent / code-review-agent]
-
-   **Task Description**:
-   [Description of the issue and what needs to be fixed]
-
-   **Solution**:
-   [Recommended fix from the agent report]
-
-   **Verification**:
-   1. [Steps to verify the fix]
+1. For tasks that passed: mark as `[v]` in `{base}/PROGRESS.md`
+2. For tasks with issues: leave as `[x]` and add new `[ ]` follow-up tasks to the same milestone. These are plain tasks, not specially tagged:
    ```
-2. Add follow-up tasks to `{base}/PROGRESS.md`. **Placement rules (mandatory, no exceptions):**
+   - [ ] P1-M17-FIX-1: [Issue Description]
+   ```
+3. Add follow-up tasks to `{base}/PROGRESS.md`. **Placement rules (mandatory, no exceptions):**
    - Determine which milestone each issue belongs to based on the tasks/code that were verified
-   - Insert each follow-up task under its **source milestone** (e.g., M17 issue → add under M17's task list)
-   - **CRITICAL — non-negotiable**: Change that milestone's status from `✅` to `⬜` (e.g., `### ✅ M17:` becomes `### ⬜ M17:`). A milestone with pending tasks MUST NOT remain marked ✅ — this causes the auto loop to skip the feature entirely. After making this change, re-read PROGRESS.md to verify the ✅ was actually changed to ⬜.
+   - Insert each follow-up task under its **source milestone** as a new `[ ]` task
    - When verifying multiple milestones (e.g., M17+M18+M19), distribute follow-ups to their respective milestones — do NOT group them together
    - **DO NOT create any new milestone headings** — no "M20: Follow-ups", no "MX: Verification Fixes", no "MX: Design Fidelity Fixes". This is forbidden because it causes automated loop controllers to enter infinite cycles
-   - If the source milestone is truly ambiguous, add to the last pending (⬜) milestone that already exists
+   - If the source milestone is truly ambiguous, add to the last milestone that has pending tasks
    - Follow-up tasks MUST live inside a milestone heading — never in a freestanding section outside the milestones structure
-3. If critical issues were found, update the overall status to reflect this
-5. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
+4. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
    ```
    # Progress: [Product Name from .belmont/PRD.md]
-   ## Status: 🟡 In Progress
    ## Features
-   | Feature | Slug | Status | Milestones | Tasks | Blockers |
-   |---------|------|--------|------------|-------|----------|
+   | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
+   |---------|------|----------|-------------|--------|------------|-------|
    ## Recent Activity
    | Date | Feature | Activity |
    |------|---------|----------|
    ```
-   Then if follow-up tasks were added, update the Tasks total in the `## Features` table for this feature's row (add a new row if missing). If blockers were found, update the Blockers column. Add a row to `## Recent Activity` noting verification results.
+   Then if follow-up tasks were added, update the Tasks total in the `## Features` table for this feature's row (add a new row if missing). Add a row to `## Recent Activity` noting verification results.
 
 ### Record Polish Items
 
@@ -192,7 +182,7 @@ If any **Polish** items were reported by either agent, append them to `{base}/NO
 - [Polish item description] — [file:line if applicable]
 ```
 
-These items are preserved for future reference but do **not** block milestone completion or create FWLUP tasks. They can be addressed in a future polish pass.
+These items are preserved for future reference but do **not** block milestone completion or create follow-up tasks. They can be addressed in a future polish pass.
 
 ### Five Whys Root Cause Analysis
 
@@ -227,8 +217,8 @@ Keep entries scannable — the implementation agent reads these before every tas
 ### Determine Overall Verification Status
 
 When deciding the overall status:
-- If **only** Polish and/or Suggestion items were found (no Critical, no Warning): report status as **ALL PASSED**. The milestone remains complete.
-- If Critical or Warning items were found: report status as **ISSUES FOUND** or **CRITICAL ISSUES** as appropriate.
+- If **only** Polish and/or Suggestion items were found (no Critical, no Warning): report status as **ALL PASSED**. All tasks are marked `[v]` (verified).
+- If Critical or Warning items were found: report status as **ISSUES FOUND** or **CRITICAL ISSUES** as appropriate. Tasks with issues remain `[x]`, follow-up `[ ]` tasks are added.
 
 ### Report Summary
 
@@ -260,13 +250,11 @@ Output a combined summary:
 - Suggestions: [count]
 
 ## Follow-up Tasks Created
-[List of new FWLUP tasks added to PRD]
+[List of new follow-up tasks added to PROGRESS.md]
 
 ## Recommendations
 [Any overall recommendations for the project]
 ```
-
-<!-- @include state-reconciliation.md -->
 
 <!-- @include commit-belmont-changes.md commit_context="after verification" -->
 
@@ -283,10 +271,10 @@ Skip this step if you used Approach B or C.
 
 1. **Run both agents** - Always run verification AND code review
 2. **Be thorough** - Check all completed tasks, not just the latest
-3. **Create follow-ups only for Critical/Warning** - Only these tiers become FWLUP tasks. Polish items go to NOTES.md. Suggestions are reported but not persisted.
+3. **Create follow-ups only for Critical/Warning** - Only these tiers become follow-up tasks. Polish items go to NOTES.md. Suggestions are reported but not persisted.
 4. **Don't fix issues yourself** - Report them and create follow-up tasks
-5. **Update tracking files** - Add follow-up tasks to both PRD.md and PROGRESS.md
-6. **Polish doesn't block** - If only Polish/Suggestion items are found, the milestone stays complete (✅) and overall status is ALL PASSED
+5. **Update PROGRESS.md** - Mark verified tasks `[v]`, add follow-up `[ ]` tasks for issues
+6. **Polish doesn't block** - If only Polish/Suggestion items are found, all tasks are marked `[v]` and overall status is ALL PASSED
 
 Once done, prompt the user to "/clear" and then "/belmont:status", "/belmont:next", or "/belmont:implement"
    - If you are Codex, instead prompt: "/new" and then "belmont:status", "belmont:next", or "belmont:implement"

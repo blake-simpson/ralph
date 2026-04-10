@@ -187,48 +187,13 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 **Scenario B — Feature plan with existing master:**
 1. Write `{base}/TECH_PLAN.md` using the **Feature TECH_PLAN.md Format** below.
-2. **Cross-cutting drift check**: if any new cross-cutting decisions emerged during the interview (new conventions, tooling changes, shared patterns), append them to `.belmont/TECH_PLAN.md` and tell the user what was added.
+2. **Cross-cutting drift check**: if any new cross-cutting decisions emerged during the interview (new conventions, tooling changes, shared patterns), update `.belmont/TECH_PLAN.md` — edit existing sections where decisions changed, add new sections for new decisions, and remove stale info. Tell the user what was changed.
 
 **Scenario C — Master only:**
-1. Update `.belmont/TECH_PLAN.md` in-place using the **Master TECH_PLAN.md Format** below.
+1. Update `.belmont/TECH_PLAN.md` in-place using the **Master TECH_PLAN.md Format** below. Actively curate: edit existing sections, remove stale info, update decisions that have changed.
 
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
-### Reconcile State Files
-
-Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and fix any discrepancies:
-
-1. **Task ↔ checkbox sync** — For each task in PROGRESS.md milestone sections:
-   - Find the matching `### P...:` header in PRD.md by task ID
-   - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
-   - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
-
-2. **Milestone status sync** — Only for the milestone(s) you were asked to verify or implement (your scoped milestone). Do NOT touch other milestones' headings — they may be `⬜` intentionally (e.g., queued for re-verification):
-   - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
-   - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
-
-3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
-   - Remove entries whose referenced task ID is now marked ✅ in PRD.md
-   - Remove entries that reference other features (e.g. "Depends on X feature") if that feature's status is `✅ Complete` in `.belmont/PROGRESS.md`'s Features table
-   - If section becomes empty, set to `None`
-
-4. **Overall status line** — Update `## Status:` in PROGRESS.md:
-   - All milestones ✅ → `## Status: ✅ Complete`
-   - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
-   - All ⬜ → `## Status: 🔴 Not Started`
-
-5. **Feature dependency sync** (master PRD only) — In the `## Features` table of `.belmont/PRD.md`:
-   - Verify all dependency slugs reference existing feature slugs in the table
-   - If a feature row is removed, remove its slug from other features' Dependencies columns
-   - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
-
-6. **Master PROGRESS sync** — After reconciling the feature-level files:
-   - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
-   - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
-   - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
-   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
-
-Only fix actual discrepancies — if files already agree, make no changes.
 ### Commit Planning File Changes
 
 After completing all updates to `.belmont/` planning files, commit them:
@@ -250,6 +215,8 @@ After completing all updates to `.belmont/` planning files, commit them:
    git add .belmont/ && git commit -m "belmont: update planning files after technical planning"
    ```
 
+**Note**: PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec document with no status markers — do not add emoji or state indicators to PRD task headers.
+
 - Say: "Tech plan complete."
 - STOP. Do not continue. Do not implement anything.
 - Final: Prompt user to "/clear" and "/belmont:implement" (also mention `/belmont:review-plans` is recommended for safety before implementation)
@@ -257,7 +224,7 @@ After completing all updates to `.belmont/` planning files, commit them:
 
 ## Master TECH_PLAN.md Format
 
-Write to `.belmont/TECH_PLAN.md` with this structure:
+The master TECH_PLAN is a **living document** for cross-cutting architecture decisions. Skills and agents actively curate it — editing existing sections, removing stale info, and updating decisions as the architecture evolves. Write to `.belmont/TECH_PLAN.md` with this structure:
 
 ```markdown
 # Technical Plan: [Product Name]

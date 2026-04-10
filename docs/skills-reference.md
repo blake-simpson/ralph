@@ -48,11 +48,11 @@ Implements the next pending milestone from the PRD.
   1. **Codebase Scan** (codebase-agent) -- Reads MILESTONE + codebase, writes `## Codebase Analysis` *(parallel with 2)*
   2. **Design Analysis** (design-agent) -- Reads MILESTONE + Figma, writes `## Design Specifications` *(parallel with 1)*
   3. **Implementation** (implementation-agent) -- Reads MILESTONE only, writes code + `## Implementation Log` *(after 1+2)*
-- After each task: marks it complete in PRD.md, updates PROGRESS.md
+- After each task: marks it as `[x]` done in PROGRESS.md
 - After all milestone tasks: marks the milestone complete
 - **Archives the MILESTONE file** (`MILESTONE-M2.done.md`) to keep context clean for next run
-- Creates follow-up tasks (FWLUP) for out-of-scope issues discovered during implementation
-- Handles blockers gracefully -- marks blocked tasks and skips to the next
+- Creates follow-up tasks (plain `[ ]` entries) for out-of-scope issues discovered during implementation
+- Handles blockers gracefully -- marks blocked tasks as `[!]` and skips to the next
 
 ## `next`
 
@@ -61,10 +61,10 @@ Implements just the next single pending task — a lightweight alternative to th
 - Reads PROGRESS.md to find the first unchecked task in the first pending milestone
 - Creates a **minimal MILESTONE file** with just the single task's context (skips analysis agents)
 - Dispatches the single task to the `implementation-agent` as a sub-agent
-- After the task is done: marks it complete in PRD.md and PROGRESS.md
+- After the task is done: marks it as `[x]` done in PROGRESS.md
 - If it was the last task in the milestone, marks the milestone complete
 - **Archives the MILESTONE file** after completion
-- Creates follow-up tasks (FWLUP) for any out-of-scope issues
+- Creates follow-up tasks (plain `[ ]` entries) for any out-of-scope issues
 
 **Best for**: Follow-up tasks from verification, small fixes, well-scoped isolated work.
 **Use `/belmont:implement` instead for**: Large tasks, first tasks in a milestone, tasks needing Figma analysis.
@@ -78,7 +78,7 @@ Runs verification and code review on all completed tasks.
   - **Code Review Agent** -- Runs build and test commands (auto-detects package manager: npm, pnpm, yarn, or bun), reviews code against project patterns, checks PRD alignment
 - Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context
 - Categorizes issues: Critical / Warnings / Suggestions
-- Creates follow-up tasks in PRD.md and PROGRESS.md for anything that needs fixing
+- Creates follow-up tasks (plain `[ ]` entries) in PROGRESS.md for anything that needs fixing
 - Produces a combined summary report
 
 ## `debug`
@@ -96,7 +96,7 @@ Auto debug loop — dispatches a verification agent to check each fix attempt.
 - User checkpoint after iteration 2 before continuing
 - Single atomic commit with `debug:` prefix after user confirms the fix
 - Ephemeral `DEBUG.md` — created at start, deleted when session ends
-- Optional PRD integration: can mark FWLUP tasks complete if relevant
+- Optional PRD integration: can mark follow-up tasks complete if relevant
 
 **Best for**: Complex logic bugs, race conditions, issues needing automated test verification.
 
@@ -165,19 +165,17 @@ Belmont Status
 
 Product: My App
 
-PR/FAQ: ✅ Written
-Master Tech Plan: ✅ Ready
+PR/FAQ: Written
+Master Tech Plan: Ready
 
-Status: 🟡 In Progress
-
-🟡 Chat Application (chat-app)
+Chat Application (chat-app)
   Tasks: 3/7 done  |  Milestones: 1/3 done
-    ✅ M1: Foundation
-    🔄 M2: Core Features
-    ⬜ M3: Polish
+    M1: Foundation (verified)
+    M2: Core Features (in_progress)
+    M3: Polish (todo)
   Next: P1-2 — Add real-time message updates
-  Blockers:
-    - P1-3: Figma design not accessible
+  Blocked:
+    - [!] P1-3: Figma design not accessible
 
 Use --feature <slug> for detailed task-level status.
 ```
@@ -190,26 +188,24 @@ Belmont Status
 
 Feature: Chat Application
 
-Tech Plan: ✅ Ready
+Tech Plan: Ready
 
-Status: 🟡 In Progress
+Tasks: 3 done, 1 in progress, 1 blocked, 2 todo (of 7 total)
 
-Tasks: 3 done, 1 in progress, 1 blocked, 2 pending (of 7 total)
-
-  ✅ P0-1: Set up project structure
-  ✅ P0-2: Implement authentication flow
-  ✅ P1-1: Create chat message component
-  🔄 P1-2: Add real-time message updates
-  🚫 P1-3: Implement file attachments
-  ⬜ P2-1: Add emoji picker
-  ⬜ P2-2: Dark mode support
+  [v] P0-1: Set up project structure
+  [v] P0-2: Implement authentication flow
+  [x] P1-1: Create chat message component
+  [>] P1-2: Add real-time message updates
+  [!] P1-3: Implement file attachments
+  [ ] P2-1: Add emoji picker
+  [ ] P2-2: Dark mode support
 
 Milestones:
-  ✅ M1: Foundation
-  ⬜ M2: Core Features
-  ⬜ M3: Polish
+  M1: Foundation (verified)
+  M2: Core Features (in_progress)
+  M3: Polish (todo)
 
-Active Blockers:
+Blocked Tasks:
   - P1-3: Figma design not accessible
 
 Recent Activity:

@@ -52,14 +52,14 @@ If you need to manually refresh, restart Cursor or reload the window.
 
 Run the product-plan skill first to create your PRD interactively. The tech-plan and implement skills require a populated PRD.
 
-## Task marked as BLOCKED
+## Task marked as blocked
 
-Check `.belmont/PROGRESS.md` for blocker details. Common causes:
+Blocked tasks show as `[!]` in `.belmont/PROGRESS.md`. Common causes:
 - Figma URL not accessible
 - Missing context or dependencies
 - Build/test failures that can't be auto-resolved
 
-Fix the underlying issue, remove the `🚫 BLOCKED` marker from the task header in PRD.md, and re-run implement.
+Fix the underlying issue, change the task's checkbox from `[!]` back to `[ ]` in PROGRESS.md, and re-run implement.
 
 ## Want to start fresh
 

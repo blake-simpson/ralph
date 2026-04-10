@@ -78,8 +78,8 @@ your-project/
 │           └── reset.md
 ├── .belmont/                    # Planning & state (commit to share with team)
 │   ├── PR_FAQ.md
-│   ├── PRD.md
-│   ├── PROGRESS.md              # Master progress (feature summary table, created by product-plan)
+│   ├── PRD.md                   # Living spec (no status markers — purely requirements)
+│   ├── PROGRESS.md              # Single source of truth for all state (task checkboxes, milestones)
 │   ├── TECH_PLAN.md
 │   ├── features/                # Sub-feature directories (optional)
 │   │   └── <feature-slug>/
@@ -111,7 +111,7 @@ your-project/
 
 - `.agents/belmont/` -- Shared agent instructions. Committed to git. Referenced by all tools.
 - `.agents/skills/belmont/` -- Canonical skill files. Single source of truth.
-- `.belmont/` -- Planning state (PR/FAQ, PRD, PROGRESS, TECH_PLAN, MILESTONE). Commit to git so the whole team has shared context.
+- `.belmont/` -- Planning state (PR/FAQ, PRD, PROGRESS, TECH_PLAN, MILESTONE). PRD.md is a status-free living spec; PROGRESS.md is the single source of truth for all task/milestone state. Commit to git so the whole team has shared context.
 - `.claude/`, `.codex/`, `.cursor/`, etc. -- Tool-specific wiring. Some use symlinks, some use copied/synced files.
 
 ## Should I gitignore `.belmont/`?

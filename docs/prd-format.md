@@ -2,7 +2,7 @@
 
 ## PRD.md
 
-Tasks use structured markdown with priority levels:
+The PRD is a **living specification** -- purely requirements, no status markers. It is actively curated as the source of truth for *what* to build. Task headers have no status emoji.
 
 ```markdown
 # PRD: Feature Name
@@ -29,7 +29,7 @@ High-level implementation strategy.
 
 ## Tasks
 
-### P0-1: Set up authentication ✅
+### P0-1: Set up authentication
 **Severity**: CRITICAL
 **Task Description**: Implement OAuth2 login flow
 **Solution**: Use next-auth with Google provider
@@ -43,14 +43,9 @@ High-level implementation strategy.
 **Verification**: npm run build, visual comparison with Figma
 ```
 
-## Task States
-
-| Marker       | State     | Meaning                                                |
-|--------------|-----------|--------------------------------------------------------|
-| *(none)*     | Pending   | Not yet started                                        |
-| `✅`          | Complete  | Task finished and verified                             |
-| `🚫 BLOCKED` | Blocked   | Cannot proceed (missing info, Figma unavailable, etc.) |
-| `🔵 FWLUP`   | Follow-up | Discovered during implementation or verification       |
+**Key points:**
+- No status markers (emoji) on task headers -- status lives in PROGRESS.md only
+- Follow-up tasks discovered during implementation are added as plain tasks (no special tag)
 
 ## Priority Levels
 
@@ -63,24 +58,34 @@ High-level implementation strategy.
 
 ## PROGRESS.md
 
-Tracks milestones, session history, and blockers:
+**Single source of truth for all state.** Tracks task status, milestones, session history, and decisions. Milestone status is computed from tasks (no emoji on milestone headers). There is no separate `## Blockers` section or `## Status:` line -- blocked tasks use the `[!]` checkbox and overall status is computed.
+
+### Task States
+
+| Checkbox | State       | Meaning                                                |
+|----------|-------------|--------------------------------------------------------|
+| `[ ]`    | Todo        | Not yet started                                        |
+| `[>]`    | In Progress | Currently being worked on                              |
+| `[x]`    | Done        | Task finished, not yet verified                        |
+| `[v]`    | Verified    | Task finished and verified                             |
+| `[!]`    | Blocked     | Cannot proceed (missing info, Figma unavailable, etc.) |
+
+### Example
 
 ```markdown
 # Progress: Feature Name
-
-## Status: 🟡 In Progress
 
 ## PRD Reference
 .belmont/PRD.md
 
 ## Milestones
 
-### ✅ M1: Foundation
-- [x] P0-1: Set up authentication
-- [x] P0-2: Database schema
+### M1: Foundation
+- [v] P0-1: Set up authentication
+- [v] P0-2: Database schema
 
-### ⬜ M2: Core Features
-- [ ] P1-1: Dashboard layout
+### M2: Core Features
+- [>] P1-1: Dashboard layout
 - [ ] P1-2: User settings
 
 ## Session History
@@ -90,7 +95,18 @@ Tracks milestones, session history, and blockers:
 
 ## Decisions Log
 [Numbered list of key decisions with rationale]
-
-## Blockers
-[None currently]
 ```
+
+### Master PROGRESS.md
+
+The master PROGRESS.md (at `.belmont/PROGRESS.md` in multi-feature projects) contains a features table with these columns:
+
+| Feature | Priority | Dependencies | Status | Milestones | Tasks |
+|---------|----------|--------------|--------|------------|-------|
+
+Feature-level status is computed from task states. There is no separate status line.
+
+### Master PRD.md and TECH_PLAN.md
+
+- **Master PRD.md** -- Living global document covering vision, constraints, and cross-cutting decisions. No features table (that lives in master PROGRESS.md).
+- **Master TECH_PLAN.md** -- Living global document for cross-cutting architecture decisions.

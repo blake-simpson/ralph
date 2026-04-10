@@ -18,3 +18,5 @@ After completing all updates to `.belmont/` planning files, commit them:
    ```bash
    git add .belmont/ && git commit -m "belmont: update planning files {{commit_context}}"
    ```
+
+**Note**: PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec document with no status markers — do not add emoji or state indicators to PRD task headers.

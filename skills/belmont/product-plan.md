@@ -78,7 +78,7 @@ Once the base path is resolved, use `{base}` as shorthand:
 
 ## Creating the Master PRD (first time)
 
-If `.belmont/PRD.md` is empty/default and no features exist yet, create the **master feature catalog**:
+If `.belmont/PRD.md` is empty/default and no features exist yet, create the **master PRD** as a living global document:
 
 ```markdown
 # Product: [Product Name]
@@ -86,31 +86,32 @@ If `.belmont/PRD.md` is empty/default and no features exist yet, create the **ma
 ## Vision
 [1-2 sentence product vision, drawn from PR_FAQ if available]
 
-## Features
+## Constraints
+[Global constraints that apply across all features — performance budgets, browser support, accessibility requirements, etc.]
 
-| Feature | Slug | Priority | Dependencies | Status |
-|---------|------|----------|-------------|--------|
-| [Feature Name] | [feature-slug] | P1 | None | Not Started |
+## Cross-Cutting Decisions
+[Product decisions that span multiple features. Actively curate this section — edit/remove stale info, don't just append. Examples: navigation patterns, shared UX conventions, data model decisions.]
 ```
 
-**Dependencies format**: Use feature slugs, comma-separated (e.g. `setup, auth`). Use `None` for features with no dependencies. Features with dependencies execute after their dependencies complete when using `belmont auto --all`.
+This is a **living document**. Skills and agents actively curate it — editing existing sections, removing stale info, and updating decisions as the product evolves. It is NOT a feature catalog (features are tracked in PROGRESS.md).
 
 Also create `.belmont/PROGRESS.md` (the master progress file) if it doesn't exist or still contains template/placeholder text:
 
 ```markdown
 # Progress: [Product Name]
 
-## Status: 🔴 Not Started
-
 ## Features
 
-| Feature | Slug | Status | Milestones | Tasks | Blockers |
-|---------|------|--------|------------|-------|----------|
+| Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
+|---------|------|----------|-------------|--------|------------|-------|
+| [Feature Name] | [feature-slug] | P1 | None | Not Started | 0/N | 0/N |
 
 ## Recent Activity
 | Date | Feature | Activity |
 |------|---------|----------|
 ```
+
+**Dependencies format**: Use feature slugs, comma-separated (e.g. `setup, auth`). Use `None` for features with no dependencies. Features with dependencies execute after their dependencies complete when using `belmont auto --all`.
 
 Then immediately proceed to create the first feature (below).
 
@@ -122,8 +123,8 @@ When the user selects or creates a feature:
 2. **Create directory**: `.belmont/features/<slug>/`
 3. **Write feature PRD**: `.belmont/features/<slug>/PRD.md` (using the PRD format below)
 4. **Write feature PROGRESS**: `.belmont/features/<slug>/PROGRESS.md` (using the PROGRESS format below)
-5. **Update master PRD**: Add/update the feature entry in `.belmont/PRD.md`'s features table. Set Dependencies to slugs of features this one requires (data, APIs, infrastructure) — use `None` if independent.
-6. **Update master PROGRESS**: Add or update the feature's row in `.belmont/PROGRESS.md`'s `## Features` table with the feature name, slug, initial status, milestone/task counts, and blockers. Add a row to `## Recent Activity` noting the feature was created or updated.
+5. **Update master PRD**: If any cross-cutting product decisions were made during planning, add them to `.belmont/PRD.md`'s `## Cross-Cutting Decisions` section. Edit existing entries if they changed.
+6. **Update master PROGRESS**: Add or update the feature's row in `.belmont/PROGRESS.md`'s `## Features` table with the feature name, slug, priority, dependencies, initial status, milestone/task counts. Set Dependencies to slugs of features this one requires (data, APIs, infrastructure) — use `None` if independent. Add a row to `## Recent Activity` noting the feature was created or updated.
 
 When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
 
@@ -171,41 +172,6 @@ This is a **product** planning session, NOT a technical planning session. Techni
 
 If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
 
-### Reconcile State Files
-
-Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and fix any discrepancies:
-
-1. **Task ↔ checkbox sync** — For each task in PROGRESS.md milestone sections:
-   - Find the matching `### P...:` header in PRD.md by task ID
-   - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
-   - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
-
-2. **Milestone status sync** — Only for the milestone(s) you were asked to verify or implement (your scoped milestone). Do NOT touch other milestones' headings — they may be `⬜` intentionally (e.g., queued for re-verification):
-   - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
-   - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
-
-3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
-   - Remove entries whose referenced task ID is now marked ✅ in PRD.md
-   - Remove entries that reference other features (e.g. "Depends on X feature") if that feature's status is `✅ Complete` in `.belmont/PROGRESS.md`'s Features table
-   - If section becomes empty, set to `None`
-
-4. **Overall status line** — Update `## Status:` in PROGRESS.md:
-   - All milestones ✅ → `## Status: ✅ Complete`
-   - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
-   - All ⬜ → `## Status: 🔴 Not Started`
-
-5. **Feature dependency sync** (master PRD only) — In the `## Features` table of `.belmont/PRD.md`:
-   - Verify all dependency slugs reference existing feature slugs in the table
-   - If a feature row is removed, remove its slug from other features' Dependencies columns
-   - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
-
-6. **Master PROGRESS sync** — After reconciling the feature-level files:
-   - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
-   - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
-   - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
-   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
-
-Only fix actual discrepancies — if files already agree, make no changes.
 ### Commit Planning File Changes
 
 After completing all updates to `.belmont/` planning files, commit them:
@@ -227,6 +193,8 @@ After completing all updates to `.belmont/` planning files, commit them:
    git add .belmont/ && git commit -m "belmont: update planning files after product planning"
    ```
 
+**Note**: PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec document with no status markers — do not add emoji or state indicators to PRD task headers.
+
 Final: Prompt user to "/clear" and then "/belmont:tech-plan"
    - If you are Codex, instead prompt: "/new" and then "belmont:tech-plan"
    - If this was the first feature in a new product, also mention they can create more features later by running `/belmont:product-plan` again
@@ -239,7 +207,7 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 - It is critical that agents get every piece of information they need
 - List in the plan the relevant available skills the agent should load when implementing
 - When creating milestones, consider the work involved. For example: If design/UI work is required, group it with other design/UI work. This allows the design context to be loaded once and shared amongst that milestones tasks. By the same logic, group backend heavy tasks together and try to skip UI work for that milestone. Some tasks will need both but try your best to split where possible.
-- When milestones can be implemented independently (e.g., separate features that only share a common foundation), add dependency annotations: `### ⬜ M3: Feature X (depends: M1)`. This enables `belmont auto` to run independent milestones in parallel via git worktrees. If a milestone has no dependency on another, it can run in the same wave. Only add `(depends: ...)` when there's a real dependency — don't over-constrain.
+- When milestones can be implemented independently (e.g., separate features that only share a common foundation), add dependency annotations: `### M3: Feature X (depends: M1)`. This enables `belmont auto` to run independent milestones in parallel via git worktrees. If a milestone has no dependency on another, it can run in the same wave. Only add `(depends: ...)` when there's a real dependency — don't over-constrain.
 
 ## PRD Format
 
@@ -307,37 +275,36 @@ Write the PROGRESS to `{base}/PROGRESS.md` (same base path as the PRD) with this
 ```markdown
 # Progress: [Feature Name]
 
-## Status: 🔴 Not Started
-
 ## PRD Reference
 .belmont/PRD.md
 
 ## Milestones
 
-### ⬜ M1: [Milestone Name]
-- [ ] Task 1
-- [ ] Task 2
+### M1: [Milestone Name]
+- [ ] P0-1: Task description
+- [ ] P0-2: Task description
 
-### ⬜ M2: [Milestone Name] (depends: M1)
-- [ ] Task 1
+### M2: [Milestone Name] (depends: M1)
+- [ ] P1-1: Task description
 
-### ⬜ M3: [Milestone Name] (depends: M1)
-- [ ] Task 1
+### M3: [Milestone Name] (depends: M1)
+- [ ] P1-1: Task description
 
-### ⬜ M4: [Milestone Name] (depends: M2, M3)
-- [ ] Task 1
+### M4: [Milestone Name] (depends: M2, M3)
+- [ ] P1-1: Task description
 
 > **Dependency syntax**: Add `(depends: M1)` or `(depends: M1, M3)` after the milestone name to declare dependencies. When dependencies are present, `belmont auto` will run independent milestones in parallel via git worktrees. If no milestones have `(depends: ...)`, they run sequentially (default behavior).
 
+> **Task states**: `[ ]` todo, `[>]` in_progress, `[x]` done, `[v]` verified, `[!]` blocked. Milestone status is computed from its tasks — do not add status emoji to milestone headers.
+
 ## Session History
-| Session | Date/Time           | Context Used | Milestones Completed |
-|---------|---------------------|-----------------|----------------------|
+
+| Date | Action | Details |
+|------|--------|---------|
 
 ## Decisions Log
-[Numbered list of key decisions with rationale]
 
-## Blockers
-[Any blocking issues]
+(none yet)
 ```
 
 ## Begin

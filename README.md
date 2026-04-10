@@ -109,7 +109,7 @@ When you run the verify skill, two agents run:
 | `verification-agent` | Sonnet | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys              |
 | `code-review-agent`  | Sonnet | Runs build, test, and E2E test commands (auto-detects package manager), reviews code quality and PRD alignment |
 
-Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context. Any issues found become follow-up tasks added to the PRD and PROGRESS files.
+Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context. Any issues found become follow-up tasks (plain `[ ]` entries) added to PROGRESS.md.
 
 ---
 

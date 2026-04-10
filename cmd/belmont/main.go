@@ -34,39 +34,87 @@ var (
 type taskStatus string
 
 const (
-	taskComplete   taskStatus = "complete"
-	taskBlocked    taskStatus = "blocked"
+	taskTodo       taskStatus = "todo"
 	taskInProgress taskStatus = "in_progress"
-	taskPending    taskStatus = "pending"
+	taskDone       taskStatus = "done"
+	taskVerified   taskStatus = "verified"
+	taskBlocked    taskStatus = "blocked"
 )
 
 type task struct {
-	ID     string
-	Name   string
-	Status taskStatus
+	ID          string
+	Name        string
+	Status      taskStatus
+	MilestoneID string // which milestone this task belongs to (from PROGRESS.md)
 }
 
 type milestone struct {
-	ID   string
-	Name string
-	Done bool
-	Deps []string // e.g. ["M1", "M3"] — nil for no explicit deps
+	ID    string
+	Name  string
+	Tasks []task   // tasks in this milestone (from PROGRESS.md)
+	Deps  []string // e.g. ["M1", "M3"] — nil for no explicit deps
+}
+
+// Milestone computed state helpers
+
+func milestoneAllDone(m milestone) bool {
+	if len(m.Tasks) == 0 {
+		return false
+	}
+	for _, t := range m.Tasks {
+		if t.Status != taskDone && t.Status != taskVerified {
+			return false
+		}
+	}
+	return true
+}
+
+func milestoneAllVerified(m milestone) bool {
+	if len(m.Tasks) == 0 {
+		return false
+	}
+	for _, t := range m.Tasks {
+		if t.Status != taskVerified {
+			return false
+		}
+	}
+	return true
+}
+
+func milestoneHasBlockers(m milestone) bool {
+	for _, t := range m.Tasks {
+		if t.Status == taskBlocked {
+			return true
+		}
+	}
+	return false
+}
+
+func milestoneNotStarted(m milestone) bool {
+	for _, t := range m.Tasks {
+		if t.Status != taskTodo {
+			return false
+		}
+	}
+	return true
 }
 
 type featureSummary struct {
-	Slug            string      `json:"slug"`
-	Name            string      `json:"name"`
-	TasksDone       int         `json:"tasks_done"`
-	TasksTotal      int         `json:"tasks_total"`
-	MilestonesDone  int         `json:"milestones_done"`
-	MilestonesTotal int         `json:"milestones_total"`
-	Milestones      []milestone `json:"milestones"`
-	NextMilestone   *milestone  `json:"next_milestone,omitempty"`
-	NextTask        *task       `json:"next_task,omitempty"`
-	Blockers        []string    `json:"blockers,omitempty"`
-	Status          string      `json:"status"`
-	Deps            []string    `json:"deps,omitempty"`
-	Priority        string      `json:"priority,omitempty"`
+	Slug             string      `json:"slug"`
+	Name             string      `json:"name"`
+	TasksDone        int         `json:"tasks_done"`
+	TasksVerified    int         `json:"tasks_verified"`
+	TasksInProgress  int         `json:"tasks_in_progress"`
+	TasksBlocked     int         `json:"tasks_blocked"`
+	TasksTotal       int         `json:"tasks_total"`
+	MilestonesDone   int         `json:"milestones_done"`
+	MilestonesTotal  int         `json:"milestones_total"`
+	Milestones       []milestone `json:"milestones"`
+	NextMilestone    *milestone  `json:"next_milestone,omitempty"`
+	NextTask         *task       `json:"next_task,omitempty"`
+	Status           string      `json:"status"`
+	Deps             []string    `json:"deps,omitempty"`
+	Priority         string      `json:"priority,omitempty"`
 }
 
 type statusReport struct {
@@ -77,7 +125,6 @@ type statusReport struct {
 	TaskCounts      map[string]int
 	Tasks           []task
 	Milestones      []milestone
-	Blockers        []string
 	NextMilestone   *milestone
 	NextTask        *task
 	LastCompleted   *task
@@ -450,10 +497,11 @@ func runStatus(args []string) error {
 func buildStatus(root string, maxName int, feature string) (statusReport, error) {
 	var report statusReport
 	report.TaskCounts = map[string]int{
-		"done":        0,
+		"todo":        0,
 		"in_progress": 0,
+		"done":        0,
+		"verified":    0,
 		"blocked":     0,
-		"pending":     0,
 		"total":       0,
 	}
 
@@ -493,31 +541,31 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 		}
 
 		report.Feature = extractFeatureName(string(prdContent))
-		report.Tasks = parseTasks(string(prdContent), maxName)
+		report.Milestones = parseMilestones(string(progressContent))
+		report.Tasks = flattenTasks(report.Milestones, maxName)
 
-		assignTaskStatuses(report.Tasks)
 		report.TaskCounts["total"] = len(report.Tasks)
 		for _, t := range report.Tasks {
 			switch t.Status {
-			case taskComplete:
+			case taskDone:
 				report.TaskCounts["done"]++
+			case taskVerified:
+				report.TaskCounts["verified"]++
 			case taskBlocked:
 				report.TaskCounts["blocked"]++
 			case taskInProgress:
 				report.TaskCounts["in_progress"]++
-			case taskPending:
-				report.TaskCounts["pending"]++
+			case taskTodo:
+				report.TaskCounts["todo"]++
 			}
 		}
 
 		report.LastCompleted = lastCompletedTask(report.Tasks)
-		report.Milestones = parseMilestones(string(progressContent))
-		report.Blockers = parseBlockers(string(progressContent))
 		report.RecentDecisions = parseDecisions(string(progressContent), 3)
 		report.NextMilestone = nextMilestone(report.Milestones)
 		report.NextTask = nextTask(report.Tasks)
 		report.TechPlanReady = techPlanReady(techPlanPath)
-		report.OverallStatus = computeOverallStatus(string(progressContent), report.Tasks)
+		report.OverallStatus = computeOverallStatus(report.Tasks)
 
 		return report, nil
 	}
@@ -532,22 +580,7 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	report.Feature = extractProductName(filepath.Join(root, ".belmont", "PRD.md"))
 	report.TechPlanReady = techPlanReady(filepath.Join(root, ".belmont", "TECH_PLAN.md"))
 
-	// Read master PROGRESS.md for overall status and blockers
-	masterProgressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
-	if masterProgress, err := os.ReadFile(masterProgressPath); err == nil {
-		content := string(masterProgress)
-		if len(features) > 0 {
-			report.OverallStatus = computeFeatureListStatus(features)
-		} else {
-			statusLine := parseStatusLine(content)
-			if statusLine != "" {
-				report.OverallStatus = statusLine
-			} else {
-				report.OverallStatus = "🔴 Not Started"
-			}
-		}
-		report.Blockers = parseBlockers(content)
-	} else if len(features) > 0 {
+	if len(features) > 0 {
 		report.OverallStatus = computeFeatureListStatus(features)
 	} else {
 		report.OverallStatus = "🔴 Not Started"
@@ -605,7 +638,7 @@ func listFeaturesWithOverrides(featuresDir string, maxName int, worktreeOverride
 	}
 	var features []featureSummary
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		slug := entry.Name()
@@ -617,103 +650,94 @@ func listFeaturesWithOverrides(featuresDir string, maxName int, worktreeOverride
 		prdPath := filepath.Join(featurePath, "PRD.md")
 
 		name := slug
-		prdContent, err := os.ReadFile(prdPath)
-		if err == nil {
+		if prdContent, err := os.ReadFile(prdPath); err == nil {
 			extracted := extractFeatureName(string(prdContent))
 			if extracted != "Unknown" {
 				name = extracted
 			}
 		}
 
-		tasksDone := 0
-		tasksTotal := 0
-		if err == nil {
-			tasks := parseTasks(string(prdContent), maxName)
-			assignTaskStatuses(tasks)
-			tasksTotal = len(tasks)
-			for _, t := range tasks {
-				if t.Status == taskComplete {
-					tasksDone++
-				}
-			}
-		}
-
+		// Read all state from PROGRESS.md
 		var milestones []milestone
-		var featureBlockers []string
-		milestonesDone := 0
-		milestonesTotal := 0
 		progressPath := filepath.Join(featurePath, "PROGRESS.md")
 		if progressContent, err := os.ReadFile(progressPath); err == nil {
 			milestones = parseMilestones(string(progressContent))
-			milestonesTotal = len(milestones)
-			for _, m := range milestones {
-				if m.Done {
-					milestonesDone++
-				}
+		}
+
+		tasks := flattenTasks(milestones, maxName)
+		tasksTotal := len(tasks)
+		tasksDone := 0
+		tasksVerified := 0
+		tasksInProgress := 0
+		tasksBlocked := 0
+		for _, t := range tasks {
+			switch t.Status {
+			case taskDone:
+				tasksDone++
+			case taskVerified:
+				tasksVerified++
+			case taskInProgress:
+				tasksInProgress++
+			case taskBlocked:
+				tasksBlocked++
 			}
-			featureBlockers = parseBlockers(string(progressContent))
 		}
 
-		// Compute next milestone and next task for this feature
-		var featureNextMilestone *milestone
-		var featureNextTask *task
-		if err == nil {
-			tasks := parseTasks(string(prdContent), maxName)
-			assignTaskStatuses(tasks)
-			featureNextTask = nextTask(tasks)
+		milestonesDone := 0
+		for _, m := range milestones {
+			if milestoneAllDone(m) {
+				milestonesDone++
+			}
 		}
-		featureNextMilestone = nextMilestone(milestones)
 
-		status := "🔴 Not Started"
-		allTasksDone := tasksTotal > 0 && tasksDone == tasksTotal
-		allMilestonesDone := milestonesTotal > 0 && milestonesDone == milestonesTotal
-		if allTasksDone && (milestonesTotal == 0 || allMilestonesDone) {
-			status = "✅ Complete"
-		} else if tasksDone > 0 || milestonesDone > 0 {
-			status = "🟡 In Progress"
-		}
+		featureNextMilestone := nextMilestone(milestones)
+		featureNextTask := nextTask(tasks)
+
+		status := computeOverallStatus(tasks)
 
 		features = append(features, featureSummary{
 			Slug:            slug,
 			Name:            name,
-			TasksDone:       tasksDone,
+			TasksDone:       tasksDone + tasksVerified,
+			TasksVerified:   tasksVerified,
+			TasksInProgress: tasksInProgress,
+			TasksBlocked:    tasksBlocked,
 			TasksTotal:      tasksTotal,
 			MilestonesDone:  milestonesDone,
-			MilestonesTotal: milestonesTotal,
+			MilestonesTotal: len(milestones),
 			Milestones:      milestones,
 			NextMilestone:   featureNextMilestone,
 			NextTask:        featureNextTask,
-			Blockers:        featureBlockers,
 			Status:          status,
 		})
 	}
 	return features
 }
 
-// parseMasterPRDDeps reads the master PRD and extracts feature slug → dependency slugs mapping
+// parseMasterDeps reads the master PROGRESS.md and extracts feature slug → dependency slugs mapping
 // from the ## Features table. Handles "None", empty, and comma-separated slugs.
-func parseMasterPRDDeps(root string) (deps map[string][]string, priorities map[string]string) {
+// New table format: | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
+func parseMasterDeps(root string) (deps map[string][]string, priorities map[string]string) {
 	deps = make(map[string][]string)
 	priorities = make(map[string]string)
 
-	prdPath := filepath.Join(root, ".belmont", "PRD.md")
-	content, err := os.ReadFile(prdPath)
+	progressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
+	content, err := os.ReadFile(progressPath)
 	if err != nil {
 		return
 	}
 
 	lines := strings.Split(string(content), "\n")
+	colIdx := parseMasterTableColumns(lines)
 	inTable := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Detect start of Features table
 		if strings.HasPrefix(trimmed, "## Features") {
 			inTable = true
 			continue
 		}
 
-		// Stop at next heading
 		if inTable && strings.HasPrefix(trimmed, "## ") {
 			break
 		}
@@ -722,38 +746,32 @@ func parseMasterPRDDeps(root string) (deps map[string][]string, priorities map[s
 			continue
 		}
 
-		// Skip header and separator rows
-		cols := strings.Split(trimmed, "|")
-		// Remove empty first/last from leading/trailing pipes
-		var cells []string
-		for _, c := range cols {
-			c = strings.TrimSpace(c)
-			if c != "" {
-				cells = append(cells, c)
-			}
-		}
+		cells := splitTableCells(trimmed)
+		slugCol := colIdx["Slug"]
+		prioCol := colIdx["Priority"]
+		depCol := colIdx["Dependencies"]
 
-		// Need at least 4 columns: Feature, Slug, Priority, Dependencies
-		if len(cells) < 4 {
+		if slugCol < 0 || len(cells) <= slugCol {
 			continue
 		}
 
-		// Skip header row and separator
-		slug := strings.TrimSpace(cells[1])
+		slug := strings.TrimSpace(cells[slugCol])
 		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
 			continue
 		}
 
-		priority := strings.TrimSpace(cells[2])
-		depStr := strings.TrimSpace(cells[3])
+		if prioCol >= 0 && prioCol < len(cells) {
+			priorities[slug] = strings.TrimSpace(cells[prioCol])
+		}
 
-		priorities[slug] = priority
-
+		if depCol < 0 || depCol >= len(cells) {
+			continue
+		}
+		depStr := strings.TrimSpace(cells[depCol])
 		if depStr == "" || strings.EqualFold(depStr, "None") || depStr == "-" {
 			continue
 		}
 
-		// Parse comma-separated dependency slugs
 		var depSlugs []string
 		for _, d := range strings.Split(depStr, ",") {
 			d = strings.TrimSpace(d)
@@ -770,6 +788,7 @@ func parseMasterPRDDeps(root string) (deps map[string][]string, priorities map[s
 
 // parseMasterFeatureStatuses reads the ## Features table in the master .belmont/PROGRESS.md
 // and returns a map of slug → status string (e.g. "✅ Complete", "🟡 In Progress").
+// New table format: | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
 func parseMasterFeatureStatuses(root string) map[string]string {
 	statuses := make(map[string]string)
 
@@ -781,6 +800,7 @@ func parseMasterFeatureStatuses(root string) map[string]string {
 
 	lines := strings.Split(string(content), "\n")
 	inTable := false
+	colIdx := parseMasterTableColumns(lines)
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
@@ -797,34 +817,69 @@ func parseMasterFeatureStatuses(root string) map[string]string {
 			continue
 		}
 
-		cols := strings.Split(trimmed, "|")
-		var cells []string
-		for _, c := range cols {
-			c = strings.TrimSpace(c)
-			if c != "" {
-				cells = append(cells, c)
-			}
-		}
-
-		// Need at least 3 columns: Feature, Slug, Status
-		if len(cells) < 3 {
+		cells := splitTableCells(trimmed)
+		slugCol := colIdx["Slug"]
+		statusCol := colIdx["Status"]
+		if slugCol < 0 || statusCol < 0 || len(cells) <= slugCol || len(cells) <= statusCol {
 			continue
 		}
 
-		slug := strings.TrimSpace(cells[1])
+		slug := strings.TrimSpace(cells[slugCol])
 		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
 			continue
 		}
 
-		status := strings.TrimSpace(cells[2])
+		status := strings.TrimSpace(cells[statusCol])
 		statuses[slug] = status
 	}
 	return statuses
 }
 
+// parseMasterTableColumns finds column indices by header name in the master PROGRESS.md features table.
+func parseMasterTableColumns(lines []string) map[string]int {
+	result := map[string]int{
+		"Feature": -1, "Slug": -1, "Priority": -1, "Dependencies": -1,
+		"Status": -1, "Milestones": -1, "Tasks": -1,
+	}
+	inTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## Features") {
+			inTable = true
+			continue
+		}
+		if inTable && strings.HasPrefix(trimmed, "|") {
+			cells := splitTableCells(trimmed)
+			for i, c := range cells {
+				c = strings.TrimSpace(c)
+				if _, ok := result[c]; ok {
+					result[c] = i
+				}
+			}
+			return result
+		}
+	}
+	// Fallback: old 6-column format or new 7-column format by position
+	return result
+}
+
+// splitTableCells splits a markdown table row into cells (stripping leading/trailing pipes).
+func splitTableCells(line string) []string {
+	cols := strings.Split(line, "|")
+	var cells []string
+	for _, c := range cols {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			cells = append(cells, c)
+		}
+	}
+	return cells
+}
+
 // syncMasterFeatureStatuses updates the ## Features table in master .belmont/PROGRESS.md
 // to match computed feature-level statuses. This prevents stale master data from causing
 // auto mode to skip features that still have pending work.
+// New table format: | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
 func syncMasterFeatureStatuses(root string, features []featureSummary) {
 	progressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
 	content, err := os.ReadFile(progressPath)
@@ -852,6 +907,7 @@ func syncMasterFeatureStatuses(root string, features []featureSummary) {
 	}
 
 	lines := strings.Split(string(content), "\n")
+	colIdx := parseMasterTableColumns(lines)
 	inTable := false
 	changed := false
 	for i, line := range lines {
@@ -868,19 +924,17 @@ func syncMasterFeatureStatuses(root string, features []featureSummary) {
 			continue
 		}
 
-		cols := strings.Split(trimmed, "|")
-		var cells []string
-		for _, c := range cols {
-			c = strings.TrimSpace(c)
-			if c != "" {
-				cells = append(cells, c)
-			}
-		}
-		if len(cells) < 6 {
+		cells := splitTableCells(trimmed)
+		slugCol := colIdx["Slug"]
+		statusCol := colIdx["Status"]
+		msCol := colIdx["Milestones"]
+		tasksCol := colIdx["Tasks"]
+
+		if slugCol < 0 || len(cells) <= slugCol {
 			continue
 		}
 
-		slug := strings.TrimSpace(cells[1])
+		slug := strings.TrimSpace(cells[slugCol])
 		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
 			continue
 		}
@@ -894,23 +948,27 @@ func syncMasterFeatureStatuses(root string, features []featureSummary) {
 		newMs := fmt.Sprintf("%d/%d", c.MsDone, c.MsTotal)
 		newTasks := fmt.Sprintf("%d/%d", c.TasksDone, c.TasksTotal)
 
-		if cells[2] != newStatus || cells[3] != newMs || cells[4] != newTasks {
-			lines[i] = fmt.Sprintf("| %s | %s | %s | %s | %s | %s |",
-				cells[0], slug, newStatus, newMs, newTasks, cells[5])
-			changed = true
+		cellsChanged := false
+		if statusCol >= 0 && statusCol < len(cells) && cells[statusCol] != newStatus {
+			cells[statusCol] = newStatus
+			cellsChanged = true
 		}
-	}
+		if msCol >= 0 && msCol < len(cells) && cells[msCol] != newMs {
+			cells[msCol] = newMs
+			cellsChanged = true
+		}
+		if tasksCol >= 0 && tasksCol < len(cells) && cells[tasksCol] != newTasks {
+			cells[tasksCol] = newTasks
+			cellsChanged = true
+		}
 
-	// Also sync the ## Status: line
-	computedStatus := computeFeatureListStatus(features)
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "## Status:") {
-			newLine := "## Status: " + computedStatus
-			if lines[i] != newLine {
-				lines[i] = newLine
-				changed = true
+		if cellsChanged {
+			var parts []string
+			for _, c := range cells {
+				parts = append(parts, " "+c+" ")
 			}
-			break
+			lines[i] = "|" + strings.Join(parts, "|") + "|"
+			changed = true
 		}
 	}
 
@@ -919,9 +977,9 @@ func syncMasterFeatureStatuses(root string, features []featureSummary) {
 	}
 }
 
-// populateFeatureDeps enriches feature summaries with dependency and priority info from master PRD.
+// populateFeatureDeps enriches feature summaries with dependency and priority info from master PROGRESS.md.
 func populateFeatureDeps(features []featureSummary, root string) {
-	deps, priorities := parseMasterPRDDeps(root)
+	deps, priorities := parseMasterDeps(root)
 	for i := range features {
 		if d, ok := deps[features[i].Slug]; ok {
 			features[i].Deps = d
@@ -933,15 +991,22 @@ func populateFeatureDeps(features []featureSummary, root string) {
 }
 
 func computeFeatureListStatus(features []featureSummary) string {
+	allVerified := true
 	allComplete := true
 	anyProgress := false
 	for _, f := range features {
-		if f.Status != "✅ Complete" {
+		if f.Status != "✅ Verified" {
+			allVerified = false
+		}
+		if f.Status != "✅ Complete" && f.Status != "✅ Verified" {
 			allComplete = false
 		}
-		if f.TasksDone > 0 {
+		if f.TasksDone > 0 || f.TasksInProgress > 0 {
 			anyProgress = true
 		}
+	}
+	if allVerified && len(features) > 0 {
+		return "✅ Verified"
 	}
 	if allComplete && len(features) > 0 {
 		return "✅ Complete"
@@ -961,22 +1026,17 @@ func extractFeatureName(prd string) string {
 	return "Unknown"
 }
 
-func parseTasks(prd string, maxName int) []task {
-	re := regexp.MustCompile(`(?m)^###\s+(P\d+-[\w][\w-]*):\s*(.+)$`)
-	matches := re.FindAllStringSubmatch(prd, -1)
-	tasks := make([]task, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 3 {
-			continue
+// flattenTasks extracts all tasks from parsed milestones, sorted by task ID.
+func flattenTasks(milestones []milestone, maxName int) []task {
+	var tasks []task
+	for _, m := range milestones {
+		for _, t := range m.Tasks {
+			name := t.Name
+			if maxName > 0 && len([]rune(name)) > maxName {
+				name = string([]rune(name)[:maxName-1]) + "…"
+			}
+			tasks = append(tasks, task{ID: t.ID, Name: name, Status: t.Status, MilestoneID: t.MilestoneID})
 		}
-		id := strings.TrimSpace(match[1])
-		raw := strings.TrimSpace(match[2])
-		status := detectTaskStatus(raw)
-		cleaned := normalizeTaskName(raw)
-		if maxName > 0 && len([]rune(cleaned)) > maxName {
-			cleaned = string([]rune(cleaned)[:maxName-1]) + "…"
-		}
-		tasks = append(tasks, task{ID: id, Name: cleaned, Status: status})
 	}
 
 	sort.Slice(tasks, func(i, j int) bool {
@@ -991,41 +1051,6 @@ func parseTasks(prd string, maxName int) []task {
 	return tasks
 }
 
-func normalizeTaskName(name string) string {
-	cleaned := name
-	cleaned = strings.ReplaceAll(cleaned, "✅", "")
-	cleaned = strings.ReplaceAll(cleaned, "🚫", "")
-	cleaned = strings.ReplaceAll(cleaned, "🔄", "")
-	cleaned = strings.ReplaceAll(cleaned, "⬜", "")
-
-	cleaned = regexp.MustCompile(`(?i)\[done\]`).ReplaceAllString(cleaned, "")
-	cleaned = regexp.MustCompile(`(?i)blocked`).ReplaceAllString(cleaned, "")
-	cleaned = regexp.MustCompile(`(?i)follow-?up`).ReplaceAllString(cleaned, "")
-
-	return strings.TrimSpace(cleaned)
-}
-
-func assignTaskStatuses(tasks []task) {
-	inProgressAssigned := false
-	for i := range tasks {
-		status := tasks[i].Status
-		if status == taskPending && !inProgressAssigned {
-			status = taskInProgress
-			inProgressAssigned = true
-		}
-		tasks[i].Status = status
-	}
-}
-
-func detectTaskStatus(name string) taskStatus {
-	if strings.Contains(name, "✅") || regexp.MustCompile(`(?i)\[done\]`).MatchString(name) {
-		return taskComplete
-	}
-	if strings.Contains(name, "🚫") || regexp.MustCompile(`(?i)blocked`).MatchString(name) {
-		return taskBlocked
-	}
-	return taskPending
-}
 
 func parseTaskOrder(id string) (int, int) {
 	re := regexp.MustCompile(`^P(\d+)-(\d+)`)
@@ -1039,7 +1064,7 @@ func parseTaskOrder(id string) (int, int) {
 func lastCompletedTask(tasks []task) *task {
 	var last *task
 	for i := range tasks {
-		if tasks[i].Status == taskComplete {
+		if tasks[i].Status == taskDone || tasks[i].Status == taskVerified {
 			t := tasks[i]
 			last = &t
 		}
@@ -1048,36 +1073,101 @@ func lastCompletedTask(tasks []task) *task {
 }
 
 func parseMilestones(progress string) []milestone {
-	re := regexp.MustCompile(`(?m)^###\s+([✅⬜🔄🚫])?\s*M(\d+):\s*(.+)$`)
+	// Match milestone headers: ### M1: Name or ### ✅ M1: Name (legacy) or ### ⬜ M1: Name (legacy)
+	msRe := regexp.MustCompile(`(?m)^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):\s*(.+)$`)
 	depsRe := regexp.MustCompile(`\(depends:\s*(M[\d]+(?:\s*,\s*M[\d]+)*)\)\s*$`)
-	matches := re.FindAllStringSubmatch(progress, -1)
-	milestones := make([]milestone, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 4 {
+	// Match task checkboxes: - [ ] P0-1: Task Name, - [x] ..., - [>] ..., - [v] ..., - [!] ...
+	taskRe := regexp.MustCompile(`(?m)^\s*-\s+\[(.)\]\s+(.+)$`)
+
+	lines := strings.Split(progress, "\n")
+	var milestones []milestone
+	var currentMS *milestone
+
+	for _, line := range lines {
+		// Check for milestone header
+		if msMatch := msRe.FindStringSubmatch(line); len(msMatch) >= 3 {
+			// Save previous milestone
+			if currentMS != nil {
+				milestones = append(milestones, *currentMS)
+			}
+
+			id := "M" + strings.TrimSpace(msMatch[1])
+			name := strings.TrimSpace(msMatch[2])
+
+			// Extract dependency annotations from name
+			var deps []string
+			if depsMatch := depsRe.FindStringSubmatch(name); len(depsMatch) >= 2 {
+				name = strings.TrimSpace(depsRe.ReplaceAllString(name, ""))
+				for _, d := range strings.Split(depsMatch[1], ",") {
+					deps = append(deps, strings.TrimSpace(d))
+				}
+			}
+
+			currentMS = &milestone{ID: id, Name: name, Deps: deps}
 			continue
 		}
-		marker := strings.TrimSpace(match[1])
-		id := "M" + strings.TrimSpace(match[2])
-		name := strings.TrimSpace(match[3])
-		done := marker == "✅"
 
-		// Extract dependency annotations from name
-		var deps []string
-		if depsMatch := depsRe.FindStringSubmatch(name); len(depsMatch) >= 2 {
-			name = strings.TrimSpace(depsRe.ReplaceAllString(name, ""))
-			for _, d := range strings.Split(depsMatch[1], ",") {
-				deps = append(deps, strings.TrimSpace(d))
+		// Check for next section (## header) — stops current milestone
+		if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+			if currentMS != nil {
+				milestones = append(milestones, *currentMS)
+				currentMS = nil
 			}
+			continue
 		}
 
-		milestones = append(milestones, milestone{ID: id, Name: name, Done: done, Deps: deps})
+		// Parse task checkboxes under current milestone
+		if currentMS != nil {
+			if taskMatch := taskRe.FindStringSubmatch(line); len(taskMatch) >= 3 {
+				marker := taskMatch[1]
+				taskText := strings.TrimSpace(taskMatch[2])
+
+				var status taskStatus
+				switch marker {
+				case " ":
+					status = taskTodo
+				case ">":
+					status = taskInProgress
+				case "x":
+					status = taskDone
+				case "v":
+					status = taskVerified
+				case "!":
+					status = taskBlocked
+				default:
+					status = taskTodo
+				}
+
+				// Extract task ID if present (e.g., "P0-1: Task Name")
+				taskID := ""
+				taskName := taskText
+				idRe := regexp.MustCompile(`^(P\d+-[\w][\w-]*):\s*(.+)$`)
+				if idMatch := idRe.FindStringSubmatch(taskText); len(idMatch) >= 3 {
+					taskID = idMatch[1]
+					taskName = strings.TrimSpace(idMatch[2])
+				}
+
+				currentMS.Tasks = append(currentMS.Tasks, task{
+					ID:          taskID,
+					Name:        taskName,
+					Status:      status,
+					MilestoneID: currentMS.ID,
+				})
+			}
+		}
 	}
+
+	// Don't forget the last milestone
+	if currentMS != nil {
+		milestones = append(milestones, *currentMS)
+	}
+
 	return milestones
 }
 
 func nextMilestone(milestones []milestone) *milestone {
 	for _, m := range milestones {
-		if !m.Done {
+		if !milestoneAllDone(m) {
 			mm := m
 			return &mm
 		}
@@ -1087,7 +1177,7 @@ func nextMilestone(milestones []milestone) *milestone {
 
 func nextTask(tasks []task) *task {
 	for _, t := range tasks {
-		if t.Status == taskInProgress || t.Status == taskPending {
+		if t.Status == taskInProgress || t.Status == taskTodo {
 			tt := t
 			return &tt
 		}
@@ -1095,74 +1185,34 @@ func nextTask(tasks []task) *task {
 	return nil
 }
 
-func parseBlockers(progress string) []string {
-	return parseSectionLines(progress, "## Blockers")
-}
-
-// filterResolvedFeatureBlockers removes blockers that reference feature slugs
-// which are already complete. This handles stale blockers that weren't cleaned
-// up by the AI agent after dependency features finished.
-func filterResolvedFeatureBlockers(blockers []string, root string) []string {
-	if len(blockers) == 0 {
-		return blockers
-	}
-
-	// Resolve symlinked .belmont to get the real root
-	belmontPath := filepath.Join(root, ".belmont")
-	if target, err := filepath.EvalSymlinks(belmontPath); err == nil {
-		root = filepath.Dir(target)
-	}
-
-	featuresDir := filepath.Join(root, ".belmont", "features")
-	entries, err := os.ReadDir(featuresDir)
-	if err != nil {
-		return blockers
-	}
-
-	// Build set of completed feature slugs
-	completeSlugs := make(map[string]bool)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		slug := e.Name()
-		progressPath := filepath.Join(featuresDir, slug, "PROGRESS.md")
-		content, err := os.ReadFile(progressPath)
-		if err != nil {
-			continue
-		}
-		if strings.Contains(string(content), "## Status: ✅ Complete") {
-			completeSlugs[slug] = true
-		}
-	}
-
-	// Also check master PROGRESS.md feature table statuses
-	masterStatuses := parseMasterFeatureStatuses(root)
-	for slug, status := range masterStatuses {
-		if strings.Contains(status, "✅") {
-			completeSlugs[slug] = true
-		}
-	}
-
-	if len(completeSlugs) == 0 {
-		return blockers
-	}
-
-	var filtered []string
-	for _, b := range blockers {
-		lower := strings.ToLower(b)
-		resolved := false
-		for slug := range completeSlugs {
-			if strings.Contains(lower, slug) {
-				resolved = true
-				break
+// blockedTaskCount returns the number of tasks with [!] status across all milestones.
+func blockedTaskCount(milestones []milestone) int {
+	count := 0
+	for _, m := range milestones {
+		for _, t := range m.Tasks {
+			if t.Status == taskBlocked {
+				count++
 			}
 		}
-		if !resolved {
-			filtered = append(filtered, b)
+	}
+	return count
+}
+
+// blockedTaskNames returns descriptions of blocked tasks for display.
+func blockedTaskNames(milestones []milestone) []string {
+	var names []string
+	for _, m := range milestones {
+		for _, t := range m.Tasks {
+			if t.Status == taskBlocked {
+				label := t.Name
+				if t.ID != "" {
+					label = t.ID + ": " + t.Name
+				}
+				names = append(names, label)
+			}
 		}
 	}
-	return filtered
+	return names
 }
 
 func parseDecisions(progress string, limit int) []string {
@@ -1233,52 +1283,46 @@ func fileHasRealContent(path string) bool {
 	return true
 }
 
-func computeOverallStatus(progress string, tasks []task) string {
-	statusLine := parseStatusLine(progress)
-	if strings.Contains(strings.ToLower(statusLine), "blocked") {
-		if strings.TrimSpace(statusLine) != "" {
-			return statusLine
-		}
-		return "🔴 BLOCKED"
-	}
-
+func computeOverallStatus(tasks []task) string {
 	if len(tasks) == 0 {
 		return "🔴 Not Started"
 	}
 
-	allDoneOrBlocked := true
-	anyDone := false
-	anyInProgress := false
+	allVerified := true
+	allDone := true
+	anyProgress := false
+	allBlocked := true
 
 	for _, t := range tasks {
-		if t.Status == taskComplete {
-			anyDone = true
+		if t.Status != taskVerified {
+			allVerified = false
 		}
-		if t.Status == taskInProgress {
-			anyInProgress = true
+		if t.Status != taskDone && t.Status != taskVerified {
+			allDone = false
 		}
-		if t.Status != taskComplete && t.Status != taskBlocked {
-			allDoneOrBlocked = false
+		if t.Status == taskDone || t.Status == taskVerified || t.Status == taskInProgress {
+			anyProgress = true
+		}
+		if t.Status != taskBlocked {
+			allBlocked = false
 		}
 	}
 
-	if allDoneOrBlocked {
+	if allVerified {
+		return "✅ Verified"
+	}
+	if allDone {
 		return "✅ Complete"
 	}
-	if anyDone || anyInProgress {
+	if allBlocked {
+		return "🔴 BLOCKED"
+	}
+	if anyProgress {
 		return "🟡 In Progress"
 	}
 	return "🔴 Not Started"
 }
 
-func parseStatusLine(progress string) string {
-	re := regexp.MustCompile(`(?m)^##\s*Status:\s*(.+)$`)
-	match := re.FindStringSubmatch(progress)
-	if len(match) < 2 {
-		return ""
-	}
-	return strings.TrimSpace(match[1])
-}
 
 func renderStatus(report statusReport) string {
 	// Feature listing mode (default when no --feature specified)
@@ -1291,11 +1335,12 @@ func renderStatus(report statusReport) string {
 		techPlan = "✅ Ready"
 	}
 
-	taskLine := fmt.Sprintf("Tasks: %d done, %d in progress, %d blocked, %d pending (of %d total)",
+	taskLine := fmt.Sprintf("Tasks: %d verified, %d done, %d in progress, %d blocked, %d todo (of %d total)",
+		report.TaskCounts["verified"],
 		report.TaskCounts["done"],
 		report.TaskCounts["in_progress"],
 		report.TaskCounts["blocked"],
-		report.TaskCounts["pending"],
+		report.TaskCounts["todo"],
 		report.TaskCounts["total"],
 	)
 
@@ -1321,23 +1366,28 @@ func renderStatus(report statusReport) string {
 	} else {
 		for _, m := range report.Milestones {
 			icon := "⬜"
-			if m.Done {
+			if milestoneAllVerified(m) {
+				icon = "✓"
+			} else if milestoneAllDone(m) {
 				icon = "✅"
+			} else if milestoneHasBlockers(m) {
+				icon = "🚫"
+			} else if !milestoneNotStarted(m) {
+				icon = "🔄"
 			}
 			sb.WriteString(fmt.Sprintf("  %s %s: %s\n", icon, m.ID, m.Name))
 		}
 	}
 	sb.WriteString("\n")
 
-	sb.WriteString("Active Blockers:\n")
-	if len(report.Blockers) == 0 {
-		sb.WriteString("  - None\n")
-	} else {
-		for _, b := range report.Blockers {
+	blocked := blockedTaskNames(report.Milestones)
+	if len(blocked) > 0 {
+		sb.WriteString("Blocked Tasks:\n")
+		for _, b := range blocked {
 			sb.WriteString(fmt.Sprintf("  - %s\n", b))
 		}
+		sb.WriteString("\n")
 	}
-	sb.WriteString("\n")
 
 	sb.WriteString("Next Milestone:\n")
 	if report.NextMilestone == nil {
@@ -1395,13 +1445,18 @@ func renderFeatureListing(report statusReport) string {
 	} else {
 		for _, f := range report.Features {
 			icon := "🔴"
-			if f.Status == "✅ Complete" {
+			if f.Status == "✅ Verified" {
+				icon = "✓"
+			} else if f.Status == "✅ Complete" {
 				icon = "✅"
 			} else if f.Status == "🟡 In Progress" {
 				icon = "🟡"
 			}
 			sb.WriteString(fmt.Sprintf("%s %s (%s)\n", icon, f.Name, f.Slug))
 			sb.WriteString(fmt.Sprintf("  Tasks: %d/%d done", f.TasksDone, f.TasksTotal))
+			if f.TasksVerified > 0 {
+				sb.WriteString(fmt.Sprintf(" (%d verified)", f.TasksVerified))
+			}
 			if f.MilestonesTotal > 0 {
 				sb.WriteString(fmt.Sprintf("  |  Milestones: %d/%d done", f.MilestonesDone, f.MilestonesTotal))
 			}
@@ -1411,9 +1466,15 @@ func renderFeatureListing(report statusReport) string {
 			if len(f.Milestones) > 0 {
 				for _, m := range f.Milestones {
 					mIcon := "⬜"
-					if m.Done {
+					if milestoneAllVerified(m) {
+						mIcon = "✓"
+					} else if milestoneAllDone(m) {
 						mIcon = "✅"
+					} else if milestoneHasBlockers(m) {
+						mIcon = "🚫"
 					} else if f.NextMilestone != nil && m.ID == f.NextMilestone.ID {
+						mIcon = "🔄"
+					} else if !milestoneNotStarted(m) {
 						mIcon = "🔄"
 					}
 					sb.WriteString(fmt.Sprintf("    %s %s: %s\n", mIcon, m.ID, m.Name))
@@ -1425,10 +1486,11 @@ func renderFeatureListing(report statusReport) string {
 				sb.WriteString(fmt.Sprintf("  Next: %s — %s\n", f.NextTask.ID, f.NextTask.Name))
 			}
 
-			// Show blockers if any
-			if len(f.Blockers) > 0 {
-				sb.WriteString("  Blockers:\n")
-				for _, b := range f.Blockers {
+			// Show blocked tasks if any
+			if f.TasksBlocked > 0 {
+				blockedNames := blockedTaskNames(f.Milestones)
+				sb.WriteString("  Blocked:\n")
+				for _, b := range blockedNames {
 					sb.WriteString(fmt.Sprintf("    - %s\n", b))
 				}
 			}
@@ -1437,27 +1499,20 @@ func renderFeatureListing(report statusReport) string {
 		}
 	}
 
-	// Show master-level blockers if any (from master PROGRESS.md)
-	if len(report.Blockers) > 0 {
-		sb.WriteString("Active Blockers:\n")
-		for _, b := range report.Blockers {
-			sb.WriteString(fmt.Sprintf("  - %s\n", b))
-		}
-		sb.WriteString("\n")
-	}
-
 	sb.WriteString("Use --feature <slug> for detailed task-level status.\n")
 	return sb.String()
 }
 
 func taskStatusIcon(status taskStatus) string {
 	switch status {
-	case taskComplete:
+	case taskVerified:
+		return "✓"
+	case taskDone:
 		return "✅"
-	case taskBlocked:
-		return "🚫"
 	case taskInProgress:
 		return "🔄"
+	case taskBlocked:
+		return "🚫"
 	default:
 		return "⬜"
 	}
@@ -2541,6 +2596,11 @@ func runUpdate(args []string) error {
 		fmt.Println(release.Body)
 	}
 
+	// Migrate old state tracking format if needed
+	if dirExists(filepath.Join(".", ".belmont")) {
+		migrateToUnifiedTracking(".")
+	}
+
 	// Auto-install if .belmont/ exists in cwd
 	if dirExists(filepath.Join(".", ".belmont")) {
 		fmt.Println("\nRe-installing skills and agents...")
@@ -2776,8 +2836,12 @@ func runAutoCmd(args []string) error {
 		fmt.Fprintf(os.Stderr, "\n\033[1mMilestones:\033[0m\n")
 		for _, m := range inRange {
 			status := "pending"
-			if m.Done {
+			if milestoneAllVerified(m) {
+				status = "verified"
+			} else if milestoneAllDone(m) {
 				status = "done"
+			} else if !milestoneNotStarted(m) {
+				status = "in progress"
 			}
 			fmt.Fprintf(os.Stderr, "  • %s — %s [%s]\n", m.ID, m.Name, status)
 		}
@@ -3572,11 +3636,11 @@ func runLoop(cfg loopConfig) error {
 			entry := historyEntry{
 				Action:       *action,
 				Result:       &executionResult{Success: skipErr == nil, DurationMs: 0},
-				TasksDone:    report.TaskCounts["done"],
+				TasksDone:    report.TaskCounts["done"] + report.TaskCounts["verified"],
 				TasksTotal:   report.TaskCounts["total"],
 				MsDone:       countDoneMilestones(report.Milestones),
 				MsTotal:      len(report.Milestones),
-				BlockerCount: len(report.Blockers),
+				BlockerCount: blockedTaskCount(report.Milestones),
 				HasFwlup:     hasFwlup,
 				Iteration:    i,
 			}
@@ -3639,11 +3703,11 @@ func runLoop(cfg loopConfig) error {
 		entry := historyEntry{
 			Action:       *action,
 			Result:       &result,
-			TasksDone:    report.TaskCounts["done"],
+			TasksDone:    report.TaskCounts["done"] + report.TaskCounts["verified"],
 			TasksTotal:   report.TaskCounts["total"],
 			MsDone:       countDoneMilestones(report.Milestones),
 			MsTotal:      len(report.Milestones),
-			BlockerCount: len(report.Blockers),
+			BlockerCount: blockedTaskCount(report.Milestones),
 			HasFwlup:     hasFwlup,
 			Iteration:    i,
 			WorkType:     wt,
@@ -3666,7 +3730,7 @@ func runLoop(cfg loopConfig) error {
 }
 
 func printLoopState(report statusReport, hasFwlup bool) {
-	done := report.TaskCounts["done"]
+	done := report.TaskCounts["done"] + report.TaskCounts["verified"]
 	total := report.TaskCounts["total"]
 	msDone := countDoneMilestones(report.Milestones)
 	msTotal := len(report.Milestones)
@@ -3683,8 +3747,9 @@ func printLoopState(report statusReport, hasFwlup bool) {
 	if hasFwlup {
 		fmt.Fprintf(os.Stderr, " \033[33m(FWLUP)\033[0m")
 	}
-	if len(report.Blockers) > 0 {
-		fmt.Fprintf(os.Stderr, " \033[31m(%d blockers)\033[0m", len(report.Blockers))
+	blockedCount := blockedTaskCount(report.Milestones)
+	if blockedCount > 0 {
+		fmt.Fprintf(os.Stderr, " \033[31m(%d blocked)\033[0m", blockedCount)
 	}
 	fmt.Fprintln(os.Stderr)
 }
@@ -3692,9 +3757,10 @@ func printLoopState(report statusReport, hasFwlup bool) {
 func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfig, hasFwlup bool, pendingTasks bool) loopAction {
 	last := lastActionType(history)
 
-	// Rule 1: Blockers → PAUSE
-	if len(report.Blockers) > 0 {
-		return loopAction{Type: actionPause, Reason: fmt.Sprintf("Blockers detected: %s", strings.Join(report.Blockers, ", "))}
+	// Rule 1: Blocked tasks → PAUSE
+	blocked := blockedTaskNames(report.Milestones)
+	if len(blocked) > 0 {
+		return loopAction{Type: actionPause, Reason: fmt.Sprintf("Blocked tasks: %s", strings.Join(blocked, ", "))}
 	}
 
 	// Rule 2: Consecutive failures >= maxFailures → ERROR
@@ -3726,7 +3792,7 @@ func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfi
 	inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 	allDone := true
 	for _, m := range inRange {
-		if !m.Done {
+		if !milestoneAllDone(m) {
 			allDone = false
 			break
 		}
@@ -3747,7 +3813,7 @@ func decideLoopAction(report statusReport, history []historyEntry, cfg loopConfi
 
 	// Rule 10: Next milestone in range → IMPLEMENT_MILESTONE
 	for _, m := range inRange {
-		if !m.Done {
+		if !milestoneAllDone(m) {
 			return loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Implementing milestone %s", m.ID), MilestoneID: m.ID}
 		}
 	}
@@ -4125,9 +4191,9 @@ func executeTriageAction(cfg loopConfig) executionResult {
 	var prompt string
 	if tmplErr != nil {
 		// Fallback inline prompt
-		prompt = fmt.Sprintf(`You are a triage agent. Read %s/PRD.md to find pending FWLUP tasks.
+		prompt = fmt.Sprintf(`You are a triage agent. Read %s/PROGRESS.md to find incomplete tasks (marked [ ] or [>]).
 Classify each as blocking (real bug) or deferrable (polish).
-If all are deferrable, move them to %s/NOTES.md under ## Polish and remove from PRD.md/PROGRESS.md.
+If all are deferrable, move them to %s/NOTES.md under ## Polish and remove from PROGRESS.md.
 Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","blocking_tasks":[],"deferred_tasks":[],"reason":"...","reverify_scope":"focused"}`, featureBase, featureBase)
 	} else {
 		var buf bytes.Buffer
@@ -4341,7 +4407,7 @@ func loopFingerprint(e historyEntry) string {
 func countDoneMilestones(milestones []milestone) int {
 	count := 0
 	for _, m := range milestones {
-		if m.Done {
+		if milestoneAllDone(m) {
 			count++
 		}
 	}
@@ -4469,7 +4535,7 @@ func buildMilestoneLoopStates(history []historyEntry, milestones []milestone) ma
 		states[m.ID] = &milestoneLoopState{
 			ID:   m.ID,
 			Name: m.Name,
-			Done: m.Done,
+			Done: milestoneAllDone(m),
 		}
 	}
 
@@ -4530,7 +4596,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		// First iteration: implement first undone milestone in range
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
-			if !m.Done {
+			if !milestoneAllDone(m) {
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("First iteration — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4567,7 +4633,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			// Docs-only: skip verification, move to next milestone
 			inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 			for _, m := range inRange {
-				if !m.Done {
+				if !milestoneAllDone(m) {
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Docs-only milestone — moving to %s", m.ID), MilestoneID: m.ID}
 				}
 			}
@@ -4589,7 +4655,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 	if lastType == actionVerify && lastSuccess && !hasMsFwlup {
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
-			if !m.Done {
+			if !milestoneAllDone(m) {
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Verification passed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4615,7 +4681,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 			// Triage already moved FWLUPs to NOTES.md — proceed to next milestone
 			inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 			for _, m := range inRange {
-				if !m.Done {
+				if !milestoneAllDone(m) {
 					return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Triage deferred polish items — implementing %s", m.ID), MilestoneID: m.ID}
 				}
 			}
@@ -4647,7 +4713,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		// fix_and_proceed: skip re-verification, move to next milestone
 		inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 		for _, m := range inRange {
-			if !m.Done {
+			if !milestoneAllDone(m) {
 				return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Follow-ups fixed — implementing %s", m.ID), MilestoneID: m.ID}
 			}
 		}
@@ -4670,7 +4736,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 				// Move to next undone milestone or complete
 				inRange := milestonesInRange(report.Milestones, cfg.From, cfg.To)
 				for _, m := range inRange {
-					if !m.Done {
+					if !milestoneAllDone(m) {
 						return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Milestone %s already verified — moving to %s", msID, m.ID), MilestoneID: m.ID}
 					}
 				}
@@ -4720,7 +4786,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 	allDone := true
 	allVerified := true
 	for _, m := range inRange {
-		if !m.Done {
+		if !milestoneAllDone(m) {
 			allDone = false
 			break
 		}
@@ -4756,7 +4822,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 
 	// Rule 10: Next undone milestone
 	for _, m := range inRange {
-		if !m.Done {
+		if !milestoneAllDone(m) {
 			return &loopAction{Type: actionImplementMilestone, Reason: fmt.Sprintf("Implementing milestone %s", m.ID), MilestoneID: m.ID}
 		}
 	}
@@ -4768,10 +4834,10 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 // checkHardGuardrails runs safety checks that always apply before AI decisions.
 // Returns nil if no guardrail triggers, otherwise a loopAction to take.
 func checkHardGuardrails(report statusReport, history []historyEntry, cfg loopConfig) *loopAction {
-	// Blockers → PAUSE (filter out blockers for completed features first)
-	blockers := filterResolvedFeatureBlockers(report.Blockers, cfg.Root)
-	if len(blockers) > 0 {
-		return &loopAction{Type: actionPause, Reason: fmt.Sprintf("Blockers detected: %s", strings.Join(blockers, ", "))}
+	// Blocked tasks → PAUSE
+	blocked := blockedTaskNames(report.Milestones)
+	if len(blocked) > 0 {
+		return &loopAction{Type: actionPause, Reason: fmt.Sprintf("Blocked tasks: %s", strings.Join(blocked, ", "))}
 	}
 
 	// Consecutive failures >= maxFailures → ERROR
@@ -4800,7 +4866,7 @@ func decideLoopActionAI(report statusReport, history []historyEntry, cfg loopCon
 	}
 	var milestones []msStateJSON
 	for _, m := range inRange {
-		ms := msStateJSON{ID: m.ID, Name: m.Name, Done: m.Done}
+		ms := msStateJSON{ID: m.ID, Name: m.Name, Done: milestoneAllDone(m)}
 		if s, ok := msStates[m.ID]; ok {
 			ms.Implemented = s.Implemented
 			ms.Verified = s.Verified
@@ -4860,11 +4926,11 @@ func decideLoopActionAI(report statusReport, history []historyEntry, cfg loopCon
 	}
 
 	state := map[string]interface{}{
-		"tasks_done":       report.TaskCounts["done"],
+		"tasks_done":       report.TaskCounts["done"] + report.TaskCounts["verified"],
 		"tasks_total":      report.TaskCounts["total"],
 		"milestone_states": milestones,
 		"has_followup":     hasFwlup,
-		"blocker_count":    len(report.Blockers),
+		"blocker_count":    blockedTaskCount(report.Milestones),
 		"last_5_actions":   recentHistory,
 		"ambiguity_reason": ambiguityReason,
 	}
@@ -5063,7 +5129,7 @@ func truncateTail(s string, maxLen int) string {
 	return s[len(s)-maxLen:]
 }
 
-// skipMilestoneInProgress marks a milestone as done in PROGRESS.md.
+// skipMilestoneInProgress marks all incomplete tasks in a milestone as done in PROGRESS.md.
 func skipMilestoneInProgress(root, feature, milestoneID string) error {
 	progressPath := filepath.Join(root, ".belmont", "features", feature, "PROGRESS.md")
 	content, err := os.ReadFile(progressPath)
@@ -5071,33 +5137,41 @@ func skipMilestoneInProgress(root, feature, milestoneID string) error {
 		return fmt.Errorf("read PROGRESS.md: %w", err)
 	}
 
-	// Replace [ ] with [x] for the matching milestone line
-	re := regexp.MustCompile(`(?im)(^- \[ \]\s+` + regexp.QuoteMeta(milestoneID) + `\b.*)`)
-	updated := re.ReplaceAllString(string(content), "- [x] "+milestoneID+" (skipped)")
+	lines := strings.Split(string(content), "\n")
+	msRe := regexp.MustCompile(`(?i)^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):`)
+	taskRe := regexp.MustCompile(`^(\s*-\s+)\[[ >!]\](\s+.*)$`)
 
-	if updated == string(content) {
+	inTarget := false
+	changed := false
+	for i, line := range lines {
+		if m := msRe.FindStringSubmatch(line); len(m) >= 2 {
+			inTarget = ("M"+m[1]) == milestoneID
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "## ") {
+			inTarget = false
+			continue
+		}
+		if inTarget {
+			if taskMatch := taskRe.FindStringSubmatch(line); len(taskMatch) >= 3 {
+				lines[i] = taskMatch[1] + "[x]" + taskMatch[2]
+				changed = true
+			}
+		}
+	}
+
+	if !changed {
 		return fmt.Errorf("milestone %s not found or already done", milestoneID)
 	}
 
-	return os.WriteFile(progressPath, []byte(updated), 0644)
+	return os.WriteFile(progressPath, []byte(strings.Join(lines, "\n")), 0644)
 }
 
 func detectFwlupTasks(root, feature string, report statusReport) bool {
-	prdPath := filepath.Join(root, ".belmont", "features", feature, "PRD.md")
-	prdContent, err := os.ReadFile(prdPath)
-	if err != nil {
-		return false
-	}
-
-	prd := string(prdContent)
 	fwlupRe := regexp.MustCompile(`(?i)FWLUP`)
-	if !fwlupRe.MatchString(prd) {
-		return false
-	}
-
-	// Check if any pending/in_progress tasks have FWLUP in their ID or name
+	// Check if any todo/in_progress tasks have FWLUP in their ID or name
 	for _, t := range report.Tasks {
-		if t.Status == taskPending || t.Status == taskInProgress {
+		if t.Status == taskTodo || t.Status == taskInProgress {
 			if fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name) {
 				return true
 			}
@@ -5121,20 +5195,12 @@ func detectFwlupTasksForMilestone(root, feature string, report statusReport, mil
 	if milestoneID == "" {
 		return false
 	}
-	prdPath := filepath.Join(root, ".belmont", "features", feature, "PRD.md")
-	prdContent, err := os.ReadFile(prdPath)
-	if err != nil {
-		return false
-	}
-	prd := string(prdContent)
 	fwlupRe := regexp.MustCompile(`(?i)FWLUP`)
-	if !fwlupRe.MatchString(prd) {
-		return false
-	}
 	for _, t := range report.Tasks {
-		if t.Status == taskPending || t.Status == taskInProgress {
+		if t.Status == taskTodo || t.Status == taskInProgress {
 			if fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name) {
-				if extractMilestoneFromTaskID(t.ID) == milestoneID {
+				// Tasks now carry their milestone ID from PROGRESS.md
+				if t.MilestoneID == milestoneID || extractMilestoneFromTaskID(t.ID) == milestoneID {
 					return true
 				}
 			}
@@ -5143,18 +5209,17 @@ func detectFwlupTasksForMilestone(root, feature string, report statusReport, mil
 	return false
 }
 
-// hasPendingTasks returns true if any task in the report is pending or in progress.
-// Used to detect state drift where milestones are marked ✅ but tasks remain incomplete.
+// hasPendingTasks returns true if any task in the report is todo or in progress.
 func hasPendingTasks(report statusReport) bool {
 	for _, t := range report.Tasks {
-		if t.Status == taskPending || t.Status == taskInProgress {
+		if t.Status == taskTodo || t.Status == taskInProgress {
 			return true
 		}
 	}
 	return false
 }
 
-// pendingTasksInRange checks for unchecked task checkboxes under milestones
+// pendingTasksInRange checks for incomplete tasks under milestones
 // that fall within the from/to range in the feature's PROGRESS.md.
 // When from and to are both empty, falls back to checking all milestones.
 func pendingTasksInRange(root, feature, from, to string) bool {
@@ -5168,8 +5233,9 @@ func pendingTasksInRange(root, feature, from, to string) bool {
 	toNum := parseMilestoneNum(to)
 
 	lines := strings.Split(string(data), "\n")
-	msRe := regexp.MustCompile(`(?i)^###\s+[✅⬜🔄🚫]?\s*M(\d+):`)
-	taskRe := regexp.MustCompile(`^\s*-\s+\[ \]`)
+	msRe := regexp.MustCompile(`(?i)^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):`)
+	// Match any incomplete task: [ ], [>], [!]
+	taskRe := regexp.MustCompile(`^\s*-\s+\[[ >!]\]`)
 
 	inRange := fromNum < 0 && toNum < 0 // if no range, all milestones are in range
 	for _, line := range lines {
@@ -5202,8 +5268,9 @@ func fwlupTasksInRange(root, feature string, report statusReport, from, to strin
 	toNum := parseMilestoneNum(to)
 
 	lines := strings.Split(string(data), "\n")
-	msRe := regexp.MustCompile(`(?i)^###\s+[✅⬜🔄🚫]?\s*M(\d+):`)
-	fwlupTaskRe := regexp.MustCompile(`(?i)^\s*-\s+\[ \].*FWLUP`)
+	msRe := regexp.MustCompile(`(?i)^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):`)
+	// Match any incomplete task with FWLUP in the text
+	fwlupTaskRe := regexp.MustCompile(`(?i)^\s*-\s+\[[ >!]\].*FWLUP`)
 
 	inRange := false
 	for _, line := range lines {
@@ -5299,10 +5366,10 @@ func interactiveMilestoneSelect(milestones []milestone) (from, to string, err er
 	firstUndone := ""
 	for _, m := range milestones {
 		marker := "⬜"
-		if m.Done {
+		if milestoneAllDone(m) {
 			marker = "✅"
 		}
-		if !m.Done && firstUndone == "" {
+		if !milestoneAllDone(m) && firstUndone == "" {
 			firstUndone = m.ID
 		}
 		depStr := ""
@@ -5371,12 +5438,12 @@ func computeWaves(milestones []milestone) ([]wave, error) {
 	// Compute in-degree for each undone milestone
 	inDegree := make(map[string]int)
 	for _, m := range milestones {
-		if m.Done {
+		if milestoneAllDone(m) {
 			continue
 		}
 		count := 0
 		for _, dep := range m.Deps {
-			if dm, ok := byID[dep]; ok && !dm.Done {
+			if dm, ok := byID[dep]; ok && !milestoneAllDone(dm) {
 				count++
 			}
 		}
@@ -7029,9 +7096,9 @@ func autoResolveBelmontConflicts(root string) bool {
 	return resolved
 }
 
-// resolveProgressConflict merges a conflicted PROGRESS.md by taking the union of
-// completions from both sides. Handles milestone tables, task-level checkboxes,
-// status lines, and activity entries. Returns true if successfully resolved.
+// resolveProgressConflict merges a conflicted PROGRESS.md by taking the most-advanced
+// task state from both sides. State ordering: [v] > [x] > [>] > [ ], [!] preserved.
+// Returns true if successfully resolved.
 func resolveProgressConflict(root, relPath, filePath string) bool {
 	// Get "ours" version
 	oursCmd := exec.Command("git", "show", ":2:"+relPath)
@@ -7049,42 +7116,24 @@ func resolveProgressConflict(root, relPath, filePath string) bool {
 		return false
 	}
 
-	oursLines := strings.Split(string(oursOut), "\n")
+	// State priority: higher = more advanced
+	statePriority := map[string]int{" ": 0, ">": 1, "x": 2, "v": 3, "!": -1}
+
+	// Parse task states from "theirs"
+	theirsStates := make(map[string]string) // task ID → checkbox marker
+	taskRe := regexp.MustCompile(`^\s*-\s+\[(.)\]\s+(P\d+-[\w][\w-]*)`)
 	theirsLines := strings.Split(string(theirsOut), "\n")
-
-	// Build sets of completed items from "theirs"
-	theirsDone := make(map[string]bool)
-
-	// Match milestone table rows: | [x] | M1 ...
-	milestoneRe := regexp.MustCompile(`^\|\s*\[([xX ])\]\s*\|\s*(M\d+)`)
-	// Match task checkboxes: - [x] P0-1: ... or - [x] DS-1: ...
-	taskRe := regexp.MustCompile(`^-\s*\[([xX ])\]\s*([A-Z][A-Z0-9]+-\d+[\w-]*)`)
-	// Match milestone headers: ### ✅ M1: ... or ### ⬜ M1: ...
-	milestoneHeaderRe := regexp.MustCompile(`^###\s*(✅|⬜|🔄)\s*(M\d+):`)
-
 	for _, line := range theirsLines {
-		if m := milestoneRe.FindStringSubmatch(line); m != nil {
-			if strings.ToLower(m[1]) == "x" {
-				theirsDone["ms:"+m[2]] = true
-			}
-		}
 		if m := taskRe.FindStringSubmatch(line); m != nil {
-			if strings.ToLower(m[1]) == "x" {
-				theirsDone["task:"+m[2]] = true
-			}
-		}
-		if m := milestoneHeaderRe.FindStringSubmatch(line); m != nil {
-			if m[1] == "✅" {
-				theirsDone["header:"+m[2]] = true
-			}
+			theirsStates[m[2]] = m[1]
 		}
 	}
 
-	// Collect unique activity entries from "theirs" (table rows starting with |)
+	// Collect unique activity entries from "theirs"
 	theirsActivityLines := make(map[string]bool)
 	inActivity := false
 	for _, line := range theirsLines {
-		if strings.Contains(line, "## Recent Activity") || strings.Contains(line, "## Activity") {
+		if strings.Contains(line, "## Recent Activity") || strings.Contains(line, "## Activity") || strings.Contains(line, "## Session History") {
 			inActivity = true
 			continue
 		}
@@ -7096,56 +7145,31 @@ func resolveProgressConflict(root, relPath, filePath string) bool {
 		}
 	}
 
-	// Status priority for the Status line
-	statusPriority := map[string]int{"🔴 Not Started": 0, "🟡 In Progress": 1, "✅ Done": 2, "✅ Complete": 2}
-	theirsStatus := ""
-	statusRe := regexp.MustCompile(`^## Status:\s*(.+)`)
-	for _, line := range theirsLines {
-		if m := statusRe.FindStringSubmatch(line); m != nil {
-			theirsStatus = strings.TrimSpace(m[1])
-		}
-	}
-
-	// Merge: start from "ours", upgrade completions from "theirs"
+	// Merge: start from "ours", upgrade task states from "theirs"
+	oursLines := strings.Split(string(oursOut), "\n")
 	var merged []string
 	inActivitySection := false
 	activityInserted := make(map[string]bool)
 
 	for _, line := range oursLines {
-		// Upgrade milestone table checkboxes
-		if m := milestoneRe.FindStringSubmatch(line); m != nil {
-			if m[1] == " " && theirsDone["ms:"+m[2]] {
-				line = strings.Replace(line, "[ ]", "[x]", 1)
-			}
-		}
-
-		// Upgrade task checkboxes
+		// Upgrade task checkboxes to the more-advanced state
 		if m := taskRe.FindStringSubmatch(line); m != nil {
-			if m[1] == " " && theirsDone["task:"+m[2]] {
-				line = strings.Replace(line, "[ ]", "[x]", 1)
-			}
-		}
-
-		// Upgrade milestone headers
-		if m := milestoneHeaderRe.FindStringSubmatch(line); m != nil {
-			if m[1] != "✅" && theirsDone["header:"+m[2]] {
-				line = strings.Replace(line, m[1], "✅", 1)
-			}
-		}
-
-		// Take the more-complete status
-		if m := statusRe.FindStringSubmatch(line); m != nil && theirsStatus != "" {
-			oursStatus := strings.TrimSpace(m[1])
-			if statusPriority[theirsStatus] > statusPriority[oursStatus] {
-				line = "## Status: " + theirsStatus
+			oursMarker := m[1]
+			taskID := m[2]
+			if theirsMarker, ok := theirsStates[taskID]; ok {
+				// Take the more-advanced state (but preserve [!] blocked)
+				if oursMarker == "!" || theirsMarker == "!" {
+					// Keep blocked as-is from ours
+				} else if statePriority[theirsMarker] > statePriority[oursMarker] {
+					line = strings.Replace(line, "["+oursMarker+"]", "["+theirsMarker+"]", 1)
+				}
 			}
 		}
 
 		// Track activity section for merging entries
-		if strings.Contains(line, "## Recent Activity") || strings.Contains(line, "## Activity") {
+		if strings.Contains(line, "## Recent Activity") || strings.Contains(line, "## Activity") || strings.Contains(line, "## Session History") {
 			inActivitySection = true
 		} else if inActivitySection && strings.HasPrefix(line, "##") {
-			// End of activity section — insert any theirs-only entries before the next section
 			for theirsLine := range theirsActivityLines {
 				if !activityInserted[theirsLine] {
 					merged = append(merged, theirsLine)
@@ -7360,10 +7384,17 @@ func runReverifyCmd(args []string) error {
 	milestones := parseMilestones(string(progressContent))
 	inRange := milestonesInRange(milestones, from, to)
 
-	// Find completed milestones to verify
+	// Find milestones that have [x] (done but not verified) tasks
 	var targets []milestone
 	for _, m := range inRange {
-		if m.Done {
+		hasDoneTasks := false
+		for _, t := range m.Tasks {
+			if t.Status == taskDone {
+				hasDoneTasks = true
+				break
+			}
+		}
+		if hasDoneTasks {
 			targets = append(targets, m)
 		}
 	}
@@ -7372,7 +7403,7 @@ func runReverifyCmd(args []string) error {
 		if format == "json" {
 			fmt.Println(`{"verified":0,"results":[]}`)
 		} else {
-			fmt.Fprintln(os.Stderr, "No completed milestones to re-verify in the specified range.")
+			fmt.Fprintln(os.Stderr, "No milestones with unverified tasks to re-verify in the specified range.")
 		}
 		return nil
 	}
@@ -7405,7 +7436,7 @@ func runReverifyCmd(args []string) error {
 
 		// Build milestone-scoped verify prompt
 		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
-		prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nCRITICAL: Do NOT modify the status of ANY other milestone in PROGRESS.md. Only update the heading for %s.", m.ID, m.ID, m.ID)
+		prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks marked [x] (done) in milestone %s. Do NOT verify tasks from other milestones. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nOn success: mark verified tasks as [v] in PROGRESS.md.\nOn failure: add new [ ] follow-up tasks to milestone %s and leave originals as [x].\n\nCRITICAL: Do NOT modify tasks in any other milestone.", m.ID, m.ID, m.ID)
 
 		// Build and run the tool command
 		var cmd *exec.Cmd
@@ -7461,20 +7492,31 @@ func runReverifyCmd(args []string) error {
 		} else {
 			fmt.Fprintf(os.Stderr, "\n\033[32m  ✓ %s (%.1fs)\033[0m\n", m.ID, res.Duration)
 
-			// Re-read status to detect new FWLUPs for this milestone
+			// Re-read status to detect verification results
 			report, statusErr := buildStatus(root, 55, feature)
 			if statusErr == nil {
-				var fwlups []string
-				fwlupRe := regexp.MustCompile(`(?i)FWLUP`)
+				// Check for new incomplete tasks (follow-ups) in this milestone
+				var followups []string
 				for _, t := range report.Tasks {
-					if (t.Status == taskPending || t.Status == taskInProgress) &&
-						(fwlupRe.MatchString(t.ID) || fwlupRe.MatchString(t.Name)) &&
-						extractMilestoneFromTaskID(t.ID) == m.ID {
-						fwlups = append(fwlups, t.ID)
+					if (t.Status == taskTodo || t.Status == taskInProgress) &&
+						t.MilestoneID == m.ID {
+						label := t.ID
+						if label == "" {
+							label = t.Name
+						}
+						followups = append(followups, label)
 					}
 				}
-				res.Fwlups = fwlups
-				res.Passed = len(fwlups) == 0
+				// Also check if any [x] tasks remain (verification didn't pass them)
+				hasUnverified := false
+				for _, t := range report.Tasks {
+					if t.Status == taskDone && t.MilestoneID == m.ID {
+						hasUnverified = true
+						break
+					}
+				}
+				res.Fwlups = followups
+				res.Passed = len(followups) == 0 && !hasUnverified
 			} else {
 				res.Passed = true // assume passed if we can't check
 			}
@@ -7574,6 +7616,296 @@ func runSyncCmd(args []string) error {
 }
 
 // runRecover handles the "belmont recover" command.
+// migrateToUnifiedTracking detects and converts old dual-file state tracking to the new
+// unified PROGRESS.md format. Old format: PRD.md has ✅/🚫 on task headers, PROGRESS.md has
+// ✅/⬜ on milestone headers and ## Blockers/## Status sections. New format: PROGRESS.md
+// has task checkboxes with [ ]/[>]/[x]/[v]/[!] states, no milestone emojis, no Blockers/Status sections.
+func migrateToUnifiedTracking(root string) {
+	featuresDir := filepath.Join(root, ".belmont", "features")
+	entries, err := os.ReadDir(featuresDir)
+	if err != nil {
+		return
+	}
+
+	// Detect if migration is needed by checking first feature
+	needsMigration := false
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		progressPath := filepath.Join(featuresDir, e.Name(), "PROGRESS.md")
+		data, err := os.ReadFile(progressPath)
+		if err != nil {
+			continue
+		}
+		content := string(data)
+		// Old format indicators: emoji on milestone headers or ## Blockers section
+		if regexp.MustCompile(`(?m)^###\s+[✅⬜🔄🚫]\s*M\d+:`).MatchString(content) ||
+			strings.Contains(content, "## Blockers") ||
+			strings.Contains(content, "## Status:") {
+			needsMigration = true
+		}
+		break
+	}
+
+	if !needsMigration {
+		return
+	}
+
+	fmt.Println("\n🔄 Migrating to unified state tracking...")
+
+	migratedCount := 0
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		slug := e.Name()
+		featurePath := filepath.Join(featuresDir, slug)
+
+		// Step 1: Parse task statuses from old PRD.md
+		prdPath := filepath.Join(featurePath, "PRD.md")
+		prdTaskStatuses := make(map[string]string) // task ID → new checkbox marker
+		if prdData, err := os.ReadFile(prdPath); err == nil {
+			prdRe := regexp.MustCompile(`(?m)^###\s+(P\d+-[\w][\w-]*):\s*(.+)$`)
+			for _, match := range prdRe.FindAllStringSubmatch(string(prdData), -1) {
+				id := strings.TrimSpace(match[1])
+				text := match[2]
+				marker := " " // default: todo
+				if strings.Contains(text, "✅") || regexp.MustCompile(`(?i)\[done\]`).MatchString(text) {
+					marker = "x" // done (not verified — conservative)
+				} else if strings.Contains(text, "🚫") || regexp.MustCompile(`(?i)blocked`).MatchString(text) {
+					marker = "!"
+				}
+				prdTaskStatuses[id] = marker
+			}
+
+			// Step 2: Strip emoji from PRD.md task headers
+			updated := string(prdData)
+			for _, emoji := range []string{"✅", "🚫", "🔄", "⬜", "🔵"} {
+				updated = strings.ReplaceAll(updated, emoji, "")
+			}
+			// Clean up extra spaces from removed emojis
+			updated = regexp.MustCompile(`(?m)^(###\s+P\d+-[\w][\w-]*:\s*)\s+`).ReplaceAllString(updated, "$1")
+			updated = regexp.MustCompile(`\s+$`).ReplaceAllString(updated, "")
+			os.WriteFile(prdPath, []byte(strings.TrimRight(updated, "\n")+"\n"), 0644)
+		}
+
+		// Step 3: Update PROGRESS.md
+		progressPath := filepath.Join(featurePath, "PROGRESS.md")
+		progressData, err := os.ReadFile(progressPath)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(progressData), "\n")
+		var newLines []string
+		skipBlockers := false
+		skipStatus := false
+
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+
+			// Remove ## Status: line
+			if strings.HasPrefix(trimmed, "## Status:") {
+				skipStatus = true
+				continue
+			}
+			if skipStatus {
+				if trimmed == "" {
+					skipStatus = false
+					continue
+				}
+				skipStatus = false
+			}
+
+			// Remove ## Blockers section
+			if strings.HasPrefix(trimmed, "## Blockers") {
+				skipBlockers = true
+				continue
+			}
+			if skipBlockers {
+				if strings.HasPrefix(trimmed, "## ") {
+					skipBlockers = false
+					// Fall through to process this line
+				} else {
+					continue
+				}
+			}
+
+			// Remove emoji from milestone headers: ### ✅ M1: → ### M1:
+			msRe := regexp.MustCompile(`^(###\s+)[✅⬜🔄🚫]\s*(M\d+:.*)$`)
+			if m := msRe.FindStringSubmatch(line); m != nil {
+				line = m[1] + m[2]
+			}
+
+			// Upgrade task checkboxes using PRD.md statuses
+			taskRe := regexp.MustCompile(`^(\s*-\s+)\[[ xX]\](\s+)(P\d+-[\w][\w-]*)(.*)$`)
+			if m := taskRe.FindStringSubmatch(line); m != nil {
+				taskID := m[3]
+				if marker, ok := prdTaskStatuses[taskID]; ok {
+					line = m[1] + "[" + marker + "]" + m[2] + m[3] + m[4]
+				}
+			}
+
+			newLines = append(newLines, line)
+		}
+
+		os.WriteFile(progressPath, []byte(strings.Join(newLines, "\n")), 0644)
+		migratedCount++
+		fmt.Printf("  Migrated feature '%s'\n", slug)
+	}
+
+	// Step 4: Migrate master PRD.md — remove features table
+	masterPrdPath := filepath.Join(root, ".belmont", "PRD.md")
+	if prdData, err := os.ReadFile(masterPrdPath); err == nil {
+		content := string(prdData)
+		// Remove the features table section
+		featuresTableRe := regexp.MustCompile(`(?ms)^## Features\s*\n.*?(?:\n## |\z)`)
+		if featuresTableRe.MatchString(content) {
+			// Extract priority/deps from old table before removing
+			oldDeps, oldPriorities := parseMasterPRDTableLegacy(content)
+
+			// Remove the features table from PRD
+			updated := featuresTableRe.ReplaceAllString(content, "")
+			// Add global doc sections if not present
+			if !strings.Contains(updated, "## Cross-Cutting Decisions") {
+				updated = strings.TrimRight(updated, "\n") + "\n\n## Cross-Cutting Decisions\n\n(Add cross-cutting product decisions here)\n"
+			}
+			if !strings.Contains(updated, "## Constraints") {
+				updated = strings.TrimRight(updated, "\n") + "\n\n## Constraints\n\n(Add project-wide constraints here)\n"
+			}
+			os.WriteFile(masterPrdPath, []byte(updated), 0644)
+
+			// Step 5: Add Priority + Dependencies columns to master PROGRESS.md
+			masterProgressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
+			if progressData, err := os.ReadFile(masterProgressPath); err == nil {
+				migratedProgress := migrateMasterProgressTable(string(progressData), oldDeps, oldPriorities)
+				os.WriteFile(masterProgressPath, []byte(migratedProgress), 0644)
+			}
+		}
+	}
+
+	if migratedCount > 0 {
+		fmt.Printf("\n  Migrated %d feature(s). ✅ tasks mapped to [x] (done, not verified).\n", migratedCount)
+		fmt.Println("  Run 'belmont reverify' to verify completed work.")
+	}
+}
+
+// parseMasterPRDTableLegacy extracts deps and priorities from the old-format master PRD features table.
+func parseMasterPRDTableLegacy(content string) (deps map[string][]string, priorities map[string]string) {
+	deps = make(map[string][]string)
+	priorities = make(map[string]string)
+	lines := strings.Split(content, "\n")
+	inTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## Features") {
+			inTable = true
+			continue
+		}
+		if inTable && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if !inTable || !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+		cells := splitTableCells(trimmed)
+		if len(cells) < 4 {
+			continue
+		}
+		slug := strings.TrimSpace(cells[1])
+		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
+			continue
+		}
+		priorities[slug] = strings.TrimSpace(cells[2])
+		depStr := strings.TrimSpace(cells[3])
+		if depStr != "" && !strings.EqualFold(depStr, "None") && depStr != "-" {
+			for _, d := range strings.Split(depStr, ",") {
+				d = strings.TrimSpace(d)
+				if d != "" {
+					deps[slug] = append(deps[slug], d)
+				}
+			}
+		}
+	}
+	return
+}
+
+// migrateMasterProgressTable adds Priority and Dependencies columns to the master PROGRESS.md features table.
+func migrateMasterProgressTable(content string, deps map[string][]string, priorities map[string]string) string {
+	lines := strings.Split(content, "\n")
+	var result []string
+	inTable := false
+	headerDone := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "## Features") {
+			inTable = true
+			result = append(result, line)
+			continue
+		}
+		if inTable && strings.HasPrefix(trimmed, "## ") {
+			inTable = false
+		}
+
+		if inTable && strings.HasPrefix(trimmed, "|") {
+			cells := splitTableCells(trimmed)
+			if !headerDone {
+				// Check if it's a header row
+				if len(cells) >= 2 && cells[0] == "Feature" {
+					// Replace header: add Priority and Dependencies after Slug
+					result = append(result, "| Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |")
+					result = append(result, "|---------|------|----------|-------------|--------|------------|-------|")
+					headerDone = true
+					continue
+				}
+				// Separator row
+				if strings.Contains(trimmed, "---") {
+					continue // already added separator above
+				}
+			} else {
+				// Data row — add priority and deps columns
+				if len(cells) >= 2 && !strings.HasPrefix(cells[0], "-") {
+					slug := strings.TrimSpace(cells[1])
+					if strings.HasPrefix(slug, "-") || slug == "Slug" {
+						result = append(result, line)
+						continue
+					}
+					priority := "P1"
+					if p, ok := priorities[slug]; ok {
+						priority = p
+					}
+					depStr := "None"
+					if d, ok := deps[slug]; ok && len(d) > 0 {
+						depStr = strings.Join(d, ", ")
+					}
+					status := ""
+					ms := ""
+					tasks := ""
+					if len(cells) >= 3 {
+						status = cells[2]
+					}
+					if len(cells) >= 4 {
+						ms = cells[3]
+					}
+					if len(cells) >= 5 {
+						tasks = cells[4]
+					}
+					result = append(result, fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |",
+						cells[0], slug, priority, depStr, status, ms, tasks))
+					continue
+				}
+			}
+		}
+
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
+}
+
 func runRecover(args []string) error {
 	fs := flag.NewFlagSet("recover", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

@@ -43,12 +43,12 @@ Read all state files and build a cleanup profile:
 
 1. Check `.belmont/` directory exists — if not, tell user to run `belmont install` first and stop
 2. Read `.belmont/PRD.md` — extract features table, note each feature's status
-3. Read `.belmont/PROGRESS.md` — cross-reference feature statuses
+3. Read `.belmont/PROGRESS.md` — cross-reference feature statuses (computed from task states)
 4. Scan `.belmont/features/` for each subdirectory:
-   - Read `PROGRESS.md` — check for `## Status: ✅ Complete`
+   - Read `PROGRESS.md` — check if all tasks are `[v]` (verified) indicating the feature is complete
    - Count all files: PRD.md, TECH_PLAN.md, PROGRESS.md, NOTES.md, MILESTONE.md, MILESTONE-*.done.md
    - Estimate total size of the feature directory
-   - Classify as: **Completed** (status ✅), **Active** (in progress), or **Not Started**
+   - Classify as: **Completed** (all tasks `[v]`), **Active** (has `[>]` or `[x]` tasks), or **Not Started** (all tasks `[ ]`)
 5. Find all `MILESTONE-*.done.md` files across `.belmont/` root and all feature directories
 6. Read `.belmont/NOTES.md` — count entries/sections, note oldest entry date
 7. Check for convention files at project root: CLAUDE.md, `.cursorrules`, `.windsurfrules`, AGENTS.md
@@ -97,7 +97,7 @@ Enter letters for categories to run (e.g., "amn"):
 
 **Skip if no completed features exist.**
 
-For each feature where `## Status: ✅ Complete` in its PROGRESS.md, present it individually:
+For each feature where all tasks in PROGRESS.md are `[v]` (verified), present it individually:
 
 ```
 Feature: [feature-name] ([slug])

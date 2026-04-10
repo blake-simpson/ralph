@@ -150,14 +150,13 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 **Scenario B — Feature plan with existing master:**
 1. Write `{base}/TECH_PLAN.md` using the **Feature TECH_PLAN.md Format** below.
-2. **Cross-cutting drift check**: if any new cross-cutting decisions emerged during the interview (new conventions, tooling changes, shared patterns), append them to `.belmont/TECH_PLAN.md` and tell the user what was added.
+2. **Cross-cutting drift check**: if any new cross-cutting decisions emerged during the interview (new conventions, tooling changes, shared patterns), update `.belmont/TECH_PLAN.md` — edit existing sections where decisions changed, add new sections for new decisions, and remove stale info. Tell the user what was changed.
 
 **Scenario C — Master only:**
-1. Update `.belmont/TECH_PLAN.md` in-place using the **Master TECH_PLAN.md Format** below.
+1. Update `.belmont/TECH_PLAN.md` in-place using the **Master TECH_PLAN.md Format** below. Actively curate: edit existing sections, remove stale info, update decisions that have changed.
 
 - If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
-<!-- @include state-reconciliation.md -->
 <!-- @include commit-belmont-changes.md commit_context="after technical planning" -->
 
 - Say: "Tech plan complete."
@@ -167,7 +166,7 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 ## Master TECH_PLAN.md Format
 
-Write to `.belmont/TECH_PLAN.md` with this structure:
+The master TECH_PLAN is a **living document** for cross-cutting architecture decisions. Skills and agents actively curate it — editing existing sections, removing stale info, and updating decisions as the architecture evolves. Write to `.belmont/TECH_PLAN.md` with this structure:
 
 ```markdown
 # Technical Plan: [Product Name]

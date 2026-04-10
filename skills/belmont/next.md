@@ -38,7 +38,7 @@ Once the base path is resolved, use `{base}` as shorthand:
 
 ## When to Use This
 
-- Follow-up tasks (FWLUP) created by verification
+- Follow-up tasks created by verification
 - Small, isolated bug fixes or adjustments
 - Tasks with clear, self-contained scope
 - Knocking out one quick task without the overhead of the full pipeline
@@ -51,14 +51,14 @@ Once the base path is resolved, use `{base}` as shorthand:
 
 ## Batch Mode
 
-If the invoking prompt contains "BATCH MODE" instructions, implement **ALL pending FWLUP tasks** in the current milestone sequentially instead of stopping after one:
+If the invoking prompt contains "BATCH MODE" instructions, implement **ALL pending follow-up tasks** in the current milestone sequentially instead of stopping after one:
 
-1. After completing a task (Steps 1-5), loop back to Step 1 to find the next pending FWLUP task
-2. Continue until no pending FWLUP tasks remain in the milestone
+1. After completing a task (Steps 1-5), loop back to Step 1 to find the next pending follow-up task
+2. Continue until no pending follow-up tasks remain in the milestone
 3. Archive each MILESTONE file individually after each task (Step 5)
 4. Report a combined summary at the end listing all tasks completed
 
-**Critical**: In batch mode, ONLY work on tasks that have "FWLUP" in their task ID. If Step 1 finds no pending FWLUP tasks, stop immediately and report "No FWLUP tasks to fix — batch mode complete." Do NOT pick up regular (non-FWLUP) tasks. Regular tasks require the full `/belmont:implement` pipeline.
+**Critical**: In batch mode, ONLY work on follow-up tasks (tasks added by verification). If Step 1 finds no pending follow-up tasks, stop immediately and report "No follow-up tasks to fix — batch mode complete." Do NOT pick up regular tasks. Regular tasks require the full `/belmont:implement` pipeline.
 
 This mode is used by the auto loop to fix all follow-up issues in a single invocation, avoiding the overhead of re-invoking the tool CLI for each small fix.
 
@@ -81,7 +81,7 @@ Optional helper:
 
 1. Read `{base}/PROGRESS.md` and find the **first pending milestone** (any milestone with unchecked `[ ]` tasks)
 2. Within that milestone, find the **first unchecked task** (`[ ]`)
-   - **In batch mode**: Only consider tasks with "FWLUP" in their ID. If no FWLUP tasks are pending, report "No FWLUP tasks to fix — batch mode complete." and stop. Do NOT implement regular tasks.
+   - **In batch mode**: Only consider follow-up tasks (tasks added by verification). If no follow-up tasks are pending, report "No follow-up tasks to fix — batch mode complete." and stop. Do NOT implement regular tasks.
 3. Look up that task's full definition in `{base}/PRD.md`
 4. If all tasks are complete, report "All tasks complete!" and stop
 
@@ -166,19 +166,17 @@ If Figma URLs exist for this task, note them in the Design Specifications sectio
 After the implementation agent completes:
 
 1. **Read the Implementation Log** from `{base}/MILESTONE.md`
-2. **Verify tracking updates** — the implementation agent should have marked the task in `{base}/PRD.md` and `{base}/PROGRESS.md`. If missed, update them now.
+2. **Verify tracking updates** — the implementation agent should have marked the task `[x]` in `{base}/PROGRESS.md`. If missed, update it now: `[ ]` or `[>]` -> `[x]`.
 3. **Handle follow-up tasks** — if the implementation log listed out-of-scope issues:
-   - Add them as new FWLUP tasks to `{base}/PRD.md`
-   - Add them to the appropriate milestone in `{base}/PROGRESS.md`
-4. **Check milestone completion** — if this was the last task in the milestone:
-   - Update milestone status: `### ⬜ M1:` becomes `### ✅ M1:`
-5. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
+   - Add them as new `[ ]` tasks to the appropriate milestone in `{base}/PROGRESS.md`
+4. **Check milestone completion** — milestone status is computed from its tasks. No header changes needed.
+5. **Update master docs** — If cross-cutting decisions were discovered, update `.belmont/PRD.md` and `.belmont/TECH_PLAN.md`. Edit existing sections, remove stale info.
+6. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
    ```
    # Progress: [Product Name from .belmont/PRD.md]
-   ## Status: 🟡 In Progress
    ## Features
-   | Feature | Slug | Status | Milestones | Tasks | Blockers |
-   |---------|------|--------|------------|-------|----------|
+   | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
+   |---------|------|----------|-------------|--------|------------|-------|
    ## Recent Activity
    | Date | Feature | Activity |
    |------|---------|----------|
@@ -190,42 +188,6 @@ After the implementation agent completes:
 Archive the MILESTONE file: `{base}/MILESTONE.md` → `{base}/MILESTONE-[MilestoneID].done.md` (e.g., `MILESTONE-M2.done.md`). Use the **milestone ID** (M1, M2, etc.), NOT the task ID. If a file with that name already exists (from a previous task in the same milestone), overwrite it.
 
 This prevents stale context from bleeding into the next run.
-
-### Reconcile State Files
-
-Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and fix any discrepancies:
-
-1. **Task ↔ checkbox sync** — For each task in PROGRESS.md milestone sections:
-   - Find the matching `### P...:` header in PRD.md by task ID
-   - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
-   - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
-
-2. **Milestone status sync** — Only for the milestone(s) you were asked to verify or implement (your scoped milestone). Do NOT touch other milestones' headings — they may be `⬜` intentionally (e.g., queued for re-verification):
-   - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
-   - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
-
-3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
-   - Remove entries whose referenced task ID is now marked ✅ in PRD.md
-   - Remove entries that reference other features (e.g. "Depends on X feature") if that feature's status is `✅ Complete` in `.belmont/PROGRESS.md`'s Features table
-   - If section becomes empty, set to `None`
-
-4. **Overall status line** — Update `## Status:` in PROGRESS.md:
-   - All milestones ✅ → `## Status: ✅ Complete`
-   - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
-   - All ⬜ → `## Status: 🔴 Not Started`
-
-5. **Feature dependency sync** (master PRD only) — In the `## Features` table of `.belmont/PRD.md`:
-   - Verify all dependency slugs reference existing feature slugs in the table
-   - If a feature row is removed, remove its slug from other features' Dependencies columns
-   - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
-
-6. **Master PROGRESS sync** — After reconciling the feature-level files:
-   - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
-   - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
-   - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
-   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
-
-Only fix actual discrepancies — if files already agree, make no changes.
 
 ### Commit Planning File Changes
 
@@ -247,6 +209,8 @@ After completing all updates to `.belmont/` planning files, commit them:
    ```bash
    git add .belmont/ && git commit -m "belmont: update planning files after task completion"
    ```
+
+**Note**: PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec document with no status markers — do not add emoji or state indicators to PRD task headers.
 
 ## Step 6: Report
 
@@ -270,10 +234,10 @@ Prompt the user to "/clear" and then "/belmont:status", "/belmont:next", or "/be
 
 ## Important Rules
 
-1. **One task only** (unless in batch mode) — find the next task, implement it, stop. In batch mode, continue to the next FWLUP task until none remain.
+1. **One task only** (unless in batch mode) — find the next task, implement it, stop. In batch mode, continue to the next follow-up task until none remain.
 2. **Use the implementation agent** — dispatch to a sub-agent, don't implement code yourself
 3. **Create the MILESTONE file** — even in lightweight mode, use the MILESTONE file as the contract with the implementation agent
 4. **Clean up after** — archive the MILESTONE file when done
 5. **Stay in scope** — only implement what the task requires
-6. **Update tracking** — ensure the task is marked complete in both PRD.md and PROGRESS.md
+6. **Update tracking** — ensure the task is marked `[x]` in PROGRESS.md
 7. **Know your limits** — if the task is too complex for this lightweight approach, tell the user and suggest `/belmont:implement`

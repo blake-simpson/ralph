@@ -75,7 +75,7 @@ Other:        Load skills/belmont/implement.md as context
 2. `codebase-agent` reads MILESTONE, scans codebase, writes patterns to MILESTONE *(parallel with 3)*
 3. `design-agent` reads MILESTONE, loads Figma, writes design specs to MILESTONE *(parallel with 2)*
 4. `implementation-agent` reads MILESTONE (only), writes code, tests, verification, commits
-5. PRD.md and PROGRESS.md are updated, follow-up tasks created
+5. PROGRESS.md task states are updated, follow-up tasks added as plain `[ ]` entries
 6. MILESTONE file is archived (`MILESTONE-M2.done.md`)
 
 **After all tasks in the milestone:**
@@ -114,7 +114,7 @@ Other:        Load skills/belmont/verify.md as context
 **What happens:**
 - Verification agent checks acceptance criteria, visual fidelity, i18n
 - Code review agent runs build, tests, reviews code quality
-- Issues become follow-up tasks in the PRD
+- Issues become follow-up tasks (plain `[ ]` entries) in PROGRESS.md
 - Combined report is produced
 
 ## 7. Review Alignment (recommended periodically)

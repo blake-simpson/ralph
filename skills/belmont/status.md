@@ -89,24 +89,25 @@ Feature: [Extract from PRD title]
 Tech Plan: [✅ Ready / ⚠ Not written (run /belmont:tech-plan to create)]
 Notes:     [✅ Has notes / — None]
 
-Status: [🔴 Not Started | 🟡 In Progress | ✅ Complete | 🔴 BLOCKED: reason]
+Status: [🔴 Not Started | 🟡 In Progress | ✅ Complete]
 
-Tasks: X done, Y in progress, Z blocked, W pending (of N total)
+Tasks: X verified, Y done, Z in progress, W blocked, V pending (of N total)
 
-  ✅ P0-1: [Task name]
-  ✅ P0-2: [Task name]
-  🔄 P1-1: [Task name]
-  🚫 P1-2: [Task name]
-  ⬜ P2-1: [Task name]
-  ⬜ P2-2: [Task name]
+  ✅ P0-1: [Task name]          [v] verified
+  ✅ P0-2: [Task name]          [v] verified
+  🔄 P1-1: [Task name]          [x] done
+  🔄 P1-2: [Task name]          [>] in progress
+  🚫 P1-3: [Task name]          [!] blocked
+  ⬜ P2-1: [Task name]          [ ] todo
+  ⬜ P2-2: [Task name]          [ ] todo
 
-Milestones:
-  ✅ M1: [Milestone name]
-  ⬜ M2: [Milestone name]
-  ⬜ M3: [Milestone name]
+Milestones: (status computed from tasks)
+  ✅ M1: [Milestone name]       (all tasks verified)
+  🟡 M2: [Milestone name]       (3/5 tasks done)
+  ⬜ M3: [Milestone name]       (not started)
 
-Active Blockers:
-  - [Blocker details from PROGRESS.md]
+Blocked Tasks:
+  - [!] P1-3: [Task name] — [reason if noted]
 
 Next Milestone:
   - [Milestone ID] - [Milestone name]
@@ -122,17 +123,22 @@ Recent decisions:
 
 ## How to Determine Status
 
-### Task Status
-- **Complete (✅)**: Task header contains ✅ or [DONE]
-- **Blocked (🚫)**: Task header contains 🚫 or BLOCKED
-- **In Progress (🔄)**: First non-complete, non-blocked task
-- **Pending (⬜)**: All other tasks
+### Task Status (from PROGRESS.md checkboxes)
+- **Verified (✅)**: `[v]` in PROGRESS.md
+- **Done (🔄)**: `[x]` in PROGRESS.md (implemented, not yet verified)
+- **In Progress (🔄)**: `[>]` in PROGRESS.md
+- **Blocked (🚫)**: `[!]` in PROGRESS.md
+- **Pending (⬜)**: `[ ]` in PROGRESS.md
 
-### Overall Status
-- **🔴 Not Started**: No tasks complete, none in progress
-- **🟡 In Progress**: Some tasks complete or work in progress
-- **✅ Complete**: All tasks are complete (or complete + blocked)
-- **🔴 BLOCKED**: Check PROGRESS.md for blocked status with reason
+PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec with no status markers.
+
+### Overall Status (computed from tasks)
+- **🔴 Not Started**: All tasks are `[ ]`
+- **🟡 In Progress**: Mix of states
+- **✅ Complete**: All tasks are `[v]` (or `[v]` + `[!]`)
+
+### Milestone Status (computed from tasks)
+Milestone status is computed from its tasks — no emoji on milestone headers. A milestone is complete when all its tasks are `[v]`.
 
 ### Task Priority Order
 - Tasks are sorted by priority: P0 first, then P1, P2, P3
@@ -143,9 +149,9 @@ Recent decisions:
 - **DO NOT** modify any files - this is read-only
 - **DO NOT** run `git status` or otherwise inspect git. Belmont status is independent of git.
 - **DO NOT** scan the codebase. Just use the progress + PRD files for info.
-- **DO** read relevant files (PRD, PROGRESS only)
-- **DO** show all tasks with their current status
-- **DO** show milestones from PROGRESS.md
-- **DO** show blockers if any exist
+- **DO** read relevant files (PRD for task definitions, PROGRESS for task state)
+- **DO** show all tasks with their current status from PROGRESS.md
+- **DO** show milestones with computed status from their tasks
+- **DO** show blocked tasks (marked [!]) if any exist
 - **DO** show recent decisions from the Decisions Log
 - **DO** truncate long task names (max ~55 characters)

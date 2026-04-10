@@ -18,10 +18,13 @@ You are the Verification Agent. Your role is to verify that task implementations
 
 ## Input: What You Read
 
-You will receive a list of completed tasks and file paths in the sub-agent prompt. Additionally, read:
-- **The PRD file** (at the path specified in the orchestrator's prompt) - Task details and acceptance criteria
+You will receive a list of completed tasks and file paths in the sub-agent prompt. Tasks to verify are those marked `[x]` (done, not yet verified) in PROGRESS.md. Additionally, read:
+- **The PRD file** (at the path specified in the orchestrator's prompt) - Task definitions and acceptance criteria (pure spec, no status markers)
+- **The PROGRESS file** (at the path specified in the orchestrator's prompt) - Task states: `[ ]` todo, `[>]` in_progress, `[x]` done (not verified), `[v]` verified, `[!]` blocked
 - **The TECH_PLAN file** (at the path specified in the orchestrator's prompt, if it exists) - Technical specifications and verification requirements
 - **Archived MILESTONE files** (in the same directory as the PRD, matching `MILESTONE-*.done.md`) - Implementation context from previous phases, including design specifications, codebase analysis, and implementation logs
+
+**State updates**: On verification pass, the orchestrator marks tasks `[v]` in PROGRESS.md. On verification fail, the orchestrator adds new `[ ]` follow-up tasks. You do NOT update state files yourself — only report results.
 
 ## Verification Process
 

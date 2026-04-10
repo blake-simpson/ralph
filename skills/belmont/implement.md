@@ -66,8 +66,8 @@ Optional helper:
 ## Step 1: Find Next Milestone
 
 1. Read `{base}/PROGRESS.md` and find the Milestones section
-2. A milestone is **complete** if all its tasks are marked with `[x]` or `✅`
-3. A milestone is **pending** if any task is still `[ ]`
+2. A milestone is **complete** if all its tasks are marked `[v]` (verified)
+3. A milestone is **pending** if any task is `[ ]`, `[>]`, `[x]`, or `[!]`
 4. Select the **first pending milestone**
 5. If all milestones are complete, report "All milestones complete!" and stop
 
@@ -280,7 +280,7 @@ Use the dispatch method you selected in "Choosing Your Dispatch Method" above. F
 
 **Wait for**: Sub-agent to complete. Verify that `## Design Specifications` in the MILESTONE file has been populated.
 
-**IMPORTANT**: If the sub-agent reports that specific tasks have Figma URLs that failed to load, mark ONLY those tasks as 🚫 BLOCKED in the PRD. The remaining tasks continue to Phase 3.
+**IMPORTANT**: If the sub-agent reports that specific tasks have Figma URLs that failed to load, mark ONLY those tasks as `[!]` blocked in PROGRESS.md with a note about the Figma failure. The remaining tasks continue to Phase 3.
 
 ---
 
@@ -312,33 +312,29 @@ If you ARE using Agent Teams: Add an implementation-agent into the team per task
 
 Read the `## Implementation Log` section from `{base}/MILESTONE.md`. For each task:
 
-1. **Verify tracking updates** — The implementation agent should have already marked tasks in `{base}/PRD.md` and `{base}/PROGRESS.md`. If any were missed, update them now.
+1. **Verify tracking updates** — The implementation agent should have already marked tasks `[x]` (done, not yet verified) in `{base}/PROGRESS.md`. If any were missed, update them now: `[>]` -> `[x]` for completed tasks.
 2. **Handle follow-up tasks** — If the implementation log listed out-of-scope issues:
-   - Add them as new FWLUP tasks to `{base}/PRD.md`
-   - Add them to a milestone in `{base}/PROGRESS.md`:
-     - If they relate to existing tasks in an existing milestone, add them to that milestone
-     - If they are not related to any existing tasks, create a **new milestone** with the next sequential number (e.g., if implementing M9, create `### ⬜ M10: Follow-ups`) and add them there
+   - Add them as new `[ ]` tasks to the current milestone in `{base}/PROGRESS.md`
+   - If they are not related to the current milestone, add them to the appropriate existing milestone, or create a **new milestone** with the next sequential number
 3. **Handle blocked tasks** — If any tasks were reported as blocked during implementation:
-   - Ensure they are marked 🚫 BLOCKED in PRD.md with the reason
-   - Add blocker details to the Blockers section in PROGRESS.md. This should include the task ID and the reason it was blocked.
+   - Mark them as `[!]` in `{base}/PROGRESS.md` with a note about why they are blocked
+4. **Update master docs** — After implementing, update `.belmont/PRD.md` and `.belmont/TECH_PLAN.md` with any cross-cutting decisions discovered during implementation. Edit existing sections, remove stale info. These are living documents — actively curate them.
 
 ## Step 5: After Milestone Completes
 
-When all tasks in the milestone are done:
-1. Update milestone status in PROGRESS.md: `### ⬜ M1:` becomes `### ✅ M1:`
-2. Update overall status if needed
-3. Report summary of the milestone:
+When all tasks in the milestone are marked `[x]` (done):
+1. Milestone status is computed — do NOT add emoji to milestone headers. A milestone is complete when all its tasks are `[x]` or `[v]`.
+2. Report summary of the milestone:
    - Tasks completed
    - Commits made
    - Follow-up tasks created
    - Any issues encountered
-4. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first using the master progress format from the product-plan skill:
+3. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first using the master progress format from the product-plan skill:
    ```
    # Progress: [Product Name from .belmont/PRD.md]
-   ## Status: 🟡 In Progress
    ## Features
-   | Feature | Slug | Status | Milestones | Tasks | Blockers |
-   |---------|------|--------|------------|-------|----------|
+   | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
+   |---------|------|----------|-------------|--------|------------|-------|
    ## Recent Activity
    | Date | Feature | Activity |
    |------|---------|----------|
@@ -364,42 +360,6 @@ If you created a team:
 
 Skip this if you used Approach B or C.
 
-### Reconcile State Files
-
-Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and fix any discrepancies:
-
-1. **Task ↔ checkbox sync** — For each task in PROGRESS.md milestone sections:
-   - Find the matching `### P...:` header in PRD.md by task ID
-   - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
-   - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
-
-2. **Milestone status sync** — Only for the milestone(s) you were asked to verify or implement (your scoped milestone). Do NOT touch other milestones' headings — they may be `⬜` intentionally (e.g., queued for re-verification):
-   - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
-   - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
-
-3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
-   - Remove entries whose referenced task ID is now marked ✅ in PRD.md
-   - Remove entries that reference other features (e.g. "Depends on X feature") if that feature's status is `✅ Complete` in `.belmont/PROGRESS.md`'s Features table
-   - If section becomes empty, set to `None`
-
-4. **Overall status line** — Update `## Status:` in PROGRESS.md:
-   - All milestones ✅ → `## Status: ✅ Complete`
-   - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
-   - All ⬜ → `## Status: 🔴 Not Started`
-
-5. **Feature dependency sync** (master PRD only) — In the `## Features` table of `.belmont/PRD.md`:
-   - Verify all dependency slugs reference existing feature slugs in the table
-   - If a feature row is removed, remove its slug from other features' Dependencies columns
-   - If a circular dependency is detected (A depends on B, B depends on A), warn in output and do not auto-fix
-
-6. **Master PROGRESS sync** — After reconciling the feature-level files:
-   - Read `.belmont/PROGRESS.md` and find the row matching the current feature slug in the `## Features` table
-   - Update the Status, Milestones (done/total), and Tasks (done/total) columns to match the reconciled feature state
-   - If all milestones are now ✅, set the feature's Status column to `✅ Complete`
-   - After updating the feature row, recompute the master `## Status:` line based on all feature rows in the table: if every feature's Status column is `✅ Complete`, set `## Status: ✅ Complete`; if any feature has progress, `## Status: 🟡 In Progress`; otherwise `## Status: 🔴 Not Started`
-
-Only fix actual discrepancies — if files already agree, make no changes.
-
 ### Commit Planning File Changes
 
 After completing all updates to `.belmont/` planning files, commit them:
@@ -421,6 +381,8 @@ After completing all updates to `.belmont/` planning files, commit them:
    git add .belmont/ && git commit -m "belmont: update planning files after milestone implementation"
    ```
 
+**Note**: PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec document with no status markers — do not add emoji or state indicators to PRD task headers.
+
 ## Step 7: Final Actions
 
 1. If you have just completed the final milestone and all work is complete, automatically run "/belmont:verify" to perform QA.
@@ -430,11 +392,9 @@ After completing all updates to `.belmont/` planning files, commit them:
 ## Blocker Handling
 
 If any task is blocked:
-1. Mark it as `🚫 BLOCKED` in PRD.md with the reason
-2. Add blocker details to the Blockers section in PROGRESS.md
-3. Update the Blockers column for this feature's row in `.belmont/PROGRESS.md` (initialize the file first if it doesn't exist or is still a template — see Step 5.4 for the format)
-4. Skip to the next task in the milestone
-5. If ALL remaining tasks in the milestone are blocked, report and stop (still clean up the MILESTONE file)
+1. Mark it as `[!]` in `{base}/PROGRESS.md` with a note about why (e.g., `[!] P0-1: Task Name — blocked: reason`)
+2. Skip to the next task in the milestone
+3. If ALL remaining tasks in the milestone are blocked, report and stop (still clean up the MILESTONE file)
 
 ## Scope Guardrails
 
@@ -459,9 +419,8 @@ ALL work must trace back to a specific task in `{base}/PRD.md`. You MUST NOT:
 
 If during implementation you discover something that **should** be done but **isn't in the PRD**, the correct action is:
 
-1. Add it as a follow-up task (FWLUP) in the PRD
-2. Add it to PROGRESS.md under an appropriate future milestone
-3. Do NOT implement it now
+1. Add it as a new `[ ]` task in the appropriate milestone in PROGRESS.md
+2. Do NOT implement it now
 
 ### Scope Validation Checkpoint
 
@@ -482,7 +441,7 @@ If any check fails, STOP and report the issue rather than proceeding.
 5. **Parallel research, then implement** - Codebase + Design run simultaneously, then Implementation runs after both complete
 6. **Dispatch to sub-agents** - Spawn a sub-agent for each phase. Do NOT do the phase work inline.
 7. **Read the Implementation Log** - After Phase 3 completes, read the `## Implementation Log` from the MILESTONE file to know what was done
-8. **Update tracking files** - Keep PRD.md and PROGRESS.md current. Create follow-up tasks (FWLUP) for any out-of-scope issues reported by the implementation agent.
+8. **Update PROGRESS.md** - Keep PROGRESS.md current with task state changes. Add follow-up `[ ]` tasks for any out-of-scope issues reported by the implementation agent.
 9. **Don't skip phases** - Even if no Figma design, still run the design phase (it handles the no-design case)
 10. **Clean up the MILESTONE file** - Archive it after the milestone is complete
 11. **Quality over speed** - Ensure verification passes before marking complete

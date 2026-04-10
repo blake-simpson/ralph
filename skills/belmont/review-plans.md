@@ -102,7 +102,7 @@ For each feature listed in the master PRD features table:
 
 2. **Feature PRD vs master PRD entry**
    - Compare feature PRD scope/description against master PRD entry for that feature → **Drift** if scope expanded beyond master description
-   - Check status consistency — if master table says "Complete" but feature PRD has pending tasks → **Conflict**
+   - Check status consistency — if master table says "Complete" but feature PROGRESS.md has `[ ]` or `[>]` tasks → **Conflict**
 
 3. **Feature tech plan vs master tech plan**
    - Check if feature tech plan follows master tech plan's architecture decisions → **Drift** if it diverges
@@ -121,30 +121,29 @@ For each feature with both a PRD and PROGRESS file:
    - Tasks in PRD's task list but NOT in any PROGRESS milestone → **Gap** (task defined but not scheduled)
    - Tasks in PROGRESS milestones but NOT in PRD → **Unplanned** (orphaned tasks)
 
-2. **Completion status**
-   - Task marked ✅ in PRD but unchecked `[ ]` in PROGRESS → **Conflict**
-   - Task checked `[x]` in PROGRESS but no ✅ in PRD → **Conflict**
+2. **Task definition alignment**
+   - Verify each task in PROGRESS.md has a matching task definition (### heading) in PRD.md → **Gap** if missing
+   - Task exists in PRD.md but not in any PROGRESS milestone → **Gap** (task defined but not scheduled)
 
 3. **Stale status**
-   - Milestones with all tasks checked but milestone not marked ✅ → **Stale**
-   - Blockers listed in PROGRESS that reference completed tasks → **Stale**
-   - Tasks marked as in-progress but no recent session history entries → **Stale** (potentially abandoned)
+   - Tasks marked `[>]` (in progress) but no recent session history entries → **Stale** (potentially abandoned)
+   - Tasks marked `[!]` (blocked) where the blocking condition may no longer apply → **Stale**
 
 4. **Milestone dependencies**
 
-   PROGRESS files may include dependency annotations on milestone headings: `### ⬜ M3: Feature X (depends: M1)`. When any milestone has `(depends: ...)`, the file uses **explicit dependency mode** — `belmont auto` will run independent milestones in parallel via git worktrees. Validate:
+   PROGRESS files may include dependency annotations on milestone headings: `### M3: Feature X (depends: M1)`. When any milestone has `(depends: ...)`, the file uses **explicit dependency mode** — `belmont auto` will run independent milestones in parallel via git worktrees. Validate:
 
    - **Dangling references** — `(depends: M5)` but M5 doesn't exist in the PROGRESS file → **Conflict**. Suggest removing the reference or adding the missing milestone.
    - **Circular dependencies** — M2 depends on M3 and M3 depends on M2 (direct or transitive cycles) → **Conflict**. List the cycle and suggest which dependency to remove based on the milestone descriptions and natural ordering.
    - **Over-constrained chains** — every milestone depends on the previous one in a strict serial chain (M1 → M2 → M3 → M4 → ...) when some could plausibly run in parallel → **Drift** (from optimal parallelism). Compare milestone descriptions: if two milestones touch independent areas (e.g., separate features, backend vs frontend, different pages), suggest removing the dependency between them to enable parallel execution.
    - **Under-constrained dependencies** — milestones that clearly share resources or build on each other's output but have no declared dependency → **Gap**. For example, if M3's tasks reference files or APIs created in M2 but M3 doesn't declare `(depends: M2)`, flag it. Suggest adding the dependency.
-   - **Completed milestone still depended on** — a milestone marked ✅ that is listed as a dependency is fine (done milestones satisfy deps). But if a milestone is marked 🚫 (blocked/skipped) and other milestones depend on it → **Conflict**. The dependents can never proceed. Suggest either unblocking the dependency or removing it from dependents.
+   - **Completed milestone still depended on** — a milestone whose tasks are all `[v]` that is listed as a dependency is fine (done milestones satisfy deps). But if a milestone has all tasks `[!]` (blocked/skipped) and other milestones depend on it → **Conflict**. The dependents can never proceed. Suggest either unblocking the dependency or removing it from dependents.
    - **Mixed mode inconsistency** — some milestones have `(depends: ...)` and others don't. Milestones without explicit deps go into wave 1 (run first). Flag if a milestone without deps clearly should depend on another milestone → **Gap**. Conversely, flag if the only milestone with deps is the final one and the rest would all run in parallel (likely under-specified).
 
    When suggesting fixes, provide the exact corrected milestone heading. For example:
-   - Remove dangling: `### ⬜ M3: Feature X` (drop the invalid dep)
-   - Add missing: `### ⬜ M3: Feature X (depends: M1, M2)` (add the dep)
-   - Break serial chain: `### ⬜ M3: Dashboard (depends: M1)` (change from M2 to M1 since M2 and M3 are independent)
+   - Remove dangling: `### M3: Feature X` (drop the invalid dep)
+   - Add missing: `### M3: Feature X (depends: M1, M2)` (add the dep)
+   - Break serial chain: `### M3: Dashboard (depends: M1)` (change from M2 to M1 since M2 and M3 are independent)
 
 For each finding, present interactively. If no findings: report "Layer 3: Tasks and milestones are consistent ✅"
 
@@ -265,29 +264,22 @@ Suggested next steps:
 - /belmont:cleanup to archive completed features and reduce token bloat
 ```
 
-### Reconcile State Files
+### Validate State Consistency
 
-Before committing, audit `{base}/PRD.md` and `{base}/PROGRESS.md` for drift and fix any discrepancies:
+Before committing, verify PROGRESS.md is internally consistent:
 
-1. **Task ↔ checkbox sync** — For each task in PROGRESS.md milestone sections:
-   - Find the matching `### P...:` header in PRD.md by task ID
-   - If the PRD header has ✅ but the PROGRESS checkbox is `[ ]` → change to `[x]`
-   - If the PROGRESS checkbox is `[x]` but the PRD header lacks ✅ → add ✅ to the header
+1. **Task ↔ definition sync** — For each task in PROGRESS.md milestone sections:
+   - Verify a matching `### P...:` task definition exists in PRD.md → flag missing definitions
+   - PRD.md has NO status markers — it is a pure spec document
 
-2. **Milestone status sync** — For each milestone heading in PROGRESS.md:
-   - If ALL its tasks are `[x]` and heading is not `✅` → change to `### ✅ M...:`
-   - If ANY task is `[ ]` and heading IS `✅` → change to `### ⬜ M...:`
+2. **State validity** — Check that task states use valid markers: `[ ]`, `[>]`, `[x]`, `[v]`, `[!]`
+   - Flag any tasks with old-style markers (emoji, `[DONE]`, etc.)
 
-3. **Blocker cleanup** — In the `## Blockers` section of PROGRESS.md:
-   - Remove entries whose referenced task ID is now marked ✅ in PRD.md
-   - If section becomes empty, set to `None`
+3. **Milestone consistency** — Milestone status is computed from tasks, not stored:
+   - Milestone headers should NOT have emoji status markers (✅/⬜)
+   - If old-format headers are found, remove the emoji prefix
 
-4. **Overall status line** — Update `## Status:` in PROGRESS.md:
-   - All milestones ✅ → `## Status: ✅ Complete`
-   - Mix of ✅ and ⬜/🔄 → `## Status: 🟡 In Progress`
-   - All ⬜ → `## Status: 🔴 Not Started`
-
-Only fix actual discrepancies — if files already agree, make no changes.
+Only fix actual issues — if files are already consistent, make no changes.
 
 ### Commit Planning File Changes
 

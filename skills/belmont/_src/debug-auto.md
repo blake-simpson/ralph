@@ -46,7 +46,7 @@ Create `{base}/DEBUG.md` with the following structure:
 ## Context
 - **Feature**: [name from PRD]
 - **Figma URLs**: [if any, otherwise "None"]
-- **Related FWLUP**: [if this relates to a follow-up task, otherwise "None"]
+- **Related Follow-up**: [if this relates to a follow-up task, otherwise "None"]
 
 ### Learnings from Previous Sessions
 [From NOTES.md files, or "No previous learnings found."]
@@ -228,9 +228,9 @@ Iterations: [N]
 
 ### Optional: Update Planning Files
 
-If this fix relates to a follow-up task (FWLUP) in the PRD:
+If this fix relates to a follow-up task in PROGRESS.md:
 - Ask the user if they want to mark it complete
-- If yes, update the task status in `{base}/PRD.md` (add `✅` to the header) and check it off in `{base}/PROGRESS.md`
+- If yes, mark the task as `[x]` in `{base}/PROGRESS.md`
 
 Proceed to Step 6 (Cleanup).
 

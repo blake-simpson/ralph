@@ -41,7 +41,7 @@ Read `.belmont/PRD.md` — the master feature catalog. If it's empty/default, yo
 
 ## Creating the Master PRD (first time)
 
-If `.belmont/PRD.md` is empty/default and no features exist yet, create the **master feature catalog**:
+If `.belmont/PRD.md` is empty/default and no features exist yet, create the **master PRD** as a living global document:
 
 ```markdown
 # Product: [Product Name]
@@ -49,31 +49,32 @@ If `.belmont/PRD.md` is empty/default and no features exist yet, create the **ma
 ## Vision
 [1-2 sentence product vision, drawn from PR_FAQ if available]
 
-## Features
+## Constraints
+[Global constraints that apply across all features — performance budgets, browser support, accessibility requirements, etc.]
 
-| Feature | Slug | Priority | Dependencies | Status |
-|---------|------|----------|-------------|--------|
-| [Feature Name] | [feature-slug] | P1 | None | Not Started |
+## Cross-Cutting Decisions
+[Product decisions that span multiple features. Actively curate this section — edit/remove stale info, don't just append. Examples: navigation patterns, shared UX conventions, data model decisions.]
 ```
 
-**Dependencies format**: Use feature slugs, comma-separated (e.g. `setup, auth`). Use `None` for features with no dependencies. Features with dependencies execute after their dependencies complete when using `belmont auto --all`.
+This is a **living document**. Skills and agents actively curate it — editing existing sections, removing stale info, and updating decisions as the product evolves. It is NOT a feature catalog (features are tracked in PROGRESS.md).
 
 Also create `.belmont/PROGRESS.md` (the master progress file) if it doesn't exist or still contains template/placeholder text:
 
 ```markdown
 # Progress: [Product Name]
 
-## Status: 🔴 Not Started
-
 ## Features
 
-| Feature | Slug | Status | Milestones | Tasks | Blockers |
-|---------|------|--------|------------|-------|----------|
+| Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
+|---------|------|----------|-------------|--------|------------|-------|
+| [Feature Name] | [feature-slug] | P1 | None | Not Started | 0/N | 0/N |
 
 ## Recent Activity
 | Date | Feature | Activity |
 |------|---------|----------|
 ```
+
+**Dependencies format**: Use feature slugs, comma-separated (e.g. `setup, auth`). Use `None` for features with no dependencies. Features with dependencies execute after their dependencies complete when using `belmont auto --all`.
 
 Then immediately proceed to create the first feature (below).
 
@@ -85,8 +86,8 @@ When the user selects or creates a feature:
 2. **Create directory**: `.belmont/features/<slug>/`
 3. **Write feature PRD**: `.belmont/features/<slug>/PRD.md` (using the PRD format below)
 4. **Write feature PROGRESS**: `.belmont/features/<slug>/PROGRESS.md` (using the PROGRESS format below)
-5. **Update master PRD**: Add/update the feature entry in `.belmont/PRD.md`'s features table. Set Dependencies to slugs of features this one requires (data, APIs, infrastructure) — use `None` if independent.
-6. **Update master PROGRESS**: Add or update the feature's row in `.belmont/PROGRESS.md`'s `## Features` table with the feature name, slug, initial status, milestone/task counts, and blockers. Add a row to `## Recent Activity` noting the feature was created or updated.
+5. **Update master PRD**: If any cross-cutting product decisions were made during planning, add them to `.belmont/PRD.md`'s `## Cross-Cutting Decisions` section. Edit existing entries if they changed.
+6. **Update master PROGRESS**: Add or update the feature's row in `.belmont/PROGRESS.md`'s `## Features` table with the feature name, slug, priority, dependencies, initial status, milestone/task counts. Set Dependencies to slugs of features this one requires (data, APIs, infrastructure) — use `None` if independent. Add a row to `## Recent Activity` noting the feature was created or updated.
 
 When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
 
@@ -134,7 +135,6 @@ This is a **product** planning session, NOT a technical planning session. Techni
 
 If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
 
-<!-- @include state-reconciliation.md -->
 <!-- @include commit-belmont-changes.md commit_context="after product planning" -->
 
 Final: Prompt user to "/clear" and then "/belmont:tech-plan"
@@ -149,7 +149,7 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 - It is critical that agents get every piece of information they need
 - List in the plan the relevant available skills the agent should load when implementing
 - When creating milestones, consider the work involved. For example: If design/UI work is required, group it with other design/UI work. This allows the design context to be loaded once and shared amongst that milestones tasks. By the same logic, group backend heavy tasks together and try to skip UI work for that milestone. Some tasks will need both but try your best to split where possible.
-- When milestones can be implemented independently (e.g., separate features that only share a common foundation), add dependency annotations: `### ⬜ M3: Feature X (depends: M1)`. This enables `belmont auto` to run independent milestones in parallel via git worktrees. If a milestone has no dependency on another, it can run in the same wave. Only add `(depends: ...)` when there's a real dependency — don't over-constrain.
+- When milestones can be implemented independently (e.g., separate features that only share a common foundation), add dependency annotations: `### M3: Feature X (depends: M1)`. This enables `belmont auto` to run independent milestones in parallel via git worktrees. If a milestone has no dependency on another, it can run in the same wave. Only add `(depends: ...)` when there's a real dependency — don't over-constrain.
 
 ## PRD Format
 

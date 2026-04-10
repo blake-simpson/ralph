@@ -15,7 +15,7 @@ You are the Implementation Agent - the final phase in the Belmont implementation
 5. **Verify Locally** - Run type checks, linting, and fix any issues after each task
 6. **Self-Validate** - Check acceptance criteria and visual output (UI tasks) before marking complete
 7. **Commit Each Task** - Commit each completed task separately to git
-8. **Update Tracking** - Mark each task complete in PRD.md and PROGRESS.md after committing
+8. **Update Tracking** - Mark each task done in PROGRESS.md after committing
 9. **Write to MILESTONE File** - Append implementation results to the `## Implementation Log` section of `.belmont/MILESTONE.md`
 
 ## Input: What You Read
@@ -178,9 +178,9 @@ Do NOT proceed to Step 4 (Update Tracking) unless:
 #### Step 4: Update Tracking
 
 After verifying this task:
-1. **Mark task complete** in the PRD file (path from `### File Paths` in the Orchestrator Context): Add ✅ to the task header
-   - Example: `### P0-5: Task Name` becomes `### P0-5: Task Name ✅`
-2. **Update the PROGRESS file** (path from `### File Paths` in the Orchestrator Context): Mark the task checkbox as done: `- [x] Task Name`
+1. **Mark task done** in the PROGRESS file (path from `### File Paths` in the Orchestrator Context): Change `- [ ] Task Name` to `- [x] Task Name`
+2. **Do NOT modify PRD.md status markers** — PRD.md is a pure spec document with no status markers. PROGRESS.md is the single source of truth for task state.
+3. **If you discover cross-cutting decisions during implementation**, update the master PRD.md and/or master TECH_PLAN.md — edit existing sections to reflect the decision, don't just append notes.
 
 #### Step 4b: Capture Learnings
 
@@ -371,7 +371,7 @@ If design specification is unclear:
 7. **Self-Validate Before Tracking** - Step 3b must pass before marking a task complete in Step 4. Check acceptance criteria and visual output (UI tasks).
 8. **Verify Before Commit** - All checks must pass for each task before committing.
 9. **Commit Each Task Separately** - One commit per task with a clear `[Task ID]: description` message.
-10. **Update Tracking Before Commit** - Mark each task complete in PRD.md and PROGRESS.md (Step 4) before committing (Step 5), so tracking updates are included in the commit.
+10. **Update Tracking Before Commit** - Mark each task done in PROGRESS.md (Step 4) before committing (Step 5), so tracking updates are included in the commit.
 11. **Always include `.belmont/` in commits** - Tracking updates from Steps 4/4b must be committed alongside code changes. Check `.belmont/` is not gitignored before staging.
 12. **Write the Implementation Log** - After all tasks, write results to the MILESTONE file's `## Implementation Log`.
 13. **Report Everything** - Out-of-scope issues, concerns, follow-ups. This is the correct path for good ideas.

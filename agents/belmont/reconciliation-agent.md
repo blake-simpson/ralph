@@ -57,13 +57,13 @@ Files: `package.json`, `Cargo.toml`, `go.mod`, `pyproject.toml`, `Gemfile`, etc.
 ### Belmont Tracking Files
 Files: anything under `.belmont/`
 
-**PROGRESS.md**: Take the union of milestone/task completions from both sides. If a task is `[x]` on either side, it's done. Combine activity table entries from both sides chronologically. Take the more-complete status line.
+**PROGRESS.md** (single source of truth for task state): Take the most-advanced state per task. State progression: `[v]` verified > `[x]` done > `[>]` in_progress > `[ ]` todo. The `[!]` blocked state is preserved — if either side has `[!]`, keep it unless the other side has `[x]` or `[v]` (which means the block was resolved). Combine activity table entries from both sides chronologically. Milestone status is computed from tasks (no emoji on headers).
 
 **NOTES.md**: Append entries from both sides, deduplicating exact matches.
 
 **MILESTONE-*.done.md**: If present on either side, the milestone is done. Keep the file.
 
-**PRD.md / TECH_PLAN.md**: These should rarely conflict. If they do, combine sections additively.
+**PRD.md / TECH_PLAN.md**: These are content-only documents (no status markers to reconcile). If they conflict, combine sections additively. Both are living documents that may have been updated with cross-cutting decisions during implementation.
 
 ### Schema, ORM, and Codegen Files
 Files: database schemas, ORM model definitions, protobuf/GraphQL definitions, API route definitions, etc. Examples include Prisma schema, Drizzle schema, SQLAlchemy models, Django models, protobuf files — but this applies to any schema/model definition tool.

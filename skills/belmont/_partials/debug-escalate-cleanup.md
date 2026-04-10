@@ -4,7 +4,7 @@ If 3 iterations were exhausted without a fix:
 
 ```
 Debug limit reached (3 iterations). This issue may need the full pipeline.
-Recommendation: /belmont:implement or /belmont:next with a FWLUP task.
+Recommendation: /belmont:implement or /belmont:next with a follow-up task.
 
 Summary of attempts:
 - Iteration 1: [what was tried, result]

@@ -72,6 +72,48 @@ git push origin main --tags
 
 - **`--from`/`--to` is single-feature only**: Milestone range flags (`--from`, `--to`) are blocked in multi-feature mode (`--features`, `--all`) because milestone IDs (M1, M3, etc.) are local to each feature — the same ID means different things across features.
 - **Ports: primary vs additional servers**: `PORT`/`BELMONT_PORT` is allocated by the Go CLI for the primary dev server (frameworks auto-detect it). All other servers (Storybook, Prisma Studio, etc.) must dynamically allocate their own free port at runtime — this is handled by agent instructions, not Go code. See `_partials/worktree-awareness.md`.
+- **Unified state tracking**: PROGRESS.md is the single source of truth for all task/milestone state. PRD.md is a pure spec with no status markers. See "State Tracking" section below.
+
+## State Tracking
+
+All task and milestone state lives in PROGRESS.md. PRD.md is a pure specification document with no status markers.
+
+### Task states (PROGRESS.md checkboxes)
+
+| Marker | State | Meaning |
+|--------|-------|---------|
+| `[ ]` | todo | Not started |
+| `[>]` | in_progress | Currently being worked on |
+| `[x]` | done | Implemented, not yet verified |
+| `[v]` | verified | Implemented and passed verification |
+| `[!]` | blocked | Cannot proceed |
+
+### Milestone status: always computed from tasks
+- All `[v]` → verified
+- All `[x]` or `[v]` → done (needs verification)
+- Any `[>]` → in progress
+- Any `[!]` → has blockers
+- All `[ ]` → not started
+
+### Feature/master status: computed from milestones
+
+### Key rules
+- **No emoji on milestone headers** — milestone status is computed, not stored. Headers are `### M1: Name`.
+- **No `## Blockers` section** — blocked tasks are `[!]` checkboxes. The Go CLI counts them directly.
+- **No `## Status:` line** — overall status is computed from task states.
+- **Follow-up tasks** are plain `[ ]` entries added to the relevant milestone (no special FWLUP format).
+- **Reverify** finds milestones with `[x]` (done, not verified) tasks and re-verifies them. On success: `[x]` → `[v]`.
+- **Master PRD.md** is a living global document (vision, constraints, cross-cutting decisions). No features table. Actively curated — edit/remove stale info.
+- **Master TECH_PLAN.md** is a living global document for cross-cutting architecture. Same active curation.
+- **Master PROGRESS.md** has the features table: `| Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |`. Status/Milestones/Tasks are computed. Priority and Dependencies are manually set during planning.
+
+### Go CLI state parsing
+- `parseMilestones()` reads milestone headers and task checkboxes from PROGRESS.md, building `milestone` structs with embedded `[]task` slices
+- `flattenTasks()` extracts tasks from milestones for flat task lists
+- `milestoneAllDone(m)`, `milestoneAllVerified(m)`, `milestoneHasBlockers(m)`, `milestoneNotStarted(m)` — computed helpers, used throughout decision logic
+- Task state enum: `taskTodo`, `taskInProgress`, `taskDone`, `taskVerified`, `taskBlocked`
+- `blockedTaskCount()` / `blockedTaskNames()` replace old blocker section parsing
+- `parseMasterDeps()` reads Priority + Dependencies from master PROGRESS.md features table (not from master PRD.md)
 
 ## Architecture
 
@@ -86,7 +128,7 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 - `skills/belmont/_partials/` — Shared content blocks used by skill templates (identity-preamble, forbidden-actions, progress-template, dispatch-strategy).
 - `skills/belmont/_src/` — Skill template files with `@include` directives. Processed by `generate-skills.sh` to produce `skills/belmont/*.md`.
 - `agents/belmont/` — Agent instruction markdown files (codebase-agent, design-agent, implementation-agent, verification-agent, code-review-agent, reconciliation-agent). Copied into target projects.
-- `prompts/belmont/` — AI prompt templates used by the CLI (e.g. `ai-decision.md`). Loaded via Go `text/template` with dynamic context injection. Embedded in release builds.
+- `prompts/belmont/` — AI prompt templates used by the CLI (e.g. `ai-decision.md`, `post-verify-triage.md`). Loaded via Go `text/template` with dynamic context injection. Embedded in release builds.
 - `scripts/build.sh` — Regenerates skills from templates, copies skills/agents/prompts into `cmd/belmont/`, builds with `-tags embed` and ldflags version injection, then cleans up.
 - `scripts/release.sh` — Regenerates skills, verifies build, generates CHANGELOG entry, commits, creates annotated git tag.
 - `scripts/generate-skills.sh` — Generates skill files from `_src/` templates + `_partials/`. Supports `--check` to verify files are up to date.
@@ -111,4 +153,4 @@ Source resolution order (source mode only): `--source` flag > `BELMONT_SOURCE` e
 
 ### CLI commands
 
-The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `auto` (alias: `loop`), `reverify`, `sync`, `recover`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PRD.md` and `.belmont/PROGRESS.md` to extract tasks, milestones, and blockers. When `auto` is running, `status` reads live state from active worktrees via `.belmont/auto.json`. The `auto` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. It supports milestone dependencies with `(depends: M1)` syntax in PROGRESS.md, enabling parallel execution via git worktrees when milestones are independent. Each worktree gets isolated `.belmont/` state (copy-based, not symlinked) so AI agents commit state changes as part of their feature branch. Each worktree is assigned a unique `PORT`/`BELMONT_PORT` env var for dev server isolation, and `.belmont/worktree.json` provides user-configurable setup/teardown hooks (e.g., `npm install`). The `reverify` command runs verification on completed milestones sequentially, shelling out to the AI tool for each milestone. It reports which milestones passed and which had follow-up tasks (FWLUPs) created. Supports `--from`/`--to` range filtering and `--tool` to specify the AI tool. The `sync` command updates the master `.belmont/PROGRESS.md` feature table to match computed feature-level states (explicit command only, no longer auto-hooked). The `recover` command manages preserved worktrees from failed merges — listing, retrying merges with improved error handling, or cleaning up. The `update` command self-updates by downloading the latest release from GitHub.
+The Go CLI (`cmd/belmont/main.go`) provides: `install`, `update`, `status`, `auto` (alias: `loop`), `reverify`, `sync`, `recover`, `version`. All commands support `--format json` for machine-readable output. The `status` command parses `.belmont/PROGRESS.md` to extract tasks, milestones, and computed statuses. PRD.md is only read for the feature name. When `auto` is running, `status` reads live state from active worktrees via `.belmont/auto.json`. The `auto` command automates end-to-end feature implementation by shelling out to AI tool CLIs (Claude Code, Codex, Gemini, Copilot, Cursor) in headless mode. It supports milestone dependencies with `(depends: M1)` syntax in PROGRESS.md, enabling parallel execution via git worktrees when milestones are independent. Each worktree gets isolated `.belmont/` state (copy-based, not symlinked) so AI agents commit state changes as part of their feature branch. Each worktree is assigned a unique `PORT`/`BELMONT_PORT` env var for dev server isolation, and `.belmont/worktree.json` provides user-configurable setup/teardown hooks (e.g., `npm install`). The `reverify` command finds milestones with `[x]` tasks (done but not verified) and runs verification on each sequentially. On success tasks are marked `[v]`; on failure, new `[ ]` follow-up tasks are added. Supports `--from`/`--to` range filtering and `--tool` to specify the AI tool. The `sync` command updates the master `.belmont/PROGRESS.md` feature table to match computed feature-level states (explicit command only). The `recover` command manages preserved worktrees from failed merges — listing, retrying merges with improved error handling, or cleaning up. The `update` command self-updates by downloading the latest release from GitHub, and auto-migrates old state format to unified tracking.
