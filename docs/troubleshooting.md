@@ -10,9 +10,13 @@ echo $PATH | tr ':' '\n' | grep local
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Or re-run the installer:
+Or re-install:
 
 ```bash
+# Via Homebrew
+brew reinstall belmont
+
+# Or via curl
 curl -fsSL https://raw.githubusercontent.com/blake-simpson/belmont/main/install.sh | sh
 ```
 

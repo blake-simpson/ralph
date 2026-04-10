@@ -85,3 +85,26 @@ jobs:
         with:
           body: ${{ steps.changelog.outputs.body }}
           files: release/*
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Collect binaries
+        run: |
+          mkdir -p binaries/
+          find artifacts/ -type f -name 'belmont-*' -exec cp {} binaries/ \;
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./scripts/update-homebrew.sh "$VERSION" binaries/

@@ -16,6 +16,24 @@ Strong guardrails are in place to keep the agent focused and on task.
 
 ## Quick Start
 
+### All AI Tools (CLI)
+
+The CLI installer supports Claude Code, Codex, Cursor, Windsurf, Gemini, and GitHub Copilot:
+
+```bash
+# Install via Homebrew (macOS / Linux)
+brew install blake-simpson/belmont/belmont
+
+# Or install via curl
+curl -fsSL https://raw.githubusercontent.com/blake-simpson/belmont/main/install.sh | sh
+
+# Set up your project
+cd ~/your-project
+belmont install
+```
+
+The installer detects which AI tools you have and installs skills to `.agents/skills/belmont/`, then links or copies them into each tool's native directory. Agents are installed to `.agents/belmont/`.
+
 ### Claude Code (Plugin)
 
 Install Belmont directly as a Claude Code plugin -- no CLI required:
@@ -37,25 +55,12 @@ Then use the skills:
 **Optional: Install the Belmont CLI** for auto mode -- automated end-to-end feature implementation with headless AI agents, worktree parallelism, and milestone dependency tracking:
 
 ```bash
+brew install blake-simpson/belmont/belmont
+# OR
 curl -fsSL https://raw.githubusercontent.com/blake-simpson/belmont/main/install.sh | sh
 ```
 
 The plugin and CLI work independently. The plugin gives you the full manual workflow; the CLI adds automation on top.
-
-### All AI Tools (CLI)
-
-The CLI installer supports Claude Code, Codex, Cursor, Windsurf, Gemini, and GitHub Copilot:
-
-```bash
-# Install belmont (one-time)
-curl -fsSL https://raw.githubusercontent.com/blake-simpson/belmont/main/install.sh | sh
-
-# Set up your project
-cd ~/your-project
-belmont install
-```
-
-The installer detects which AI tools you have and installs skills to `.agents/skills/belmont/`, then links or copies them into each tool's native directory. Agents are installed to `.agents/belmont/`.
 
 ---
 
@@ -113,10 +118,10 @@ Each agent reads **only the MILESTONE file** — the orchestrator extracts all r
 
 When you run the implement skill, the orchestrator creates a MILESTONE file, then dispatches 3 phases. Phases 1 and 2 run in parallel, Phase 3 runs after both complete:
 
-| Phase              | Agent                  | Model  | Reads                | Writes to MILESTONE                  |
-|--------------------|------------------------|--------|----------------------|--------------------------------------|
-| 1. Codebase Scan   | `codebase-agent`       | Sonnet | MILESTONE + codebase | `## Codebase Analysis`               |
-| 2. Design Analysis | `design-agent`         | Sonnet | MILESTONE + Figma    | `## Design Specifications`           |
+| Phase              | Agent                  | Model  | Reads                | Writes to MILESTONE                                  |
+|--------------------|------------------------|--------|----------------------|------------------------------------------------------|
+| 1. Codebase Scan   | `codebase-agent`       | Sonnet | MILESTONE + codebase | `## Codebase Analysis`                               |
+| 2. Design Analysis | `design-agent`         | Sonnet | MILESTONE + Figma    | `## Design Specifications`                           |
 | 3. Implementation  | `implementation-agent` | Opus   | MILESTONE (only)     | Code, unit tests, E2E tests, `## Implementation Log` |
 
 After implementation, the MILESTONE file is archived (renamed to `MILESTONE-[ID].done.md`) to prevent stale context from bleeding into the next milestone.
@@ -125,9 +130,9 @@ After implementation, the MILESTONE file is archived (renamed to `MILESTONE-[ID]
 
 When you run the verify skill, two agents run:
 
-| Agent                | Model  | What It Does                                                                                        |
-|----------------------|--------|-----------------------------------------------------------------------------------------------------|
-| `verification-agent` | Sonnet | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys              |
+| Agent                | Model  | What It Does                                                                                                   |
+|----------------------|--------|----------------------------------------------------------------------------------------------------------------|
+| `verification-agent` | Sonnet | Checks acceptance criteria, visual Figma comparison via Playwright headless, i18n keys                         |
 | `code-review-agent`  | Sonnet | Runs build, test, and E2E test commands (auto-detects package manager), reviews code quality and PRD alignment |
 
 Both agents read the PRD, TECH_PLAN, and archived MILESTONE files for full context. Any issues found become follow-up tasks (plain `[ ]` entries) added to PROGRESS.md.
