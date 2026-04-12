@@ -79,11 +79,45 @@ If the invoking prompt contains "FOCUSED RE-VERIFICATION" or similar instruction
 
 This mode reduces token waste by avoiding full re-audits when only small fixes were made.
 
-## Step 1: Identify Completed Tasks
+## Step 1: Identify Tasks to Verify
 
-1. Read `{base}/PROGRESS.md` and find all tasks marked with `[x]` (done, not yet verified)
-2. These are the tasks that need verification
-3. If no tasks are marked `[x]`, report "No completed tasks to verify" and stop
+> **Why this matters**: Re-verifying ALL completed tasks on every `/belmont:verify` run wastes tokens and produces duplicate reports. As a feature matures, the history of verified milestones grows large. This step targets only the newest work while preserving the ability to re-verify everything if needed.
+
+1. Read `{base}/PROGRESS.md` and find the **newest completed milestone** — the most recent `###` milestone heading that has tasks marked `[x]` (done, not yet verified)
+2. If a feature argument was provided (e.g., `/belmont:verify qa-bug-fixes`), verify **all** `[x]` tasks across all milestones in that feature
+3. Otherwise, verify **only** the newest milestone's `[x]` tasks — do NOT re-verify prior milestones' tasks
+4. If no tasks are marked `[x]`, report "No completed tasks to verify" and stop
+
+> **Re-verifying prior milestones**: Use the "Previously Verified (skip these)" mechanism to re-check areas of concern. If a task is already verified but a new defect is suspected, manually re-run verification on that specific milestone.
+
+### Checkpoint: Skip Already-Verified Areas
+
+Before dispatching sub-agents, determine what has already been checked in prior runs.
+
+1. Read `{base}/NOTES.md` for `## Verification` and `## Polish` sections from prior sessions
+2. Read `{base}/MILESTONE-*.done.md` files for prior verification and code review reports
+3. Build a **skip list** for each agent:
+   - For **verification-agent**: Tasks checked in prior runs with matching git baselines and no issues found
+   - For **code-review-agent**: Tasks reviewed in prior runs with matching baselines where no Critical/Warning issues were flagged
+4. Populate the "Previously Verified (skip these)" section for each agent's prompt below
+
+### Task-Level Deduplication
+
+The two agents have distinct ownership. When preparing prompts, ensure each agent knows its boundaries:
+
+| Area | Owner | Other agent skips |
+|------|-------|-------------------|
+| Acceptance criteria pass/fail | Verification Agent | Code Review Agent |
+| Visual fidelity (Playwright/Figma) | Verification Agent | Code Review Agent |
+| i18n completeness | Verification Agent | Code Review Agent |
+| Lighthouse audits | Verification Agent | Code Review Agent |
+| Functional testing | Verification Agent | Code Review Agent |
+| Build success/failure | Code Review Agent | Verification Agent |
+| Test pass/fail | Code Review Agent | Verification Agent |
+| Code quality (readability, naming, DRY, etc.) | Code Review Agent | Verification Agent |
+| Pattern adherence | Code Review Agent | Verification Agent |
+| Scope violations | Code Review Agent | Verification Agent |
+| PRD/Tech Plan alignment | Code Review Agent | Verification Agent |
 
 ## Sub-Agent Dispatch Strategy
 
@@ -148,7 +182,7 @@ No team cleanup needed.
 
 If neither `TeamCreate` nor `Task` is available:
 
-1. For each agent, read its agent file (e.g., `.agents/belmont/<agent-name>.md`)
+1. For each agent, read its agent file (e.g., `agents/belmont/<agent-name>.md`)
 2. Execute its instructions fully within your own context
 3. Complete all output before moving to the next agent
 4. Do NOT blend agent work together — finish one completely before starting the next
@@ -183,7 +217,7 @@ Append this block to the end of each sub-agent's prompt, after the standard prom
 
 ### Dispatch Rules (apply to ALL approaches)
 
-1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself (unless using Approach C) — the sub-agents read them
+1. **DO NOT** read `agents/belmont/*-agent.md` files yourself (unless using Approach C) — the sub-agents read them
 2. **DO NOT** perform the sub-agents' work yourself — sub-agents do this
 3. **DO** prepare all required context before spawning any sub-agent
 4. **DO** spawn sub-agents with minimal prompts (they read their context files themselves)
@@ -208,14 +242,19 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 
 > **IDENTITY**: You are the belmont verification agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
-> **MANDATORY FIRST STEP**: Read the file `.agents/belmont/verification-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
+> **MANDATORY FIRST STEP**: Read the file `agents/belmont/verification-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
+>
+> **YOUR OWNERSHIP**: Focus on acceptance criteria pass/fail, visual fidelity (Playwright/Figma), i18n completeness, Lighthouse audits, and functional testing. The code-review agent handles build/tests/code-quality/scope violations — do NOT duplicate those checks.
+>
+> **Previously Verified (skip these)**:
+> [SKIP LIST PLACEHOLDER — orchestrator populates with already-verified tasks from prior sessions]
 >
 > Verify the following completed tasks:
 >
 > ---
 > [List each completed task ID and header, e.g.:
-> - P0-1: Set up authentication [x]
-> - P0-2: Database schema [x]]
+> - P0-1: Set up authentication
+> - P0-2: Database schema]
 > ---
 >
 > Read `{base}/PRD.md` for acceptance criteria and task details.
@@ -240,14 +279,19 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 
 > **IDENTITY**: You are the belmont code review agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
-> **MANDATORY FIRST STEP**: Read the file `.agents/belmont/code-review-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
+> **MANDATORY FIRST STEP**: Read the file `agents/belmont/code-review-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
+>
+> **YOUR OWNERSHIP**: Focus on build success/failure, test pass/fail, code quality, type safety, pattern adherence, scope violations, and PRD alignment. The verification agent handles acceptance criteria/visual fidelity/i18n/Lighthouse/functional testing — do NOT duplicate those checks.
+>
+> **Previously Verified (skip these)**:
+> [SKIP LIST PLACEHOLDER — orchestrator populates with already-reviewed tasks from prior sessions]
 >
 > Review the code changes for the following completed tasks:
 >
 > ---
 > [List each completed task ID and header, e.g.:
-> - P0-1: Set up authentication [x]
-> - P0-2: Database schema [x]]
+> - P0-1: Set up authentication
+> - P0-2: Database schema]
 > ---
 >
 > Read `{base}/PRD.md` for task details and planned solution.
