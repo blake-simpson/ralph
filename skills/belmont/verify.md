@@ -81,9 +81,31 @@ This mode reduces token waste by avoiding full re-audits when only small fixes w
 
 ## Step 1: Identify Completed Tasks
 
-1. Read `{base}/PROGRESS.md` and find all tasks marked with `[x]` (done, not yet verified)
-2. These are the tasks that need verification
-3. If no tasks are marked `[x]`, report "No completed tasks to verify" and stop
+1. Read `{base}/PROGRESS.md` and find the **newest completed milestone** (the most recent `### ...:` heading with tasks marked `[x]`)
+2. Read `{base}/PRD.md` and find the tasks that belong to that milestone (they will have task IDs listed)
+3. **VERIFY ONLY THE NEWEST COMPLETED MILESTONE'S TASKS** — do NOT re-verify tasks from all prior milestones
+4. If all tasks in the newest milestone are marked `[v]` (verified), report "No tasks to verify" and stop
+5. If a feature argument was provided (e.g., `/belmont:verify qa-bug-fixes`), verify all `[x]` tasks in that feature
+6. If no tasks are marked `[x]`, report "No completed tasks to verify" and stop
+
+**Why this matters**: Re-verifying every task ever completed wastes tokens and creates duplicate reports. Each invocation of `/belmont:verify` should only check what was **newly** completed, not the entire history.
+
+### Checkpoint: Skip Already-Verified Areas
+
+Before dispatching agents, read `{base}/NOTES.md` (and `.belmont/NOTES.md` if exists) for any prior verification or code review reports for this feature. If prior checks already validated specific acceptance criteria, i18n keys, or build/tests for specific tasks:
+- **Do NOT re-dispatch those checks** — tell each agent which areas to skip
+- Only re-verify if the task was MODIFIED since the last verification pass (check git baseline in MILESTONE file vs. when prior check ran)
+- Add a "Previously Verified (skip these)" section when spawning sub-agents (see sub-agent prompts below)
+
+### Task-Level Deduplication
+
+The two agents have overlapping interests (i18n, scope, tests). Prevent duplicate work:
+
+- **Verification-agent owns**: Acceptance criteria pass/fail, visual fidelity, i18n completeness, Lighthouse scores, functional testing
+- **Code-review-agent owns**: Build success, test results, code quality, type safety, pattern adherence, scope violations, PRD alignment
+- **Shared (both may check but only one reports)**: i18n → verification-agent reports; scope → code-review-agent reports; tests → code-review-agent runs, verification-agent asserts passing
+
+When spawning sub-agents, explicitly tell each agent what the OTHER agent handles so they don't duplicate it.
 
 ## Sub-Agent Dispatch Strategy
 
@@ -206,7 +228,16 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 
 **Spawn a sub-agent with this prompt**:
 
-> **IDENTITY**: You are the belmont verification agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
+> **IDENTITY**: You are the belmont verification agent
+>
+> **YOUR OWNERSHIP**: Focus on acceptance criteria pass/fail, visual fidelity (Playwright), i18n completeness, Lighthouse audits, functional testing. The code-review-agent handles build/tests/code-quality/scope reviews — do NOT duplicate those checks.
+>
+> > **Additional Context from User**:
+> > [paste the user's additional instructions/context here verbatim, if any]
+>
+> > **Previously Verified (skip these)**:
+> > [If the orchestrator found prior verification for specific tasks, list them here. Skip re-checking criteria already validated unless the task was modified since.]
+. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
 >
 > **MANDATORY FIRST STEP**: Read the file `.agents/belmont/verification-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
 >
