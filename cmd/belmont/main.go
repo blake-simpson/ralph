@@ -422,7 +422,7 @@ func main() {
 		must(runReverifyCmd(os.Args[2:]))
 	case "sync":
 		must(runSyncCmd(os.Args[2:]))
-	case "version":
+	case "version", "--version", "-v":
 		fmt.Printf("belmont %s (%s, %s)\n", Version, CommitSHA, BuildDate)
 	case "help", "-h", "--help":
 		printUsage(os.Stdout)
