@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.2
+
+**Released:** 2026-04-15
+
+### Changes since v0.9.1
+
+- Allow belmont --version/-v as well as default belmont version
+
+
+
 ## v0.9.1
 
 **Released:** 2026-04-10
