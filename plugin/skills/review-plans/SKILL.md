@@ -278,7 +278,7 @@ Before committing, verify PROGRESS.md is internally consistent:
 
 3. **Milestone consistency** — Milestone status is computed from tasks, not stored:
    - Milestone headers should NOT have status markers or emoji
-   - If old-format headers are found, remove the emoji prefix
+   - If old-format headers are found, remove the marker prefix
 
 Only fix actual issues — if files are already consistent, make no changes.
 

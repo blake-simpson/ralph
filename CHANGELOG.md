@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.5
+
+**Released:** 2026-04-16
+
+### Changes since v0.9.4
+
+- Improve `belmont status` output
+
+
+
 ## v0.9.4
 
 **Released:** 2026-04-16
