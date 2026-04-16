@@ -386,9 +386,10 @@ After completing all updates to `.belmont/` planning files, commit them:
 
 ## Step 7: Final Actions
 
-1. If you have just completed the final milestone and all work is complete, automatically run "/belmont:verify" to perform QA.
-2. If there are more milestones, exit and prompt user to "/clear" and "/belmont:verify", "/belmont:implement", or "/belmont:status"
-   - If you are Codex, instead prompt: "/new" and then "belmont:verify", "belmont:implement", or "belmont:status"
+**Do NOT run `/belmont:verify` yourself.** Verification is a separate step — in the `auto` pipeline it runs automatically after implementation, and in manual mode the user decides when to verify. Running it here would duplicate work and cause the dedicated VERIFY step to find nothing to do.
+
+Exit and prompt the user to "/clear" and then run "/belmont:verify", "/belmont:implement", or "/belmont:status" as appropriate.
+- If you are Codex, instead prompt: "/new" and then "belmont:verify", "belmont:implement", or "belmont:status"
 
 ## Blocker Handling
 
@@ -445,5 +446,5 @@ If any check fails, STOP and report the issue rather than proceeding.
 8. **Update PROGRESS.md** - Keep PROGRESS.md current with task state changes. Add follow-up `[ ]` tasks for any out-of-scope issues reported by the implementation agent.
 9. **Don't skip phases** - Even if no Figma design, still run the design phase (it handles the no-design case)
 10. **Clean up the MILESTONE file** - Archive it after the milestone is complete
-11. **Quality over speed** - Ensure verification passes before marking complete
+11. **Quality over speed** - Ensure build, tests, and self-checks pass before marking tasks done
 12. **Stay in scope** - Never implement anything not traceable to a PRD task in the current milestone

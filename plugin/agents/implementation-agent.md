@@ -108,7 +108,7 @@ Execute in this order:
    - Follow existing test patterns from `## Codebase Analysis`
    - Aim for meaningful coverage, not 100%
 
-#### Step 3: Verification
+#### Step 3: Build & Test Checks
 
 **Port awareness**: If `$BELMONT_PORT` is set (worktree mode), use it when starting the **primary dev server** (e.g., `next dev -p $BELMONT_PORT`, `vite --port $BELMONT_PORT`). Do NOT hardcode port numbers. For any **other server** (Storybook, Prisma Studio, etc.), dynamically find a free port — NEVER use ports from `package.json` scripts:
 ```bash
@@ -142,16 +142,18 @@ Use the detected package manager (referred to as `<pkg>` below) for ALL commands
 
 **IMPORTANT**: Fix all errors before proceeding. Do not leave broken code.
 
-#### Step 3b: Self-Validation
+#### Step 3b: Developer Review
 
 A developer validates their own work before submitting for review. The verification agent is QA — a second pair of eyes with a different angle. You are the developer. Check your own work now.
+
+**IMPORTANT**: This is your developer-level "definition of done" check — confirming your implementation works before handing off. You mark tasks `[x]` (done). Only the verification agent (a separate QA pass) marks tasks `[v]` (verified). Never mark a task `[v]` yourself.
 
 **1. Acceptance Criteria Walkthrough**
 
 For each acceptance criterion listed in this task's definition (from the MILESTONE file):
 - **Test it functionally** — don't just confirm the code compiles. Run a command, navigate to a URL, inspect output, or check behavior.
 - **Document pass/fail** for each criterion.
-- If any criterion fails, fix immediately and re-run Step 3 (typecheck/lint/test).
+- If any criterion fails, fix immediately and re-run Step 3 (build & test checks).
 
 **2. Visual Validation**
 
@@ -172,7 +174,7 @@ If Playwright MCP is unavailable (tools not found or connection fails), document
 Do NOT proceed to Step 4 (Update Tracking) unless:
 - All acceptance criteria pass (or are explicitly deferred with justification)
 - Visual check passes (or is N/A for non-UI tasks)
-- Step 3 (typecheck/lint/test) still passes after any fixes
+- Step 3 (build & test checks) still passes after any fixes
 
 **Escape hatch**: If after 3 fix attempts an issue remains unresolvable, document it clearly in the Implementation Log as a known issue and proceed. The verification agent will catch it.
 
@@ -369,8 +371,8 @@ If design specification is unclear:
 4. **Scope Boundaries Are the Boundary** - If it's not in the MILESTONE file's task list, don't build it. If it's in "Out of Scope", don't touch it.
 5. **MILESTONE File Is Your Primary Input** - All implementation context is in the MILESTONE file. The only other `.belmont/` file to read is NOTES.md (Step 0b).
 6. **Read NOTES.md First** - Step 0b is mandatory. Known anti-patterns from Root Cause Patterns must be acknowledged before implementation begins.
-7. **Self-Validate Before Tracking** - Step 3b must pass before marking a task complete in Step 4. Check acceptance criteria and visual output (UI tasks).
-8. **Verify Before Commit** - All checks must pass for each task before committing.
+7. **Developer Review Before Tracking** - Step 3b must pass before marking a task complete in Step 4. Check acceptance criteria and visual output (UI tasks).
+8. **Build & Test Checks Before Commit** - All checks (Step 3) must pass for each task before committing.
 9. **Commit Each Task Separately** - One commit per task with a clear `[Task ID]: description` message.
 10. **Update Tracking Before Commit** - Mark each task done in PROGRESS.md (Step 4) before committing (Step 5), so tracking updates are included in the commit.
 11. **Always include `.belmont/` in commits** - Tracking updates from Steps 4/4b must be committed alongside code changes. Check `.belmont/` is not gitignored before staging.

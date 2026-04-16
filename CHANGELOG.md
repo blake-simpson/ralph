@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.9.3
+
+**Released:** 2026-04-16
+
+### Changes since v0.9.2
+
+- Fix reverify command not finding verified tasks to re-verify
+- Prevent implementation agent from verifying its own tasks
+
+
+
 ## v0.9.2
 
 **Released:** 2026-04-15
