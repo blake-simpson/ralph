@@ -33,7 +33,7 @@ If `.belmont/` does not exist or contains only empty templates and no features, 
 Present a clear summary and options:
 
 ```
-⚠️  Reset Belmont State
+WARNING — Reset Belmont State
 ========================
 
 Product: [product name from master PRD]
@@ -53,7 +53,7 @@ Options:
   [3] Full reset (everything, including masters and PR_FAQ)
   [c] Cancel
 
-⚠️  This cannot be undone.
+WARNING: This cannot be undone.
 ```
 
 **Wait for the user's response.** Do NOT proceed until you receive a reply.

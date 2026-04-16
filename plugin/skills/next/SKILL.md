@@ -218,7 +218,7 @@ After completing all updates to `.belmont/` planning files, commit them:
 Output a brief summary:
 
 ```
-✅ Next Task Complete
+Next Task Complete
 =====================
 Task:      [Task ID]: [Task Name]
 Milestone: [Milestone ID and name]

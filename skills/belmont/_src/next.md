@@ -169,7 +169,7 @@ This prevents stale context from bleeding into the next run.
 Output a brief summary:
 
 ```
-✅ Next Task Complete
+Next Task Complete
 =====================
 Task:      [Task ID]: [Task Name]
 Milestone: [Milestone ID and name]

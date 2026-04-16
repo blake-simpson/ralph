@@ -101,7 +101,7 @@ For each feature where all tasks in PROGRESS.md are `[v]` (verified), present it
 
 ```
 Feature: [feature-name] ([slug])
-  Status:   ✅ Complete
+  Status:   Complete
   Files:    PRD.md, TECH_PLAN.md, PROGRESS.md, NOTES.md, N MILESTONE-*.done.md
   Size:     ~X KB total
   Summary:  [2-3 sentence summary extracted from PRD.md overview]
@@ -238,10 +238,10 @@ Scan the file for paths that look like file/directory references (e.g., `src/com
 CLAUDE.md Audit — File References:
 
   Line 23: "Components live in src/components/ui/"
-    → Path exists ✅
+    → Path exists (OK)
 
   Line 45: "Auth middleware is in src/middleware/auth.ts"
-    → Path NOT found ⚠️
+    → Path NOT found (MISSING)
     [u] Update path (ask user for correct path)
     [r] Remove this line
     [s] Skip
@@ -313,7 +313,7 @@ Agent Tool State:
   .claude/commands/belmont/: 2 extra files not in source
     - old-skill.md
     - renamed-skill.md
-  .codex/belmont/: in sync ✅
+  .codex/belmont/: in sync (OK)
   .cursor/rules/belmont/: 1 broken symlink
     - removed-skill.mdc → (broken)
 

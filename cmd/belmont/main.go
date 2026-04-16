@@ -487,7 +487,7 @@ func runStatus(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	case "text":
-		fmt.Print(renderStatus(report))
+		fmt.Print(renderStatus(report, isTerminal(os.Stdout)))
 		return nil
 	default:
 		return fmt.Errorf("status: unknown format %q", format)
@@ -583,7 +583,7 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	if len(features) > 0 {
 		report.OverallStatus = computeFeatureListStatus(features)
 	} else {
-		report.OverallStatus = "🔴 Not Started"
+		report.OverallStatus = "Not Started"
 	}
 
 	return report, nil
@@ -787,7 +787,7 @@ func parseMasterDeps(root string) (deps map[string][]string, priorities map[stri
 }
 
 // parseMasterFeatureStatuses reads the ## Features table in the master .belmont/PROGRESS.md
-// and returns a map of slug → status string (e.g. "✅ Complete", "🟡 In Progress").
+// and returns a map of slug → status string (e.g. "Complete", "In Progress").
 // New table format: | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
 func parseMasterFeatureStatuses(root string) map[string]string {
 	statuses := make(map[string]string)
@@ -995,10 +995,10 @@ func computeFeatureListStatus(features []featureSummary) string {
 	allComplete := true
 	anyProgress := false
 	for _, f := range features {
-		if f.Status != "✅ Verified" {
+		if f.Status != "Verified" {
 			allVerified = false
 		}
-		if f.Status != "✅ Complete" && f.Status != "✅ Verified" {
+		if f.Status != "Complete" && f.Status != "Verified" {
 			allComplete = false
 		}
 		if f.TasksDone > 0 || f.TasksInProgress > 0 {
@@ -1006,15 +1006,15 @@ func computeFeatureListStatus(features []featureSummary) string {
 		}
 	}
 	if allVerified && len(features) > 0 {
-		return "✅ Verified"
+		return "Verified"
 	}
 	if allComplete && len(features) > 0 {
-		return "✅ Complete"
+		return "Complete"
 	}
 	if anyProgress {
-		return "🟡 In Progress"
+		return "In Progress"
 	}
-	return "🔴 Not Started"
+	return "Not Started"
 }
 
 func extractFeatureName(prd string) string {
@@ -1285,7 +1285,7 @@ func fileHasRealContent(path string) bool {
 
 func computeOverallStatus(tasks []task) string {
 	if len(tasks) == 0 {
-		return "🔴 Not Started"
+		return "Not Started"
 	}
 
 	allVerified := true
@@ -1309,30 +1309,30 @@ func computeOverallStatus(tasks []task) string {
 	}
 
 	if allVerified {
-		return "✅ Verified"
+		return "Verified"
 	}
 	if allDone {
-		return "✅ Complete"
+		return "Complete"
 	}
 	if allBlocked {
-		return "🔴 BLOCKED"
+		return "BLOCKED"
 	}
 	if anyProgress {
-		return "🟡 In Progress"
+		return "In Progress"
 	}
-	return "🔴 Not Started"
+	return "Not Started"
 }
 
 
-func renderStatus(report statusReport) string {
+func renderStatus(report statusReport, color bool) string {
 	// Feature listing mode (default when no --feature specified)
 	if report.Features != nil {
-		return renderFeatureListing(report)
+		return renderFeatureListing(report, color)
 	}
 
-	techPlan := "⚠ Not written (run /belmont:tech-plan to create)"
+	techPlan := "Not written (run /belmont:tech-plan to create)"
 	if report.TechPlanReady {
-		techPlan = "✅ Ready"
+		techPlan = "Ready"
 	}
 
 	taskLine := fmt.Sprintf("Tasks: %d verified, %d done, %d in progress, %d blocked, %d todo (of %d total)",
@@ -1344,18 +1344,25 @@ func renderStatus(report statusReport) string {
 		report.TaskCounts["total"],
 	)
 
+	bold := func(s string) string {
+		if color {
+			return ansiBold + s + ansiReset
+		}
+		return s
+	}
+
 	var sb strings.Builder
-	sb.WriteString("Belmont Status\n")
+	sb.WriteString(bold("Belmont Status") + "\n")
 	sb.WriteString("==============\n\n")
 	sb.WriteString(fmt.Sprintf("Feature: %s\n\n", report.Feature))
 	sb.WriteString(fmt.Sprintf("Tech Plan: %s\n\n", techPlan))
-	sb.WriteString(fmt.Sprintf("Status: %s\n\n", report.OverallStatus))
+	sb.WriteString(fmt.Sprintf("Status: %s\n\n", colorStatus(report.OverallStatus, color)))
 	sb.WriteString(taskLine)
 	sb.WriteString("\n\n")
 
 	if len(report.Tasks) > 0 {
 		for _, t := range report.Tasks {
-			sb.WriteString(fmt.Sprintf("  %s %s: %s\n", taskStatusIcon(t.Status), t.ID, t.Name))
+			sb.WriteString(fmt.Sprintf("  %s %s: %s\n", taskStatusIcon(t.Status, color), t.ID, t.Name))
 		}
 	}
 	sb.WriteString("\n")
@@ -1365,16 +1372,7 @@ func renderStatus(report statusReport) string {
 		sb.WriteString("  (none)\n")
 	} else {
 		for _, m := range report.Milestones {
-			icon := "⬜"
-			if milestoneAllVerified(m) {
-				icon = "✓"
-			} else if milestoneAllDone(m) {
-				icon = "✅"
-			} else if milestoneHasBlockers(m) {
-				icon = "🚫"
-			} else if !milestoneNotStarted(m) {
-				icon = "🔄"
-			}
+			icon := milestoneStatusIcon(m, color)
 			sb.WriteString(fmt.Sprintf("  %s %s: %s\n", icon, m.ID, m.Name))
 		}
 	}
@@ -1418,40 +1416,122 @@ func renderStatus(report statusReport) string {
 			sb.WriteString(fmt.Sprintf("  - %s\n", d))
 		}
 	}
+	sb.WriteString(statusLegend(color))
 	return sb.String()
 }
 
-func renderFeatureListing(report statusReport) string {
-	prfaq := "⚠ Not written (run /belmont:working-backwards)"
-	if report.PRFAQReady {
-		prfaq = "✅ Written"
+func milestoneStatusIcon(m milestone, color bool) string {
+	if milestoneAllVerified(m) {
+		if color {
+			return ansiGreen + "[v]" + ansiReset
+		}
+		return "[v]"
+	} else if milestoneAllDone(m) {
+		if color {
+			return ansiCyan + "[x]" + ansiReset
+		}
+		return "[x]"
+	} else if milestoneHasBlockers(m) {
+		if color {
+			return ansiRed + "[!]" + ansiReset
+		}
+		return "[!]"
+	} else if !milestoneNotStarted(m) {
+		if color {
+			return ansiYellow + "[>]" + ansiReset
+		}
+		return "[>]"
 	}
-	techPlan := "⚠ Not written"
+	if color {
+		return ansiDim + "[ ]" + ansiReset
+	}
+	return "[ ]"
+}
+
+func colorStatus(status string, color bool) string {
+	if !color {
+		return status
+	}
+	switch status {
+	case "Verified":
+		return ansiGreen + status + ansiReset
+	case "Complete":
+		return ansiCyan + status + ansiReset
+	case "In Progress":
+		return ansiYellow + status + ansiReset
+	case "BLOCKED":
+		return ansiRed + status + ansiReset
+	case "Not Started":
+		return ansiDim + status + ansiReset
+	default:
+		return status
+	}
+}
+
+func statusLegend(color bool) string {
+	if !color {
+		return "\nLegend: [v] verified  [x] done  [>] in progress  [!] blocked  [ ] todo\n"
+	}
+	return fmt.Sprintf("\nLegend: %s[v]%s verified  %s[x]%s done  %s[>]%s in progress  %s[!]%s blocked  %s[ ]%s todo\n",
+		ansiGreen, ansiReset, ansiCyan, ansiReset, ansiYellow, ansiReset, ansiRed, ansiReset, ansiDim, ansiReset)
+}
+
+func featureStatusIcon(status string, color bool) string {
+	bracket := "[ ]"
+	switch status {
+	case "Verified":
+		bracket = "[v]"
+	case "Complete":
+		bracket = "[x]"
+	case "In Progress":
+		bracket = "[>]"
+	}
+	if !color {
+		return bracket
+	}
+	switch status {
+	case "Verified":
+		return ansiGreen + bracket + ansiReset
+	case "Complete":
+		return ansiCyan + bracket + ansiReset
+	case "In Progress":
+		return ansiYellow + bracket + ansiReset
+	default:
+		return ansiDim + bracket + ansiReset
+	}
+}
+
+func renderFeatureListing(report statusReport, color bool) string {
+	prfaq := "Not written (run /belmont:working-backwards)"
+	if report.PRFAQReady {
+		prfaq = "Written"
+	}
+	techPlan := "Not written"
 	if report.TechPlanReady {
-		techPlan = "✅ Ready"
+		techPlan = "Ready"
+	}
+
+	bold := func(s string) string {
+		if color {
+			return ansiBold + s + ansiReset
+		}
+		return s
 	}
 
 	var sb strings.Builder
-	sb.WriteString("Belmont Status\n")
+	sb.WriteString(bold("Belmont Status") + "\n")
 	sb.WriteString("==============\n\n")
 	sb.WriteString(fmt.Sprintf("Product: %s\n\n", report.Feature))
 	sb.WriteString(fmt.Sprintf("PR/FAQ: %s\n", prfaq))
 	sb.WriteString(fmt.Sprintf("Master Tech Plan: %s\n\n", techPlan))
-	sb.WriteString(fmt.Sprintf("Status: %s\n\n", report.OverallStatus))
+	sb.WriteString(fmt.Sprintf("Status: %s\n\n", colorStatus(report.OverallStatus, color)))
 
 	if len(report.Features) == 0 {
 		sb.WriteString("Features:\n")
 		sb.WriteString("  (none — run /belmont:product-plan to create your first feature)\n")
 	} else {
 		for _, f := range report.Features {
-			icon := "🔴"
-			if f.Status == "✅ Verified" {
-				icon = "✓"
-			} else if f.Status == "✅ Complete" {
-				icon = "✅"
-			} else if f.Status == "🟡 In Progress" {
-				icon = "🟡"
-			}
+			icon := featureStatusIcon(f.Status, color)
 			sb.WriteString(fmt.Sprintf("%s %s (%s)\n", icon, f.Name, f.Slug))
 			sb.WriteString(fmt.Sprintf("  Tasks: %d/%d done", f.TasksDone, f.TasksTotal))
 			if f.TasksVerified > 0 {
@@ -1465,24 +1545,21 @@ func renderFeatureListing(report statusReport) string {
 			// Show milestone listing
 			if len(f.Milestones) > 0 {
 				for _, m := range f.Milestones {
-					mIcon := "⬜"
-					if milestoneAllVerified(m) {
-						mIcon = "✓"
-					} else if milestoneAllDone(m) {
-						mIcon = "✅"
-					} else if milestoneHasBlockers(m) {
-						mIcon = "🚫"
-					} else if f.NextMilestone != nil && m.ID == f.NextMilestone.ID {
-						mIcon = "🔄"
-					} else if !milestoneNotStarted(m) {
-						mIcon = "🔄"
+					isNext := f.NextMilestone != nil && m.ID == f.NextMilestone.ID
+					mIcon := milestoneStatusIcon(m, color)
+					if milestoneNotStarted(m) && isNext {
+						if color {
+							mIcon = ansiYellow + "[>]" + ansiReset
+						} else {
+							mIcon = "[>]"
+						}
 					}
 					sb.WriteString(fmt.Sprintf("    %s %s: %s\n", mIcon, m.ID, m.Name))
 				}
 			}
 
 			// Show next task if feature is in progress
-			if f.NextTask != nil && f.Status == "🟡 In Progress" {
+			if f.NextTask != nil && f.Status == "In Progress" {
 				sb.WriteString(fmt.Sprintf("  Next: %s — %s\n", f.NextTask.ID, f.NextTask.Name))
 			}
 
@@ -1500,21 +1577,48 @@ func renderFeatureListing(report statusReport) string {
 	}
 
 	sb.WriteString("Use --feature <slug> for detailed task-level status.\n")
+	sb.WriteString(statusLegend(color))
 	return sb.String()
 }
 
-func taskStatusIcon(status taskStatus) string {
+// ANSI color codes for terminal output
+const (
+	ansiReset   = "\033[0m"
+	ansiGreen   = "\033[32m"
+	ansiYellow  = "\033[33m"
+	ansiRed     = "\033[31m"
+	ansiCyan    = "\033[36m"
+	ansiBold    = "\033[1m"
+	ansiDim     = "\033[2m"
+)
+
+func taskStatusIcon(status taskStatus, color bool) string {
 	switch status {
 	case taskVerified:
-		return "✓"
+		if color {
+			return ansiGreen + "[v]" + ansiReset
+		}
+		return "[v]"
 	case taskDone:
-		return "✅"
+		if color {
+			return ansiCyan + "[x]" + ansiReset
+		}
+		return "[x]"
 	case taskInProgress:
-		return "🔄"
+		if color {
+			return ansiYellow + "[>]" + ansiReset
+		}
+		return "[>]"
 	case taskBlocked:
-		return "🚫"
+		if color {
+			return ansiRed + "[!]" + ansiReset
+		}
+		return "[!]"
 	default:
-		return "⬜"
+		if color {
+			return ansiDim + "[ ]" + ansiReset
+		}
+		return "[ ]"
 	}
 }
 
@@ -2880,7 +2984,7 @@ func resolveFeatureSlugs(root, featuresFlag string, allFlag bool) ([]string, err
 		var slugs []string
 		for _, f := range features {
 			// Skip features that are complete (computed from feature-level PRD/PROGRESS files)
-			if f.Status == "✅ Complete" {
+			if f.Status == "Complete" {
 				continue
 			}
 			slugs = append(slugs, f.Slug)
@@ -2935,12 +3039,12 @@ func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
 	// Compute in-degree for each non-complete feature
 	inDegree := make(map[string]int)
 	for _, f := range features {
-		if f.Status == "✅ Complete" {
+		if f.Status == "Complete" {
 			continue
 		}
 		count := 0
 		for _, dep := range f.Deps {
-			if df, ok := bySlug[dep]; ok && df.Status != "✅ Complete" {
+			if df, ok := bySlug[dep]; ok && df.Status != "Complete" {
 				count++
 			}
 		}
@@ -3240,7 +3344,7 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 
 		// Merge this wave's successes before proceeding to next wave
 		// State is NOT committed before merge — only after successful merge.
-		// This prevents "phantom completion" where state says ✅ but code never merged.
+		// This prevents "phantom completion" where state says complete but code never merged.
 		for i, s := range waveSuccesses {
 			// Ensure repo is in a clean merge state before each merge
 			if err := ensureCleanMergeState(cfg.Root); err != nil {
@@ -4308,7 +4412,7 @@ func buildLoopPrompt(action loopAction, feature string) string {
 	case actionVerify:
 		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
 		if action.MilestoneID != "" {
-			prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nCRITICAL: Do NOT modify the status of ANY other milestone in PROGRESS.md. Only update the heading for %s. Other milestones may be marked ⬜ intentionally (queued for re-verification) — do NOT flip them to ✅.", action.MilestoneID, action.MilestoneID, action.MilestoneID)
+			prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks in milestone %s. Do NOT verify tasks from other milestones — those were verified previously. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nCRITICAL: Do NOT modify the status of ANY other milestone in PROGRESS.md. Only update the heading for %s. Other milestones may be intentionally incomplete (queued for re-verification) — do NOT change their task states.", action.MilestoneID, action.MilestoneID, action.MilestoneID)
 		}
 		if action.ReverifyScope == "focused" {
 			prompt += "\n\nFOCUSED RE-VERIFICATION: This is a re-verify after follow-up fixes. Only verify: (1) the specific FWLUP tasks that were just fixed, (2) build/test pass, (3) any previously-failing acceptance criteria. Do NOT re-run Lighthouse. Do NOT re-check visual specs unless a FWLUP specifically addressed UI. Do NOT create new Polish-level issues."
@@ -4602,7 +4706,7 @@ func decideLoopActionSmart(report statusReport, history []historyEntry, cfg loop
 		}
 		// All milestones marked done — but verify against actual task counts (range-scoped)
 		if pendingInRange {
-			// State drift: milestones marked ✅ but tasks still pending within range
+			// State drift: milestones marked done but tasks still pending within range
 			lastMS := inRange[len(inRange)-1]
 			if fwlupInRange {
 				return &loopAction{Type: actionFixAll, Reason: fmt.Sprintf("State drift: %s marked complete but FWLUP tasks pending — fixing", lastMS.ID), MilestoneID: lastMS.ID}
@@ -5365,9 +5469,9 @@ func interactiveMilestoneSelect(milestones []milestone) (from, to string, err er
 	fmt.Fprintf(os.Stderr, "\033[1mMilestones:\033[0m\n")
 	firstUndone := ""
 	for _, m := range milestones {
-		marker := "⬜"
+		marker := "[ ]"
 		if milestoneAllDone(m) {
-			marker = "✅"
+			marker = "[x]"
 		}
 		if !milestoneAllDone(m) && firstUndone == "" {
 			firstUndone = m.ID
@@ -7662,8 +7766,8 @@ func runSyncCmd(args []string) error {
 
 // runRecover handles the "belmont recover" command.
 // migrateToUnifiedTracking detects and converts old dual-file state tracking to the new
-// unified PROGRESS.md format. Old format: PRD.md has ✅/🚫 on task headers, PROGRESS.md has
-// ✅/⬜ on milestone headers and ## Blockers/## Status sections. New format: PROGRESS.md
+// unified PROGRESS.md format. Old format: PRD.md had emoji on task headers, PROGRESS.md had
+// emoji on milestone headers and ## Blockers/## Status sections. New format: PROGRESS.md
 // has task checkboxes with [ ]/[>]/[x]/[v]/[!] states, no milestone emojis, no Blockers/Status sections.
 func migrateToUnifiedTracking(root string) {
 	featuresDir := filepath.Join(root, ".belmont", "features")
@@ -7697,7 +7801,7 @@ func migrateToUnifiedTracking(root string) {
 		return
 	}
 
-	fmt.Println("\n🔄 Migrating to unified state tracking...")
+	fmt.Println("\nMigrating to unified state tracking...")
 
 	migratedCount := 0
 	for _, e := range entries {
@@ -7831,7 +7935,7 @@ func migrateToUnifiedTracking(root string) {
 	}
 
 	if migratedCount > 0 {
-		fmt.Printf("\n  Migrated %d feature(s). ✅ tasks mapped to [x] (done, not verified).\n", migratedCount)
+		fmt.Printf("\n  Migrated %d feature(s). Done tasks mapped to [x] (not yet verified).\n", migratedCount)
 		fmt.Println("  Run 'belmont reverify' to verify completed work.")
 	}
 }

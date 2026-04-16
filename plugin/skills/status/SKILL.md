@@ -60,8 +60,8 @@ Belmont Status
 
 Product: [Extract from master PRD title, or "Unnamed Product"]
 
-PR/FAQ: [✅ Written / ⚠ Not written (run /belmont:working-backwards)]
-Master Tech Plan: [✅ Ready / ⚠ Not written]
+PR/FAQ: [Written / Not written (run /belmont:working-backwards)]
+Master Tech Plan: [Ready / Not written]
 
 Features:
   [status] [slug]  [feature name]  [X/Y tasks done]
@@ -70,12 +70,15 @@ Features:
 
 Use /belmont:status with a feature name for details.
 Use /belmont:product-plan to add a new feature.
+
+Legend: [v] verified  [x] done  [>] in progress  [!] blocked  [ ] todo
 ```
 
-Feature status icons:
-- ✅ All tasks complete
-- 🟡 In progress
-- 🔴 Not started
+Feature status indicators:
+- [v] All tasks verified
+- [x] All tasks complete
+- [>] In progress
+- [ ] Not started
 
 ## Standard Status Report Format
 
@@ -87,25 +90,25 @@ Belmont Status
 
 Feature: [Extract from PRD title]
 
-Tech Plan: [✅ Ready / ⚠ Not written (run /belmont:tech-plan to create)]
-Notes:     [✅ Has notes / — None]
+Tech Plan: [Ready / Not written (run /belmont:tech-plan to create)]
+Notes:     [Has notes / -- None]
 
-Status: [🔴 Not Started | 🟡 In Progress | ✅ Complete]
+Status: [Not Started | In Progress | Complete | Verified]
 
 Tasks: X verified, Y done, Z in progress, W blocked, V pending (of N total)
 
-  ✅ P0-1: [Task name]          [v] verified
-  ✅ P0-2: [Task name]          [v] verified
-  🔄 P1-1: [Task name]          [x] done
-  🔄 P1-2: [Task name]          [>] in progress
-  🚫 P1-3: [Task name]          [!] blocked
-  ⬜ P2-1: [Task name]          [ ] todo
-  ⬜ P2-2: [Task name]          [ ] todo
+  [v] P0-1: [Task name]
+  [v] P0-2: [Task name]
+  [x] P1-1: [Task name]
+  [>] P1-2: [Task name]
+  [!] P1-3: [Task name]
+  [ ] P2-1: [Task name]
+  [ ] P2-2: [Task name]
 
 Milestones: (status computed from tasks)
-  ✅ M1: [Milestone name]       (all tasks verified)
-  🟡 M2: [Milestone name]       (3/5 tasks done)
-  ⬜ M3: [Milestone name]       (not started)
+  [v] M1: [Milestone name]       (all tasks verified)
+  [>] M2: [Milestone name]       (3/5 tasks done)
+  [ ] M3: [Milestone name]       (not started)
 
 Blocked Tasks:
   - [!] P1-3: [Task name] — [reason if noted]
@@ -120,26 +123,29 @@ Recent Activity:
 Last completed: [Task ID] - [Task name]
 Recent decisions:
   - [Last 3 decisions from Decisions Log]
+
+Legend: [v] verified  [x] done  [>] in progress  [!] blocked  [ ] todo
 ```
 
 ## How to Determine Status
 
 ### Task Status (from PROGRESS.md checkboxes)
-- **Verified (✅)**: `[v]` in PROGRESS.md
-- **Done (🔄)**: `[x]` in PROGRESS.md (implemented, not yet verified)
-- **In Progress (🔄)**: `[>]` in PROGRESS.md
-- **Blocked (🚫)**: `[!]` in PROGRESS.md
-- **Pending (⬜)**: `[ ]` in PROGRESS.md
+- **Verified [v]**: `[v]` in PROGRESS.md
+- **Done [x]**: `[x]` in PROGRESS.md (implemented, not yet verified)
+- **In Progress [>]**: `[>]` in PROGRESS.md
+- **Blocked [!]**: `[!]` in PROGRESS.md
+- **Todo [ ]**: `[ ]` in PROGRESS.md
 
 PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec with no status markers.
 
 ### Overall Status (computed from tasks)
-- **🔴 Not Started**: All tasks are `[ ]`
-- **🟡 In Progress**: Mix of states
-- **✅ Complete**: All tasks are `[v]` (or `[v]` + `[!]`)
+- **Not Started**: All tasks are `[ ]`
+- **In Progress**: Mix of states
+- **Complete**: All tasks are `[x]` or `[v]`
+- **Verified**: All tasks are `[v]`
 
 ### Milestone Status (computed from tasks)
-Milestone status is computed from its tasks — no emoji on milestone headers. A milestone is complete when all its tasks are `[v]`.
+Milestone status is computed from its tasks — no markers on milestone headers. A milestone is verified when all its tasks are `[v]`.
 
 ### Task Priority Order
 - Tasks are sorted by priority: P0 first, then P1, P2, P3

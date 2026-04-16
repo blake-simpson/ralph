@@ -64,12 +64,12 @@ Report what was found:
 ```
 Loading planning documents...
 
-  PR/FAQ:           ✅ Found / ⚠ Not found
-  Master PRD:       ✅ Found (X features listed) / ⚠ Not found
-  Master Tech Plan: ✅ Found / ⚠ Not found
+  PR/FAQ:           Found / Not found
+  Master PRD:       Found (X features listed) / Not found
+  Master Tech Plan: Found / Not found
   Features:         X directories found
-    - <slug>: PRD ✅  Tech Plan ✅  Progress ✅  Notes ✅
-    - <slug>: PRD ✅  Tech Plan ⚠  Progress ✅  Notes ⚠
+    - <slug>: PRD OK  Tech Plan OK  Progress OK  Notes OK
+    - <slug>: PRD OK  Tech Plan --  Progress OK  Notes --
     ...
 ```
 
@@ -91,7 +91,7 @@ Compare the PR/FAQ against the master PRD and master tech plan:
 
 For each finding, present it to the user with resolution options (see Interactive Resolution below).
 
-If no findings: report "Layer 1: PR/FAQ and master documents are aligned ✅" and move on.
+If no findings: report "Layer 1: PR/FAQ and master documents are aligned." and move on.
 
 ## Step 3: Layer 2 Review — Feature Plans ↔ Masters
 
@@ -111,7 +111,7 @@ For each feature listed in the master PRD features table:
 4. **Orphaned features**
    - Feature directories that exist under `.belmont/features/` but aren't listed in master PRD → **Unplanned**
 
-For each finding, present interactively. If no findings: report "Layer 2: Feature plans align with master documents ✅"
+For each finding, present interactively. If no findings: report "Layer 2: Feature plans align with master documents."
 
 ## Step 4: Layer 3 Review — Tasks & Milestones ↔ Feature Plans
 
@@ -145,7 +145,7 @@ For each feature with both a PRD and PROGRESS file:
    - Add missing: `### M3: Feature X (depends: M1, M2)` (add the dep)
    - Break serial chain: `### M3: Dashboard (depends: M1)` (change from M2 to M1 since M2 and M3 are independent)
 
-For each finding, present interactively. If no findings: report "Layer 3: Tasks and milestones are consistent ✅"
+For each finding, present interactively. If no findings: report "Layer 3: Tasks and milestones are consistent."
 
 ## Step 5: Layer 4 Review — Codebase ↔ Plans
 
@@ -167,7 +167,7 @@ Read the codebase structure to compare against plans:
    - Look for significant code/patterns that don't correspond to any planned feature → **Unplanned**
    - Scope this to major directories and patterns — this is NOT a full code audit
 
-For each finding, present interactively. If no findings: report "Layer 4: Codebase aligns with plans ✅"
+For each finding, present interactively. If no findings: report "Layer 4: Codebase aligns with plans."
 
 ## Interactive Resolution
 
@@ -276,8 +276,8 @@ Before committing, verify PROGRESS.md is internally consistent:
    - Flag any tasks with old-style markers (emoji, `[DONE]`, etc.)
 
 3. **Milestone consistency** — Milestone status is computed from tasks, not stored:
-   - Milestone headers should NOT have emoji status markers (✅/⬜)
-   - If old-format headers are found, remove the emoji prefix
+   - Milestone headers should NOT have status markers or emoji
+   - If old-format headers are found, remove the marker prefix
 
 Only fix actual issues — if files are already consistent, make no changes.
 
