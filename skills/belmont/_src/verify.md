@@ -34,7 +34,7 @@ If the invoking prompt contains "FOCUSED RE-VERIFICATION" or similar instruction
    - Build and test verification (always run fully)
    - Any previously-failing acceptance criteria
 3. **Do NOT** re-run Lighthouse audit unless a follow-up task specifically addressed performance
-4. **Do NOT** re-check visual specs against Figma unless a follow-up task specifically addressed UI changes
+4. **Do NOT** re-check visual specs against design references unless a follow-up task specifically addressed UI changes. Still include the Visual Comparison Attestation in the report, noting that comparison was skipped per focused re-verification scope.
 5. **Do NOT** create new Polish-level issues — only report Critical and Warning issues found during focused verification
 6. **Include the scoping instructions** when dispatching to the sub-agents so they also focus their review
 
@@ -45,6 +45,18 @@ This mode reduces token waste by avoiding full re-audits when only small fixes w
 1. Read `{base}/PROGRESS.md` and find all tasks marked with `[x]` (done, not yet verified)
 2. These are the tasks that need verification
 3. If no tasks are marked `[x]`, report "No completed tasks to verify" and stop
+
+## Step 1b: Gather Design References
+
+Before spawning sub-agents, collect design references for the tasks being verified:
+
+1. Read archived MILESTONE files (`{base}/MILESTONE-*.done.md`) — look for:
+   - `## Design Specifications` section with a Figma Sources table (has `fileKey`, `nodeId` columns)
+   - Embedded or linked reference images, screenshots, or mockups
+2. Check `{base}/PRD.md` task definitions for `**Figma**:` fields or linked visual references
+3. Check `{base}/TECH_PLAN.md` and `{base}/NOTES.md` for any visual specifications
+
+Collect whatever you find — Figma `fileKey`/`nodeId` pairs, image paths, URLs. You will pass these to the verification agent in Step 2.
 
 ## Sub-Agent Dispatch Strategy
 
@@ -84,9 +96,16 @@ Spawn these two sub-agents **simultaneously** (or sequentially if using Approach
 > Read `{base}/TECH_PLAN.md` for technical specifications (if it exists).
 > Check for archived MILESTONE files (`{base}/MILESTONE-*.done.md`) for implementation context.
 >
-> Check acceptance criteria, visual Figma comparison, i18n keys, and functional testing.
+> Check acceptance criteria, visual design comparison, i18n keys, and functional testing.
 >
-> **Visual Verification**: For any task with visual output, you MUST use Playwright MCP to verify the implementation — start the project's preview tool, navigate to the relevant UI, take screenshots, and compare against Figma designs. Do NOT silently skip this step.
+> **Design References for Visual Verification**:
+> [List whatever you found in Step 1b. For each task with references, list them:
+> - Task [ID]: Figma fileKey=`xxx`, nodeId=`yyy`
+> - Task [ID]: Reference screenshot at [path or URL]
+> - Task [ID]: No visual reference found
+> If no MILESTONE files or references were found, write: "No design references found in archived MILESTONE files or PRD."]
+>
+> **Visual Verification**: For any task with visual output, you MUST use Playwright MCP to take screenshots and verify the implementation. If design references are listed above, you MUST load them — call `mcp__plugin_figma_figma__get_screenshot` for Figma references, Read for local images, WebFetch for URLs — and perform structured side-by-side comparison (layout, spacing, typography, colors, component shapes, alignment). Include the Visual Comparison Attestation in your report. Do NOT silently skip available design references.
 >
 > Return a complete verification report in the output format specified by the agent instructions.
 
