@@ -163,8 +163,11 @@ If this task creates or modifies anything visual (pages, components, layouts, st
 1. **Start the project's preview tool** if not already running. Check `package.json` scripts (or equivalent) for the dev server or component preview tool. For component-only tasks, prefer a component preview tool if available (e.g., Storybook). For the primary dev server, use `$BELMONT_PORT` / `$PORT` if set. For any other server (Storybook, Prisma Studio, etc.), dynamically find a free port — NEVER use hardcoded ports from package.json scripts. Wait for it to be ready.
 2. **Navigate with Playwright MCP** (`mcp__playwright__browser_navigate`) to the relevant page or component story.
 3. **Take a screenshot** (`mcp__playwright__browser_take_screenshot`).
-4. If Figma design context exists in the MILESTONE file's `## Design Specifications`, get the reference screenshot (`mcp__plugin_figma_figma__get_screenshot`) and compare: colors, spacing, typography, layout, component states.
-5. Fix any visual discrepancies, then re-run Step 3.
+4. **Compare against design references**. Check the MILESTONE file's `## Design Specifications` for Figma sources or other visual references:
+   - If Figma `fileKey`/`nodeId` are present in the Figma Sources table, call `mcp__plugin_figma_figma__get_screenshot` with those values and compare each dimension: layout structure, spacing, typography, colors, component shapes, alignment. Fix any discrepancies before proceeding.
+   - If other reference images are linked (screenshots, mockups), load and compare against those.
+   - If no visual reference exists, note "No design reference available" in the Implementation Log — do not skip silently.
+5. Fix any visual discrepancies found, then re-run Step 3.
 6. Clean up any screenshot files created during validation.
 
 If Playwright MCP is unavailable (tools not found or connection fails), document this in the Implementation Log as "Visual validation skipped: Playwright MCP unavailable" — do NOT silently skip.

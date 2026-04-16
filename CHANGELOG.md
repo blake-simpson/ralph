@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.4
+
+**Released:** 2026-04-16
+
+### Changes since v0.9.3
+
+- Enforce design reference comparison in visual verification
+
+
+
 ## v0.9.3
 
 **Released:** 2026-04-16
