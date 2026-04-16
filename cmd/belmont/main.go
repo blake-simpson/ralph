@@ -7384,6 +7384,51 @@ func runReverifyCmd(args []string) error {
 	milestones := parseMilestones(string(progressContent))
 	inRange := milestonesInRange(milestones, from, to)
 
+	// Reset [v] (verified) tasks to [x] (done) in targeted milestones so the
+	// verification agent will pick them up again. Only milestones in range that
+	// have [v] or [x] tasks are candidates for re-verification.
+	//
+	// Build a set of milestone IDs that contain [v] tasks and need resetting.
+	resetIDs := map[string]bool{}
+	for _, m := range inRange {
+		for _, t := range m.Tasks {
+			if t.Status == taskVerified {
+				resetIDs[m.ID] = true
+				break
+			}
+		}
+	}
+
+	if len(resetIDs) > 0 {
+		// Line-by-line replacement scoped to target milestones.
+		msHeaderRe := regexp.MustCompile(`^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):\s*`)
+		verifiedTaskRe := regexp.MustCompile(`^(\s*-\s+)\[v\](\s+.*)$`)
+		lines := strings.Split(string(progressContent), "\n")
+		currentMSID := ""
+		changed := false
+		for i, line := range lines {
+			if hm := msHeaderRe.FindStringSubmatch(line); len(hm) >= 2 {
+				currentMSID = "M" + hm[1]
+			}
+			if resetIDs[currentMSID] {
+				if vm := verifiedTaskRe.FindStringSubmatch(line); len(vm) >= 3 {
+					lines[i] = vm[1] + "[x]" + vm[2]
+					changed = true
+				}
+			}
+		}
+		if changed {
+			newContent := strings.Join(lines, "\n")
+			if err := os.WriteFile(progressPath, []byte(newContent), 0644); err != nil {
+				return fmt.Errorf("reverify: failed to reset verified tasks: %w", err)
+			}
+			// Re-parse after rewrite so downstream filtering sees [x] tasks.
+			progressContent = []byte(newContent)
+			milestones = parseMilestones(newContent)
+			inRange = milestonesInRange(milestones, from, to)
+		}
+	}
+
 	// Find milestones that have [x] (done but not verified) tasks
 	var targets []milestone
 	for _, m := range inRange {
