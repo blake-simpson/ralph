@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.6
+
+**Released:** 2026-04-20
+
+### Changes since v0.9.5
+
+- Improvements to planning modes
+
+
+
 ## v0.9.5
 
 **Released:** 2026-04-16
