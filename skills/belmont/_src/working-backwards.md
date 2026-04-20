@@ -23,10 +23,46 @@ This session requires ultrathink-level reasoning — deeply consider customer ne
 
 <!-- @include user-questions.md -->
 
+<!-- @include dynamic-questioning.md -->
+
+<!-- @include proactive-research.md -->
+
+## Domains to Cover
+
+For a Working Backwards (PR/FAQ) session, the relevant domains (per the Dynamic Questioning framework above) are:
+
+- **Customer** — specific persona, context, current alternatives, willingness to pay.
+- **Problem** — singular pain, severity, frequency, data quantifying it.
+- **Solution shape** — high-level experience (no implementation detail), key differentiator.
+- **Customer benefit** — the single most important value prop in customer language.
+- **Competitive positioning** — existing solutions, their weaknesses, our relative strength.
+- **Pricing / monetization** — tier structure, trial mechanics, comparable benchmarks.
+- **Trade-offs** — options considered and why this one wins (must be data-backed).
+- **Risks & mitigations** — what can go wrong (legal, adoption, technical, reputational).
+- **KPIs** — baseline, target, measurement method, timeframe.
+- **Data & evidence** — sources that back every non-obvious claim.
+- **Leader quote framing** — visionary but specific, grounded in the customer benefit.
+- **Customer testimonial framing** — specific, believable, named persona + scenario.
+- **Launch & access** — timing, distribution, discovery, pricing visibility.
+- **Regulatory / legal context** — age-gating, compliance, disclosures, regional constraints.
+
+## Research Triggers
+
+Kick off a research sub-agent (per the Proactive Research framework above) when any of these appear:
+
+- **Market sizing** — TAM / SAM / SOM estimates for the target segment.
+- **Competitor messaging** — how direct competitors frame the same problem; what headlines and value props they use.
+- **Pricing benchmarks** — typical price points, tier structures, and trial lengths for comparable products.
+- **Industry data for the customer problem** — survey data, research reports, public statistics that quantify the pain.
+- **Regulatory context** — GDPR, COPPA, HIPAA, PCI-DSS, age-gating law, platform (Apple, Google) policy.
+- **Prior-art PR/FAQ examples** — how Amazon, DAZN, or other published writeups phrase equivalent problems.
+- **Category-defining terminology** — what language customers actually search / speak (avoid internal jargon in the press release).
+
 ## ALLOWED ACTIONS
 - Asking the user questions
 - Writing to `.belmont/PR_FAQ.md`
-- Using WebFetch for market research
+- Using WebFetch for inline lookups of single user-provided URLs
+- Spawning `Explore` or `general-purpose` sub-agents for deep market / competitor / regulatory research (see Proactive Research)
 - Reading existing `.belmont/` files for context
 
 ## Update vs. Create (CRITICAL)
@@ -37,6 +73,10 @@ Before starting, read `.belmont/PR_FAQ.md`.
 - **File has real content** → **UPDATE**: ask the user what sections to revise. NEVER replace the entire file. Preserve existing content and refine specific sections.
 
 ## Workflow
+
+### Step 0: Set the depth
+
+Before Step 1, **classify the scope and confirm the tier with the user** (see *Dynamic Questioning Depth* above). A PR/FAQ can be anything from a short single-page alignment doc (Small) to a company-level strategic document with extensive internal FAQs and appendices (Epic). The tier drives how many **Domains to Cover** you interview and how much evidence you need. Kick off research sub-agents whenever a **Research Triggers** signal appears (see *Proactive Research* above) and loop findings back through the structured question tool.
 
 ### Step 1: Gather Context
 

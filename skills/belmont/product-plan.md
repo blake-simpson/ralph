@@ -33,13 +33,162 @@ When you need to ask the user a question:
 4. **NEVER ask questions as plain inline text** when a structured question tool exists. No "Question 1: ..." followed by more text. Use the tool.
 5. **Fallback**: If no structured question tool is available in your environment, ask questions as plain text — one set at a time, clearly formatted.
 
+## Dynamic Questioning Depth (MANDATORY)
+
+Your question depth MUST scale with the complexity of the work. A one-line tweak needs 1–2 questions. A multi-surface feature with new user types, data models, and integrations needs 10+ rounds across every relevant domain. **Never stop purely because you've hit "a few" rounds.** Stop when the scope is fully covered.
+
+### Step 1 — Classify the scope (before the first question round)
+
+Silently assess the task across these five axes:
+
+- **Surface count** — how many pages / screens / flows / endpoints are involved?
+- **New vs. extension** — greenfield concept or extension of existing behaviour?
+- **New user types / roles** — does it introduce new personas, permission tiers, or audiences?
+- **External systems** — new integrations, APIs, data sources, providers, side effects?
+- **Novelty** — does this break new ground for the product (new domain, UX pattern, business model, tech stack)?
+
+Map to a **tier**:
+
+| Tier     | Signal                                                    | Target rounds | Behaviour                                                         |
+|----------|-----------------------------------------------------------|---------------|-------------------------------------------------------------------|
+| Trivial  | 1 axis, pure extension (e.g. copy tweak, colour change)   | 1             | One confirming round, finalize                                    |
+| Small    | 2–3 axes, mostly extension                                | 2–3           | Cover core concerns of the feature only                           |
+| Medium   | 3–5 axes, one novel element                               | 4–6           | Add edge cases + UX/state coverage                                |
+| Large    | 5 axes OR multiple novel elements                         | 7–10          | Exhaustive domain coverage, likely triggers research              |
+| Epic     | Cross-cutting, touches every surface, new product line    | 10+           | Escalate: consider decomposing into sub-features                  |
+
+### Step 2 — Confirm the tier with the user (before any domain questions)
+
+Use your structured question tool to announce the classification and give the user a chance to correct it. Example:
+
+> "I'm treating this as a **Large** feature — it introduces a new user type, touches 4 surfaces, and depends on a new payments provider. I'll ask ~8 rounds across user flows, edge cases, content, accessibility, analytics, privacy, notifications, and monetization. Does that match your expectation, or should I scope it tighter / wider?"
+
+Offer the options: `Confirm tier`, `Downgrade (I want it smaller)`, `Upgrade (it's bigger than that)`. Respect the user's correction — their framing wins.
+
+### Step 3 — Cover every relevant domain
+
+Walk the **Domains to Cover** checklist for this skill (defined in a section of this skill below — each skill defines its own product/tech/PR-FAQ-specific list). For each **relevant** domain, run at least one `AskUserQuestion` round. Group tightly-related sub-questions into a single call (per the `user-questions.md` rules).
+
+**Skipping domains**: a domain may be skipped only if it is *genuinely irrelevant* to the task. When skipping, record it in the plan's `## Clarifications` section as `- [domain]: skipped — not applicable because [reason]`. Do not skip a domain merely because it feels tedious.
+
+### Step 4 — Re-tier dynamically
+
+Upgrade the tier mid-interview if:
+
+- A user answer surfaces a subsystem you didn't know about.
+- Research uncovers a convention, regulation, or constraint you hadn't accounted for.
+- The user describes more scope than the initial brief implied.
+
+Downgrade only if the user explicitly scopes down. Announce any re-tier to the user the same way you announced the initial tier.
+
+### Step 5 — Exit criteria
+
+Finalize the plan ONLY when **all** of these are true:
+
+1. Every relevant domain has had at least one question round (or is explicitly marked skipped in `## Clarifications`).
+2. The user has explicitly confirmed they have no more open questions — ask this with the structured question tool, don't assume.
+3. All answers are captured in the plan's `## Clarifications` section verbatim enough that an implementation agent can trace every decision back to a user answer.
+4. Any research findings have been surfaced to the user and incorporated (see Proactive Research).
+
+If any of these fail, keep asking. The round count is an indicator, not a limit.
+
+## Proactive Research (MANDATORY on trigger)
+
+You MUST proactively use web research when the plan depends on current, external knowledge. Relying solely on training data produces stale or generic plans. The user is better served by a plan informed by up-to-date sources.
+
+### Step 1 — Watch for triggers
+
+Kick off research (silently, alongside questioning) whenever any signal in the **Research Triggers** checklist (defined in a section of this skill below) appears in the brief or surfaces during the interview.
+
+If a trigger fires, you do **not** need to ask the user "should I research this?" — just launch the research. You will surface findings back to the user for a decision (Step 4).
+
+### Step 2 — Delegate deep research to a sub-agent
+
+Deep research MUST be delegated to an `Explore` or `general-purpose` sub-agent. This keeps the planner's context window clean for the interview and allows heavier multi-source investigation.
+
+Give the sub-agent a tight brief:
+
+- **Scope**: exactly what question to answer (e.g. "compare Stripe Billing vs. Paddle vs. Lemon Squeezy for EU B2B SaaS with tax compliance").
+- **Recency filter**: prefer sources from 2025 or later. Explicitly ask the sub-agent to flag anything older.
+- **Source preference**: official docs, release notes, RFCs, and vendor changelogs over blog posts. Primary sources over secondary.
+- **Output shape**: a short summary + 2–4 candidate options, each with pros, cons, current version, maintenance signal, and a primary source URL.
+- **Length cap**: ask for a ≤300-word report so findings slot cleanly into the plan.
+
+Inline `WebFetch` is acceptable **only** for single URLs the user provided or that you need to fetch verbatim (e.g. a specific docs page). Do not loop inline fetches — delegate instead.
+
+### Step 3 — Flag stale sources
+
+If any source the sub-agent cites is older than ~12 months, mark it `(potentially stale — last updated YYYY-MM)` in the plan. Prefer more recent sources when available.
+
+### Step 4 — Loop findings back through the user
+
+After a research pass lands, summarize it back to the user via your structured question tool with concrete options. Research feeds **more** questions, not fewer — the user picks the direction:
+
+> "Research found three viable options for [X]: A (pros/cons), B (pros/cons), C (pros/cons). My default recommendation is B because [reason]. Which way do you want to go?"
+
+Do not finalize the plan until the user has chosen. If the user picks "Other", incorporate their choice and continue.
+
+### Step 5 — Embed findings in the plan (not just chat)
+
+Research outputs must land in the plan file itself so downstream agents can see them:
+
+- **PRD**: add a `### Research Notes` subsection inside `## Technical Context` (or `## Clarifications`) with a bulleted list of findings, each with its source URL and a one-sentence summary.
+- **TECH_PLAN**: populate the `Alternatives Considered` column of the `## Decision Log` from research, and add a `## References` section at the bottom listing all cited URLs with a one-sentence summary each.
+- **PR_FAQ**: put cited data in the `## Appendix` → `### Supporting Data` section. Every claim in the press release backed by research should cite its source in the appendix.
+
+Never leave research findings only in the chat — the plan must stand alone.
+
+### What NOT to research
+
+- **Internal codebase patterns** — read the code instead.
+- **Settled decisions** — don't re-open questions the user has already answered.
+- **Trivia** that doesn't affect the plan.
+- **Well-known facts** inside your training cutoff where recency doesn't matter (e.g. "what is JSON").
+
+When in doubt, ask the user whether research would be useful before kicking off a sub-agent.
+
+## Domains to Cover
+
+For a product planning session, the relevant domains (per the Dynamic Questioning framework above) are:
+
+- **User & audience** — who specifically, in what context, with what prior expectations?
+- **Problem & motivation** — why now? What triggered this? What pain does it remove?
+- **Primary flow** — step-by-step happy path, from entry point to success.
+- **Alternate flows & variations** — first-time user, returning user, power user, admin / elevated roles.
+- **Edge cases** — empty states, very long / malformed content, errors, permission-denied, network failure, concurrency, rate limits.
+- **Success criteria** — measurable business / user outcomes; how do we know it worked?
+- **Industry / competitive conventions** — what do users already expect based on comparable products?
+- **Content & copy** — tone, length, personalization, tone-of-voice constraints.
+- **Accessibility** — keyboard navigation, screen reader semantics, contrast, reduced motion, target WCAG level.
+- **Internationalization / localization** — languages, RTL, locale-specific formatting, dynamic text expansion.
+- **Analytics & telemetry** — which events to track, why, and which dashboards they feed.
+- **Trust, privacy, legal** — PII handling, consent, data retention, audit trails, regulatory framing (GDPR, COPPA, HIPAA, …).
+- **Onboarding / discovery** — how users find the feature, how they learn to use it, empty-first-use state.
+- **Notifications & cross-surface** — email, push, in-app, cross-device touchpoints.
+- **Offline / degraded states** — behaviour without connectivity or with partial data.
+- **Monetization** — pricing, entitlements, paywalls, billing events (only if commercial).
+
+## Research Triggers
+
+Kick off a research sub-agent (per the Proactive Research framework above) when any of these appear in the brief or during the interview:
+
+- **Competitive benchmarking** — "how do other products do X?"
+- **Industry-standard UX patterns** — e.g. expected flows for checkout, sign-up, password reset, notifications opt-in.
+- **Accessibility standards** — specific WCAG success criteria for the component being built.
+- **Compliance / regulatory context** — GDPR, COPPA, HIPAA, PCI-DSS, SOC2, local tax rules, age-gating law.
+- **Content / copy conventions** — required disclosures (financial, medical, legal), platform-specific guidelines (Apple, Google).
+- **Pricing / monetization benchmarks** — common tier structures, trial lengths, typical conversion copy.
+- **Notification & transactional email norms** — CAN-SPAM, double-opt-in, unsubscribe conventions.
+- **Prior-art examples** — when the user invokes "like Notion does it" / "like Linear does it", confirm the actual pattern instead of guessing.
+
 ## ALLOWED ACTIONS
 - Reading files to understand the codebase
 - If any Figma URLs are included, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design context (layout, colors, typography, component structure, copy) and incorporate findings into the PRD.
 - Asking the user questions
 - Writing to `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/features/`, and master `.belmont/PROGRESS.md`
 - Creating feature directories under `.belmont/features/`
-- Using WebFetch for research
+- Using WebFetch for inline lookups of single user-provided URLs
+- Spawning `Explore` or `general-purpose` sub-agents for deep web research (see Proactive Research)
 
 ## Strategic Context
 
@@ -128,19 +277,21 @@ When the user selects or creates a feature:
 
 When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
 
+If the existing PRD/PROGRESS already contains standalone verification/QA/testing tasks (a legacy anti-pattern — see "Important Considerations" below), do NOT mirror that pattern for the new work you are planning. Surface the stale tasks to the user, explain that verification is automatic, and offer to migrate their criteria into the adjacent feature task's `**Verification**:` field. Do not remove them silently — always ask.
+
 ## Process
 
 1. Load relevant skills for the domain (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 2. Ask the user what they want to build
-3. Ask clarifying questions until the feature is fully understood
-4. Consider edge cases, dependencies, blockers
-5. Be proactive and suggest questions to ask the user if they are not clear on something.
-6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use
-7. Perform deep research on topics that are not clear
-8. Ask the user if they are happy to finalize the plan or if they have more questions
-9. Break the feature down into implementable milestones and tasks. Keep milestones small and focused. Consider grouping tasks together that are related or can be completed in a single session.
-9. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace)
-10. Exit - do NOT start implementation
+3. **Classify scope and confirm tier with the user** (see *Dynamic Questioning Depth* above). Do this before any domain questions.
+4. Walk the **Domains to Cover** checklist. Run one `AskUserQuestion` round per relevant domain. Re-tier mid-interview if new subsystems surface.
+5. **Trigger research proactively** (see *Proactive Research* above) whenever a signal from the **Research Triggers** checklist appears. Delegate deep research to a sub-agent; loop findings back to the user with options.
+6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use.
+7. Consider edge cases, dependencies, blockers. Be proactive — suggest questions the user may not have thought to ask.
+8. Verify the **exit criteria** from the Dynamic Questioning framework: every relevant domain covered (or explicitly marked skipped), user confirms no more open questions, all answers captured in `## Clarifications`.
+9. Break the feature down into implementable milestones and tasks. Keep milestones small and focused. Group related tasks that can be completed in a single session.
+10. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace). Include a `### Research Notes` subsection in `## Technical Context` if research was performed.
+11. Exit — do NOT start implementation.
 
 ## Question Scope (CRITICAL)
 
@@ -169,6 +320,7 @@ This is a **product** planning session, NOT a technical planning session. Techni
 - State management approach
 - Styling approach (Tailwind vs CSS modules, etc.)
 - Specific pricing values or placeholder content (these come from designs/implementation)
+- Whether to add a separate verification / QA / testing task or milestone — verification runs automatically after each milestone via `/belmont:verify`; per-task criteria live in the task's `**Verification**:` field.
 
 If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
 
@@ -201,7 +353,9 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 
 ## Important Considerations
 
-- Each task must include verification steps (at minimum linting / tsc / test via the project's package manager)
+- Each task must include verification steps in its `**Verification**:` field (at minimum linting / tsc / test via the project's package manager). These are *criteria* captured inside the task — NOT a separate task.
+- **Do NOT create standalone verification, QA, or testing tasks** (e.g. "Run tests", "Responsive QA", "Cross-Breakpoint Verification", "Unit Tests", "Final verification"). Verification is owned by the `/belmont:verify` skill, which `belmont auto` dispatches automatically after every milestone. It spawns the verification-agent (visual/i18n/a11y/Lighthouse) and code-review-agent (build/test/lint/scope/quality) and creates its own follow-up tasks if issues are found. Implementation-agent also runs build/lint/typecheck/test locally before marking a task `[x]`. A standalone verify task therefore duplicates work that runs at least twice already and inflates progress counts.
+- **Exception:** tasks that set up *new* test infrastructure (e.g. "Configure Playwright", "Add vitest to the project", "Add a visual-regression harness") are legitimate implementation work and SHOULD be their own tasks. The forbidden pattern is tasks whose *body* is "run the checks that the verify agent already runs".
 - Detect blockers/dependencies on tasks and ensure blockers are addressed first
 - Always consider that the follow-up implementation agents communicate through a MILESTONE file. The orchestrator extracts relevant PRD context into this file, and each agent reads from it. Ensure the PRD contains all necessary detail so the orchestrator and agents can extract what they need.
 - It is critical that agents get every piece of information they need

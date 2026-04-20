@@ -9,6 +9,8 @@ Amazon-style Working Backwards document creation. Produces a PR/FAQ with press r
 - Creates external (customer) and internal (stakeholder) FAQs
 - Includes appendix with product backlog, KPIs, and competitive analysis
 - Enforces writing quality: no weasel words, data over adjectives, under 30 words per sentence
+- Scales interview depth to scope via a tier classification (Trivial → Epic) confirmed with the user before Step 1
+- Delegates market, competitor, pricing, and regulatory research to `Explore` / `general-purpose` sub-agents and cites sources in the appendix
 - Does NOT create PRDs or implementation plans — that comes next
 
 **Output**: `.belmont/PR_FAQ.md`
@@ -17,10 +19,12 @@ Amazon-style Working Backwards document creation. Produces a PR/FAQ with press r
 
 Interactive planning session. Creates the PRD and PROGRESS files. Supports multi-feature products with a master PRD (feature catalog) and per-feature PRDs.
 
-- Asks clarifying questions one at a time until the plan is concrete
+- Classifies task scope up front (Trivial → Epic) and shares the tier with the user before any domain questions; re-tiers mid-interview if new subsystems surface
+- Walks a fixed **Domains to Cover** checklist (user flows, edge cases, accessibility, privacy, notifications, monetization, etc.) — covering every relevant domain, not a fixed number of rounds
 - Creates structured PRD with prioritized tasks (P0-P3)
 - Organizes tasks into milestones in PROGRESS.md
 - Includes Figma URLs, acceptance criteria, verification steps
+- Delegates deep product research (competitive patterns, compliance frameworks, WCAG criteria) to `Explore` / `general-purpose` sub-agents and cites sources in a `### Research Notes` subsection of the PRD
 - Does NOT implement anything -- plan mode only
 
 **Output**: `.belmont/PRD.md`, `.belmont/PROGRESS.md` (master feature summary), `.belmont/features/<slug>/PRD.md`, `.belmont/features/<slug>/PROGRESS.md`
@@ -31,10 +35,13 @@ Technical planning session. Creates a detailed implementation specification.
 
 - Requires an existing PRD (run plan first)
 - Acts as a senior architect reviewing and refining the plan
+- Classifies task scope up front (Trivial → Epic) and confirms the tier with the user; re-tiers mid-interview if a new subsystem surfaces
+- Walks a fixed **Domains to Cover** checklist (rendering, data model, auth, observability, testing, CI/CD, migration, etc.), skipping domains already settled by the master tech plan
 - Loads Figma designs and extracts exact design tokens
 - Produces concrete file structures, component skeletons, API types
 - Maps PRD tasks to specific code sections
-- Interactive Q&A until both you and the AI are confident
+- Delegates framework / library / version / migration / security research to `Explore` / `general-purpose` sub-agents, flags stale sources (>12 months), and cites URLs in the `## References` section
+- Interactive Q&A until the exit criteria are met (every relevant domain covered, user explicitly confirms no more open questions)
 
 **Output**: `.belmont/TECH_PLAN.md`
 

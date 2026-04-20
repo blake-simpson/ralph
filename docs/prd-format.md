@@ -46,6 +46,7 @@ High-level implementation strategy.
 **Key points:**
 - No status markers (emoji) on task headers -- status lives in PROGRESS.md only
 - Follow-up tasks discovered during implementation are added as plain tasks (no special tag)
+- The `**Verification**:` field lists *criteria* for the task, not a separate task. Do not create standalone "Verification", "QA", or "Unit Tests" tasks — verification runs automatically via `/belmont:verify` after each milestone.
 
 ## Priority Levels
 

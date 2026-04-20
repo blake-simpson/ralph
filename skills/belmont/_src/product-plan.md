@@ -21,13 +21,52 @@ This session requires ultrathink-level reasoning — deeply consider product edg
 
 <!-- @include user-questions.md -->
 
+<!-- @include dynamic-questioning.md -->
+
+<!-- @include proactive-research.md -->
+
+## Domains to Cover
+
+For a product planning session, the relevant domains (per the Dynamic Questioning framework above) are:
+
+- **User & audience** — who specifically, in what context, with what prior expectations?
+- **Problem & motivation** — why now? What triggered this? What pain does it remove?
+- **Primary flow** — step-by-step happy path, from entry point to success.
+- **Alternate flows & variations** — first-time user, returning user, power user, admin / elevated roles.
+- **Edge cases** — empty states, very long / malformed content, errors, permission-denied, network failure, concurrency, rate limits.
+- **Success criteria** — measurable business / user outcomes; how do we know it worked?
+- **Industry / competitive conventions** — what do users already expect based on comparable products?
+- **Content & copy** — tone, length, personalization, tone-of-voice constraints.
+- **Accessibility** — keyboard navigation, screen reader semantics, contrast, reduced motion, target WCAG level.
+- **Internationalization / localization** — languages, RTL, locale-specific formatting, dynamic text expansion.
+- **Analytics & telemetry** — which events to track, why, and which dashboards they feed.
+- **Trust, privacy, legal** — PII handling, consent, data retention, audit trails, regulatory framing (GDPR, COPPA, HIPAA, …).
+- **Onboarding / discovery** — how users find the feature, how they learn to use it, empty-first-use state.
+- **Notifications & cross-surface** — email, push, in-app, cross-device touchpoints.
+- **Offline / degraded states** — behaviour without connectivity or with partial data.
+- **Monetization** — pricing, entitlements, paywalls, billing events (only if commercial).
+
+## Research Triggers
+
+Kick off a research sub-agent (per the Proactive Research framework above) when any of these appear in the brief or during the interview:
+
+- **Competitive benchmarking** — "how do other products do X?"
+- **Industry-standard UX patterns** — e.g. expected flows for checkout, sign-up, password reset, notifications opt-in.
+- **Accessibility standards** — specific WCAG success criteria for the component being built.
+- **Compliance / regulatory context** — GDPR, COPPA, HIPAA, PCI-DSS, SOC2, local tax rules, age-gating law.
+- **Content / copy conventions** — required disclosures (financial, medical, legal), platform-specific guidelines (Apple, Google).
+- **Pricing / monetization benchmarks** — common tier structures, trial lengths, typical conversion copy.
+- **Notification & transactional email norms** — CAN-SPAM, double-opt-in, unsubscribe conventions.
+- **Prior-art examples** — when the user invokes "like Notion does it" / "like Linear does it", confirm the actual pattern instead of guessing.
+
 ## ALLOWED ACTIONS
 - Reading files to understand the codebase
 - If any Figma URLs are included, load them **inline** (directly in this session) using the Figma MCP tools. Do NOT spawn a sub-agent for Figma — sub-agents cannot get MCP tool permissions approved. Extract design context (layout, colors, typography, component structure, copy) and incorporate findings into the PRD.
 - Asking the user questions
 - Writing to `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/features/`, and master `.belmont/PROGRESS.md`
 - Creating feature directories under `.belmont/features/`
-- Using WebFetch for research
+- Using WebFetch for inline lookups of single user-provided URLs
+- Spawning `Explore` or `general-purpose` sub-agents for deep web research (see Proactive Research)
 
 ## Strategic Context
 
@@ -91,19 +130,21 @@ When the user selects or creates a feature:
 
 When **updating** an existing feature (its PRD.md has real content): only add/modify the specific tasks, milestones, or sections needed. NEVER replace the entire file. Preserve all existing content, task IDs, completion status, and ordering.
 
+If the existing PRD/PROGRESS already contains standalone verification/QA/testing tasks (a legacy anti-pattern — see "Important Considerations" below), do NOT mirror that pattern for the new work you are planning. Surface the stale tasks to the user, explain that verification is automatic, and offer to migrate their criteria into the adjacent feature task's `**Verification**:` field. Do not remove them silently — always ask.
+
 ## Process
 
 1. Load relevant skills for the domain (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 2. Ask the user what they want to build
-3. Ask clarifying questions until the feature is fully understood
-4. Consider edge cases, dependencies, blockers
-5. Be proactive and suggest questions to ask the user if they are not clear on something.
-6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use
-7. Perform deep research on topics that are not clear
-8. Ask the user if they are happy to finalize the plan or if they have more questions
-9. Break the feature down into implementable milestones and tasks. Keep milestones small and focused. Consider grouping tasks together that are related or can be completed in a single session.
-9. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace)
-10. Exit - do NOT start implementation
+3. **Classify scope and confirm tier with the user** (see *Dynamic Questioning Depth* above). Do this before any domain questions.
+4. Walk the **Domains to Cover** checklist. Run one `AskUserQuestion` round per relevant domain. Re-tier mid-interview if new subsystems surface.
+5. **Trigger research proactively** (see *Proactive Research* above) whenever a signal from the **Research Triggers** checklist appears. Delegate deep research to a sub-agent; loop findings back to the user with options.
+6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use.
+7. Consider edge cases, dependencies, blockers. Be proactive — suggest questions the user may not have thought to ask.
+8. Verify the **exit criteria** from the Dynamic Questioning framework: every relevant domain covered (or explicitly marked skipped), user confirms no more open questions, all answers captured in `## Clarifications`.
+9. Break the feature down into implementable milestones and tasks. Keep milestones small and focused. Group related tasks that can be completed in a single session.
+10. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace). Include a `### Research Notes` subsection in `## Technical Context` if research was performed.
+11. Exit — do NOT start implementation.
 
 ## Question Scope (CRITICAL)
 
@@ -132,6 +173,7 @@ This is a **product** planning session, NOT a technical planning session. Techni
 - State management approach
 - Styling approach (Tailwind vs CSS modules, etc.)
 - Specific pricing values or placeholder content (these come from designs/implementation)
+- Whether to add a separate verification / QA / testing task or milestone — verification runs automatically after each milestone via `/belmont:verify`; per-task criteria live in the task's `**Verification**:` field.
 
 If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
 
@@ -143,7 +185,9 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 
 ## Important Considerations
 
-- Each task must include verification steps (at minimum linting / tsc / test via the project's package manager)
+- Each task must include verification steps in its `**Verification**:` field (at minimum linting / tsc / test via the project's package manager). These are *criteria* captured inside the task — NOT a separate task.
+- **Do NOT create standalone verification, QA, or testing tasks** (e.g. "Run tests", "Responsive QA", "Cross-Breakpoint Verification", "Unit Tests", "Final verification"). Verification is owned by the `/belmont:verify` skill, which `belmont auto` dispatches automatically after every milestone. It spawns the verification-agent (visual/i18n/a11y/Lighthouse) and code-review-agent (build/test/lint/scope/quality) and creates its own follow-up tasks if issues are found. Implementation-agent also runs build/lint/typecheck/test locally before marking a task `[x]`. A standalone verify task therefore duplicates work that runs at least twice already and inflates progress counts.
+- **Exception:** tasks that set up *new* test infrastructure (e.g. "Configure Playwright", "Add vitest to the project", "Add a visual-regression harness") are legitimate implementation work and SHOULD be their own tasks. The forbidden pattern is tasks whose *body* is "run the checks that the verify agent already runs".
 - Detect blockers/dependencies on tasks and ensure blockers are addressed first
 - Always consider that the follow-up implementation agents communicate through a MILESTONE file. The orchestrator extracts relevant PRD context into this file, and each agent reads from it. Ensure the PRD contains all necessary detail so the orchestrator and agents can extract what they need.
 - It is critical that agents get every piece of information they need

@@ -21,6 +21,47 @@ This session requires ultrathink-level reasoning — deeply analyze architecture
 
 <!-- @include user-questions.md -->
 
+<!-- @include dynamic-questioning.md -->
+
+<!-- @include proactive-research.md -->
+
+## Domains to Cover
+
+For a technical planning session, the relevant domains (per the Dynamic Questioning framework above) are:
+
+- **Framework / meta-framework** (if no master tech plan exists) — Next.js / Remix / Astro / SvelteKit / etc.
+- **Package manager & tooling** (if no master) — npm / pnpm / bun / yarn, plus linter, formatter, type checker.
+- **Rendering & routing strategy** — SSR vs SSG vs ISR vs SPA; App Router vs Pages Router; file-based conventions.
+- **Data fetching** — Server Components, React Query, SWR, tRPC, REST, GraphQL — including cache policy and revalidation.
+- **Data model & persistence** — schema, indexes, migrations, ORM choice, transaction boundaries.
+- **API & integration surface** — endpoints, contracts, versioning, rate limits, third-party services.
+- **State management** — server state vs client state split, forms, optimistic updates, URL state.
+- **Styling & design system** — Tailwind / CSS modules / styled-components; design tokens; theme layer.
+- **Error handling & resilience** — error boundaries, retry logic, fallback UIs, idempotency, timeouts.
+- **Observability** — logging, tracing, metrics, error reporting (Sentry / Datadog / Grafana / …).
+- **Auth, authz & security** — identity provider, session strategy, CSRF, CSP, input validation, secrets management.
+- **Performance budgets** — LCP / INP / CLS targets, bundle-size caps, cold-start targets, cache strategy.
+- **Testing strategy** — unit / integration / e2e split; tools; coverage expectations; CI integration.
+- **CI / CD & deployment** — pipelines, preview deploys, promotion flow, rollback strategy, environment matrix.
+- **Migration & rollback** — feature flags, dark-launch, data backfills, zero-downtime migration plan.
+- **Infrastructure & hosting** — Vercel / AWS / Cloudflare / self-hosted; edge vs node runtime; regions.
+- **i18n / a11y plumbing** — library choice, locale loading, ICU formatting, WCAG tooling.
+- **Component architecture & file structure** — folder layout, barrel exports, colocated tests, shared primitives.
+
+## Research Triggers
+
+Kick off a research sub-agent (per the Proactive Research framework above) when any of these appear in the brief or during the interview:
+
+- **Framework or library choice** — "best X for Y in 2026", especially when evaluating >1 candidate. Compare current stable versions, maintenance cadence, breaking changes.
+- **Version & LTS check** — always verify the current stable version and support window for any chosen framework, runtime, or library. Flag imminent EOL.
+- **Deprecations & breaking changes** — research release notes / changelogs before pinning to a major version.
+- **Performance benchmarks** — when choosing between comparable libraries (bundle size, runtime overhead, cold-start time).
+- **Security advisories** — check for recent CVEs on candidate libraries via their advisories or `npm audit`-equivalent sources.
+- **Best-practice patterns in current framework docs** — confirm the idiomatic pattern in the *current* docs rather than relying on training data.
+- **Ecosystem maturity** — community size, issue-close rate, commercial backing, long-term viability signal.
+- **Migration paths** — when the user is moving from X to Y (e.g. Pages Router → App Router), research the official migration guide and known pitfalls.
+- **Infrastructure / deployment options** — regions, pricing, cold-start behaviour, edge capability for the chosen host.
+
 ## ALLOWED ACTIONS
 - Reading files to understand codebase
 - Loading Figma designs
@@ -28,6 +69,8 @@ This session requires ultrathink-level reasoning — deeply analyze architecture
 - Writing to `.belmont/TECH_PLAN.md` (master tech plan — create or update)
 - Writing to `{base}/TECH_PLAN.md` (feature tech plan — primary output)
 - Updating `{base}/PRD.md` and `{base}/PROGRESS.md` if new tasks discovered
+- Using WebFetch for inline lookups of single user-provided URLs or specific docs pages
+- Spawning `Explore` or `general-purpose` sub-agents for deep web research (see Proactive Research)
 
 ## Strategic Context
 
@@ -84,6 +127,7 @@ Before starting, verify:
 - Explore the codebase for existing patterns. This may be done in a sub-agent if the codebase is large.
 - Load relevant skills (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
 - Consider middleware, webhooks, infrastructure (how are we hosted?), etc.
+- **Web research in parallel** — if any signal from the **Research Triggers** checklist is present in the PRD or brief (framework/library choice, version/LTS check, migration path, etc.), dispatch an `Explore` or `general-purpose` sub-agent per the *Proactive Research* framework. Don't block the interview on it — the sub-agent's report will arrive during Phase 3 and feed into the final decision.
 
 ### Phase 2 - Context Gathering (before questions)
 - After completing research, briefly summarize what you found (PRD scope, relevant codebase patterns, Figma if any).
@@ -92,9 +136,11 @@ Before starting, verify:
 - If the user says no / skip, proceed directly to interview questions.
 
 ### Phase 3 - Planning (interactive interview style questions)
-- With any upfront context in mind, ask targeted clarifying questions.
-- Be proactive — skip questions that were already answered by the user's upfront context or by the master tech plan.
-- Continue asking until you and the user are 100% confident in the plan.
+- With any upfront context in mind, **classify the scope and confirm the tier with the user** (see *Dynamic Questioning Depth* above). Do this before any domain questions.
+- Walk the **Domains to Cover** checklist. Run one `AskUserQuestion` round per relevant domain that isn't already settled in the master tech plan or by the user's upfront context. Skip already-answered domains — don't re-ask — and mark them as "resolved from master/upfront context" in `## Clarifications`.
+- When research sub-agents return findings, loop them back through the user via `AskUserQuestion` with options (per *Proactive Research*). Research feeds more questions, not fewer.
+- Re-tier mid-interview if a new subsystem or constraint surfaces.
+- Exit only when the **exit criteria** from the Dynamic Questioning framework are met — every relevant domain covered, user explicitly confirms no more open questions, all answers captured in `## Clarifications` / the Decision Log.
 
 #### Question Scope (CRITICAL)
 
@@ -231,6 +277,9 @@ The master TECH_PLAN is a **living document** for cross-cutting architecture dec
 ## Decision Log
 | Date | Decision | Context | Alternatives Considered |
 |------|----------|---------|------------------------|
+
+## References
+[External sources that informed decisions above. One bullet per source: `- [Short title](URL) — one-sentence summary.` Flag stale sources `(potentially stale — last updated YYYY-MM)` if older than ~12 months.]
 ```
 
 ## Feature TECH_PLAN.md Format
