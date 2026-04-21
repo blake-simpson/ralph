@@ -12,6 +12,7 @@ ROOT="$(dirname "$SCRIPT_DIR")"
 
 PARTIALS_DIR="$ROOT/skills/belmont/_partials"
 SRC_DIR="$ROOT/skills/belmont/_src"
+REFS_SRC_DIR="$SRC_DIR/references"
 DEST_DIR="$ROOT/skills/belmont"
 
 CHECK_MODE=false
@@ -77,6 +78,19 @@ for src_file in "$SRC_DIR"/*.md; do
     process_file "$src_file" "$out_file"
 done
 
+# Copy reference files (progressive-disclosure detail loaded on demand by skills).
+# References live alongside skills so relative paths work in every install target.
+REFS_DEST_DIR="$DEST_DIR/references"
+if [ -d "$REFS_SRC_DIR" ] && [ -n "$(ls -A "$REFS_SRC_DIR"/*.md 2>/dev/null)" ]; then
+    mkdir -p "$REFS_DEST_DIR"
+    for ref_file in "$REFS_SRC_DIR"/*.md; do
+        [ -f "$ref_file" ] || continue
+        filename="$(basename "$ref_file")"
+        echo "Copying references/$filename..."
+        cp "$ref_file" "$REFS_DEST_DIR/$filename"
+    done
+fi
+
 if [ "$CHECK_MODE" = true ]; then
     echo ""
     echo "Checking generated files against committed files..."
@@ -97,6 +111,37 @@ if [ "$CHECK_MODE" = true ]; then
             has_diff=true
         fi
     done
+
+    # Check references/ too
+    if [ -d "$REFS_SRC_DIR" ]; then
+        for ref_file in "$REFS_SRC_DIR"/*.md; do
+            [ -f "$ref_file" ] || continue
+            filename="$(basename "$ref_file")"
+            generated="$REFS_DEST_DIR/$filename"
+            committed="$ROOT/skills/belmont/references/$filename"
+
+            if [ ! -f "$committed" ]; then
+                echo "MISSING: references/$filename"
+                has_diff=true
+            elif ! diff -q "$generated" "$committed" >/dev/null 2>&1; then
+                echo "STALE: references/$filename"
+                diff "$committed" "$generated" || true
+                has_diff=true
+            fi
+        done
+
+        # Flag extra committed reference files that have no source
+        if [ -d "$ROOT/skills/belmont/references" ]; then
+            for committed_ref in "$ROOT/skills/belmont/references"/*.md; do
+                [ -f "$committed_ref" ] || continue
+                filename="$(basename "$committed_ref")"
+                if [ ! -f "$REFS_SRC_DIR/$filename" ]; then
+                    echo "EXTRA: references/$filename (no source in _src/references/)"
+                    has_diff=true
+                fi
+            done
+        fi
+    fi
 
     if [ "$has_diff" = true ]; then
         echo ""

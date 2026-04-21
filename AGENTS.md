@@ -38,9 +38,10 @@ There are no tests or linter configured. Verify changes by compiling (`go build 
 
 Skills in `skills/belmont/` are generated from templates. **Do not edit generated files directly** — edit the source:
 
-- **Shared content**: `skills/belmont/_partials/*.md` — reusable blocks with `{{variable}}` placeholders
-- **Templates**: `skills/belmont/_src/*.md` — skill templates that include partials via `<!-- @include ... -->`
-- **Generated output**: `skills/belmont/*.md` — the files that get installed into projects
+- **Shared content**: `skills/belmont/_partials/*.md` — reusable blocks with `{{variable}}` placeholders, inlined at build time via `<!-- @include ... -->`
+- **Templates**: `skills/belmont/_src/*.md` — skill templates that include partials
+- **Progressive-disclosure references**: `skills/belmont/_src/references/<skill>-<topic>.md` — detail loaded on demand by skills (NOT inlined). Named with the owning skill as a prefix. Skill bodies point at them via relative paths like `references/implement-milestone-template.md` so the same path resolves in every install target.
+- **Generated output**: `skills/belmont/*.md` and `skills/belmont/references/*.md` — the files that get installed into projects
 
 After editing partials or templates:
 
@@ -127,6 +128,7 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 - `skills/belmont/` — Skill markdown files (product-plan, tech-plan, implement, next, verify, status, reset). These are the source-of-truth copied/linked into target projects.
 - `skills/belmont/_partials/` — Shared content blocks used by skill templates (identity-preamble, forbidden-actions, progress-template, dispatch-strategy).
 - `skills/belmont/_src/` — Skill template files with `@include` directives. Processed by `generate-skills.sh` to produce `skills/belmont/*.md`.
+- `skills/belmont/_src/references/` — Progressive-disclosure detail files (`<skill>-<topic>.md`). Copied verbatim to `skills/belmont/references/` by `generate-skills.sh`. Skill bodies point at them via relative `references/*.md` paths rather than inlining the content, so the detail only loads when the skill actually needs it. Prefix-matched per skill into `plugin/skills/<name>/references/` by `generate-plugin.sh`.
 - `agents/belmont/` — Agent instruction markdown files (codebase-agent, design-agent, implementation-agent, verification-agent, code-review-agent, reconciliation-agent). Copied into target projects.
 - `prompts/belmont/` — AI prompt templates used by the CLI (e.g. `ai-decision.md`, `post-verify-triage.md`). Loaded via Go `text/template` with dynamic context injection. Embedded in release builds.
 - `scripts/build.sh` — Regenerates skills from templates, copies skills/agents/prompts into `cmd/belmont/`, builds with `-tags embed` and ldflags version injection, then cleans up.

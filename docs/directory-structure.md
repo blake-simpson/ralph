@@ -14,6 +14,8 @@ belmont/
 │   └── belmont/
 │       ├── _partials/           # Shared content blocks for templates
 │       ├── _src/                # Skill templates with @include directives
+│       │   └── references/      # Progressive-disclosure detail, source
+│       ├── references/          # Detail loaded on demand by skills (generated)
 │       ├── product-plan.md      # Planning skill (generated)
 │       ├── tech-plan.md         # Tech plan skill (generated)
 │       ├── implement.md         # Implementation skill (generated)
@@ -75,7 +77,8 @@ your-project/
 │           ├── status.md
 │           ├── review-plans.md
 │           ├── cleanup.md
-│           └── reset.md
+│           ├── reset.md
+│           └── references/      # Progressive-disclosure detail (loaded on demand)
 ├── .belmont/                    # Planning & state (commit to share with team)
 │   ├── PR_FAQ.md
 │   ├── PRD.md                   # Living spec (no status markers — purely requirements)

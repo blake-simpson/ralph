@@ -52,6 +52,8 @@ cat > "$PLUGIN_DIR/.claude-plugin/plugin.json" <<EOF
 }
 EOF
 
+REFS_SRC="$SKILLS_SRC/references"
+
 # Transform and copy skills
 # Each skill file becomes skills/<name>/SKILL.md with adjusted frontmatter
 for skill_file in "$SKILLS_SRC"/*.md; do
@@ -105,6 +107,16 @@ for skill_file in "$SKILLS_SRC"/*.md; do
         printf "%s", body
     }
     ' FILENAME_BASE="$filename" "$skill_file" > "$skill_dir/SKILL.md"
+
+    # Copy references prefixed by this skill's name (e.g. implement-*.md → skills/implement/references/)
+    # so relative "references/<name>.md" paths in SKILL.md resolve correctly.
+    if [ -d "$REFS_SRC" ]; then
+        for ref_file in "$REFS_SRC"/"$filename"-*.md; do
+            [ -f "$ref_file" ] || continue
+            mkdir -p "$skill_dir/references"
+            cp "$ref_file" "$skill_dir/references/$(basename "$ref_file")"
+        done
+    fi
 
     echo "  skill: $filename"
 done
