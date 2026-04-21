@@ -296,39 +296,7 @@ After both agents complete:
 
 ### Create Follow-up Tasks
 
-> **FOLLOW-UP PLACEMENT RULE — READ THIS BEFORE MODIFYING PROGRESS.md:**
->
-> Follow-up tasks go into their **source milestone** (the milestone where the issue was found). You MUST NOT create new milestones. Even if existing PROGRESS.md shows a pattern of follow-up milestones (e.g., "M19: Follow-ups"), that pattern is WRONG — do not replicate it. Insert follow-ups directly into the original milestone as new `[ ]` tasks.
-
-**Scope violation safeguard**: For scope violation issues specifically, only create "revert" follow-up tasks for code that was **newly added by the current task**. If the scope violation involves pre-existing code from other features or milestones, do NOT create a follow-up task to delete it — instead note it in the summary as "pre-existing code outside current scope, no action needed." Deleting pre-existing features is catastrophic and must be prevented.
-
-If **all tasks pass verification** (no Critical or Warning issues):
-1. Mark each verified task as `[v]` in `{base}/PROGRESS.md` (change `[x]` to `[v]`)
-
-If **Critical or Warning** issues were found by either agent:
-1. For tasks that passed: mark as `[v]` in `{base}/PROGRESS.md`
-2. For tasks with issues: leave as `[x]` and add new `[ ]` follow-up tasks to the same milestone. These are plain tasks, not specially tagged:
-   ```
-   - [ ] P1-M17-FIX-1: [Issue Description]
-   ```
-3. Add follow-up tasks to `{base}/PROGRESS.md`. **Placement rules (mandatory, no exceptions):**
-   - Determine which milestone each issue belongs to based on the tasks/code that were verified
-   - Insert each follow-up task under its **source milestone** as a new `[ ]` task
-   - When verifying multiple milestones (e.g., M17+M18+M19), distribute follow-ups to their respective milestones — do NOT group them together
-   - **DO NOT create any new milestone headings** — no "M20: Follow-ups", no "MX: Verification Fixes", no "MX: Design Fidelity Fixes". This is forbidden because it causes automated loop controllers to enter infinite cycles
-   - If the source milestone is truly ambiguous, add to the last milestone that has pending tasks
-   - Follow-up tasks MUST live inside a milestone heading — never in a freestanding section outside the milestones structure
-4. **Update master PROGRESS** (`.belmont/PROGRESS.md`): If the file doesn't exist or still contains template/placeholder text (e.g., `[Feature Name]`, `[Milestone Name]`), initialize it first:
-   ```
-   # Progress: [Product Name from .belmont/PRD.md]
-   ## Features
-   | Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |
-   |---------|------|----------|-------------|--------|------------|-------|
-   ## Recent Activity
-   | Date | Feature | Activity |
-   |------|---------|----------|
-   ```
-   Then if follow-up tasks were added, update the Tasks total in the `## Features` table for this feature's row (add a new row if missing). Add a row to `## Recent Activity` noting verification results.
+Follow-up task placement rules, the scope-violation safeguard, and the master PROGRESS update are in `references/verify-followup-tasks.md`. Read it whenever Critical or Warning issues were found.
 
 ### Record Polish Items
 
@@ -346,75 +314,11 @@ These items are preserved for future reference but do **not** block milestone co
 
 ### Five Whys Root Cause Analysis
 
-**Only run this step if Critical or Warning issues were found.** Skip entirely if only Polish/Suggestion items exist.
-
-For each Critical or Warning issue, perform a root cause analysis using Amazon's Five Whys framework:
-
-1. **Ask "Why?" up to five times**, tracing from the symptom to the root cause:
-   - Why 1: Immediate cause (what went wrong)
-   - Why 2: Contributing factor (why the immediate cause happened)
-   - Why 3: Process gap (what process failure allowed it)
-   - Why 4: Systemic reason (why the process gap exists)
-   - Why 5: Root pattern (the fundamental behavior to change)
-   - Stop early if the root cause is reached before the fifth why.
-
-2. **Distill a prevention rule** — one concise, actionable statement the implementation agent can follow. Example: "Always use semantic design tokens instead of hex colors because the design system requires theme support."
-
-3. **Group similar issues** — if multiple issues share the same root cause, combine into one entry.
-
-4. **Write to NOTES.md** — Append to `{base}/NOTES.md` under a `## Root Cause Patterns` section (create section if absent). Format each entry as:
-
-```markdown
-### [YYYY-MM-DD] Pattern: <short descriptive name>
-**Issue**: <one-line description of what was found>
-**Root Cause**: <the deepest "why" — the fundamental pattern to change>
-**Prevention**: <actionable rule for the implementation agent>
-**Source**: <milestone ID / task ID where the issue was found>
-```
-
-Keep entries scannable — the implementation agent reads these before every task. Each entry should be understood in under 10 seconds.
-
-### Determine Overall Verification Status
-
-When deciding the overall status:
-- If **only** Polish and/or Suggestion items were found (no Critical, no Warning): report status as **ALL PASSED**. All tasks are marked `[v]` (verified).
-- If Critical or Warning items were found: report status as **ISSUES FOUND** or **CRITICAL ISSUES** as appropriate. Tasks with issues remain `[x]`, follow-up `[ ]` tasks are added.
+The Five Whys process, grouping rule, and NOTES.md entry format are in `references/verify-five-whys.md`. Skip entirely if only Polish/Suggestion items exist.
 
 ### Report Summary
 
-Output a combined summary:
-
-```markdown
-# Verification & Code Review Summary
-
-## Overall Status
-[ALL PASSED | ISSUES FOUND | CRITICAL ISSUES]
-
-## Verification Results
-- Acceptance Criteria: [X/Y passed]
-- Visual Verification: [PASS/FAIL/N/A]
-- i18n Check: [PASS/FAIL/N/A]
-- Functional Tests: [PASS/FAIL]
-- Lighthouse Audit: [PASS/WARNING/CRITICAL/N/A]
-
-## Code Review Results
-- Build: [PASS/FAIL]
-- Tests: [PASS/FAIL]
-- Pattern Adherence: [GOOD/ISSUES]
-- PRD Alignment: [ALIGNED/MISALIGNED]
-
-## Issues Found
-- Critical: [count]
-- Warnings: [count]
-- Polish: [count] (recorded in NOTES.md, not blocking)
-- Suggestions: [count]
-
-## Follow-up Tasks Created
-[List of new follow-up tasks added to PROGRESS.md]
-
-## Recommendations
-[Any overall recommendations for the project]
-```
+Status-decision rules and the combined summary template are in `references/verify-report-format.md`. Use that template to produce the final output.
 
 ### Commit Planning File Changes
 
@@ -450,12 +354,7 @@ Skip this step if you used Approach B or C.
 
 ## Important Rules
 
-1. **Run both agents** - Always run verification AND code review
-2. **Be thorough** - Check all completed tasks, not just the latest
-3. **Create follow-ups only for Critical/Warning** - Only these tiers become follow-up tasks. Polish items go to NOTES.md. Suggestions are reported but not persisted.
-4. **Don't fix issues yourself** - Report them and create follow-up tasks
-5. **Update PROGRESS.md** - Mark verified tasks `[v]`, add follow-up `[ ]` tasks for issues
-6. **Polish doesn't block** - If only Polish/Suggestion items are found, all tasks are marked `[v]` and overall status is ALL PASSED
+A compact rule list covering the full workflow is in `references/verify-important-rules.md`. Read it if you need a refresher on agent dispatch, follow-up creation, or status rules.
 
 Once done, prompt the user to "/clear" and then "/belmont:status", "/belmont:next", or "/belmont:implement"
    - If you are Codex, instead prompt: "/new" and then "belmont:status", "belmont:next", or "belmont:implement"
