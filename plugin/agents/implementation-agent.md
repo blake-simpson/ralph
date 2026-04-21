@@ -69,6 +69,16 @@ Before implementing, check for known patterns and anti-patterns from previous wo
 
 This step closes the learning loop — verification discovers root causes, and you avoid repeating them.
 
+#### Step 0c: Mark Task In Progress (MANDATORY)
+
+Before starting Step 1, update the task's checkbox in the PROGRESS file (path from `### File Paths` in the Orchestrator Context) from `[ ]` to `[>]`:
+
+```
+- [ ] P0-1: Task Name   →   - [>] P0-1: Task Name
+```
+
+Do NOT commit this change as a separate commit — it lives in the working tree until Step 4 flips it to `[x]` alongside the code in the per-task commit. The `[>]` state lets `belmont status` and the auto loop see which task is live in real time. If a task is blocked in Step 0, do NOT mark it `[>]`; mark it `[!]` instead.
+
 #### Step 1: Preparation
 
 1. **Identify the current task** - Find this task's definition in the PRD (task IDs listed in MILESTONE's `### Active Task IDs`), its codebase context in `## Codebase Analysis`, and its design spec in `## Design Specifications`
@@ -188,7 +198,7 @@ Do NOT proceed to Step 4 (Update Tracking) unless:
 #### Step 4: Update Tracking
 
 After verifying this task:
-1. **Mark task done** in the PROGRESS file (path from `### File Paths` in the Orchestrator Context): Change `- [ ] Task Name` to `- [x] Task Name`
+1. **Mark task done** in the PROGRESS file (path from `### File Paths` in the Orchestrator Context): change the task's checkbox to `[x]`. The starting state will be `[>]` (set in Step 0c); if for any reason it is still `[ ]`, flip that to `[x]` too.
 2. **Do NOT modify PRD.md status markers** — PRD.md is a pure spec document with no status markers. PROGRESS.md is the single source of truth for task state.
 3. **If you discover cross-cutting decisions during implementation**, update the master PRD.md and/or master TECH_PLAN.md — edit existing sections to reflect the decision, don't just append notes.
 
@@ -381,7 +391,7 @@ If design specification is unclear:
 7. **Developer Review Before Tracking** - Step 3b must pass before marking a task complete in Step 4. Check acceptance criteria and visual output (UI tasks).
 8. **Build & Test Checks Before Commit** - All checks (Step 3) must pass for each task before committing.
 9. **Commit Each Task Separately** - One commit per task with a clear `[Task ID]: description` message.
-10. **Update Tracking Before Commit** - Mark each task done in PROGRESS.md (Step 4) before committing (Step 5), so tracking updates are included in the commit.
+10. **Update Tracking Before Commit** - Mark each task `[>]` in_progress at Step 0c (start), then `[x]` done at Step 4 (before the per-task commit). Both writes happen to PROGRESS.md at the path from `### File Paths`. The `[>]` state lives only in the working tree between Steps 0c and 4; the committed transition is `[ ]` → `[x]`.
 11. **Always include `.belmont/` in commits** - Tracking updates from Steps 4/4b must be committed alongside code changes. Check `.belmont/` is not gitignored before staging.
 12. **Write the Implementation Log** - After all tasks, write results to the MILESTONE file's `## Implementation Log`.
 13. **Report Everything** - Out-of-scope issues, concerns, follow-ups. This is the correct path for good ideas.
