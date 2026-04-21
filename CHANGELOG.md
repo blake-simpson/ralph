@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.9
+
+**Released:** 2026-04-21
+
+### Changes since v0.9.8
+
+- reconciliation: unstage reconciliation-report.json from merge commit
+- recover: auto-detect AI tool (or accept --tool flag)
+- install: write relative symlinks; reconciliation: handle symlinks+parents
+- agents: add tactical Web Research guidance to implement/verify/review
+- auto: grant WebFetch and WebSearch to claude dispatch
+- agents: mark tasks [>] in_progress when starting each task
+- skills: token-saver — MILESTONE coordinator + references/ convention
+
+
+
 ## v0.9.8
 
 **Released:** 2026-04-21
