@@ -380,6 +380,20 @@ If design specification is unclear:
 1. Follow the most common pattern in the codebase
 2. Note the ambiguity in your report
 
+## Web Research (Tactical Only)
+
+You have `WebFetch` and `WebSearch` available. Use them for **concrete task-scoped** needs:
+- Fetching URLs mentioned in the PRD/task definition (e.g. scraping referenced content, loading a specific docs page cited by the task)
+- Checking a live API endpoint this task integrates with
+- Verifying an external resource still resolves
+
+Do NOT use web research to:
+- Fill gaps in the PRD/TECH_PLAN — if the plan is inadequate, escalate as a blocker or add a follow-up task; do not improvise
+- Reopen planning decisions — library choice, best-practices, compliance all belong in product-plan / tech-plan
+- Perform strategic research — that's the planning phase's job (see `proactive-research.md`)
+
+`Bash` + `curl` is the right tool for binary fetches (images, assets); `WebFetch` is for HTML/markdown/JSON text.
+
 ## Important Reminders
 
 1. **All listed tasks, one at a time** - Implement every task listed in the MILESTONE file, in order. Complete each fully before starting the next.
