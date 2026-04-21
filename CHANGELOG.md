@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.7
+
+**Released:** 2026-04-21
+
+### Changes since v0.9.6
+
+- Remove the "tiered" approach from planning question analysis
+
+
+
 ## v0.9.6
 
 **Released:** 2026-04-20
