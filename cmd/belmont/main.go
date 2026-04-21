@@ -4330,7 +4330,7 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	case "claude":
 		cmd = exec.Command("claude", "-p", prompt,
 			"--permission-mode", "bypassPermissions",
-			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
+			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
 			"--output-format", "stream-json", "--verbose")
 	case "codex":
 		cmd = exec.Command("codex", "exec", prompt,
@@ -5302,7 +5302,7 @@ func buildToolCommand(tool, prompt, root string, extraFlags ...string) *exec.Cmd
 	case "claude":
 		args := []string{"-p", prompt,
 			"--permission-mode", "bypassPermissions",
-			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
+			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
 			"--output-format", "json"}
 		args = append(args, extraFlags...)
 		cmd = exec.Command("claude", args...)
@@ -7753,7 +7753,7 @@ func runReverifyCmd(args []string) error {
 		case "claude":
 			cmd = exec.Command("claude", "-p", prompt,
 				"--permission-mode", "bypassPermissions",
-				"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill mcp__*",
+				"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
 				"--output-format", "stream-json", "--verbose")
 		case "codex":
 			cmd = exec.Command("codex", "exec", prompt,
