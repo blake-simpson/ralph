@@ -445,7 +445,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "    (alias: belmont loop)")
 	fmt.Fprintln(w, "  belmont reverify [--feature SLUG] [--from M1] [--to M5] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont sync [--root PATH]")
-	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--root PATH] [--format text|json]")
+	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--tool claude|codex|gemini|copilot|cursor] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont version")
 }
 
@@ -8270,12 +8270,14 @@ func runRecover(args []string) error {
 	var merge string
 	var clean string
 	var cleanAll bool
+	var tool string
 	fs.StringVar(&root, "root", ".", "project root")
 	fs.StringVar(&format, "format", "text", "text or json")
 	fs.BoolVar(&list, "list", false, "list preserved worktrees")
 	fs.StringVar(&merge, "merge", "", "retry merge for slug")
 	fs.StringVar(&clean, "clean", "", "delete worktree and branch for slug")
 	fs.BoolVar(&cleanAll, "clean-all", false, "clean all preserved worktrees")
+	fs.StringVar(&tool, "tool", "", "CLI tool for reconciliation (claude|codex|gemini|copilot|cursor) — auto-detected if omitted")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	}
@@ -8288,7 +8290,7 @@ func runRecover(args []string) error {
 	worktrees := listPreservedWorktrees(root)
 
 	if merge != "" {
-		return recoverMerge(root, merge, worktrees)
+		return recoverMerge(root, merge, tool, worktrees)
 	}
 	if clean != "" {
 		return recoverClean(root, clean, worktrees)
@@ -8335,7 +8337,7 @@ func recoverList(root string, worktrees []worktreeEntry, format string) error {
 		fmt.Println()
 	}
 	fmt.Println("Actions:")
-	fmt.Println("  belmont recover --merge <slug>    Retry merge with improved logic")
+	fmt.Println("  belmont recover --merge <slug>    Retry merge with improved logic (uses --tool for reconciliation)")
 	fmt.Println("  belmont recover --clean <slug>    Delete worktree and branch")
 	fmt.Println("  belmont recover --clean-all       Clean all preserved worktrees")
 	return nil
@@ -8350,14 +8352,30 @@ func findWorktree(worktrees []worktreeEntry, slug string) *worktreeEntry {
 	return nil
 }
 
-func recoverMerge(root, slug string, worktrees []worktreeEntry) error {
+func recoverMerge(root, slug, tool string, worktrees []worktreeEntry) error {
 	wt := findWorktree(worktrees, slug)
 	if wt == nil {
 		return fmt.Errorf("no preserved worktree found for slug: %s", slug)
 	}
 
+	// Reconciliation needs an AI tool to analyze conflicts. Honour the explicit
+	// --tool flag if given, otherwise auto-detect (mirrors the `auto` command).
+	if tool == "" {
+		tool = detectTool()
+		if tool == "" {
+			return fmt.Errorf("recover: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+		}
+	} else {
+		switch tool {
+		case "claude", "codex", "gemini", "copilot", "cursor":
+			// ok
+		default:
+			return fmt.Errorf("recover: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", tool)
+		}
+	}
+
 	commitMsg := fmt.Sprintf("belmont: merge recovered %s", slug)
-	cfg := loopConfig{Root: root}
+	cfg := loopConfig{Root: root, Tool: tool}
 
 	if err := attemptMerge(cfg, commitMsg, wt.Branch, slug); err != nil {
 		return fmt.Errorf("merge failed for %s: %w", slug, err)
