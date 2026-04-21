@@ -34,9 +34,9 @@ Optional helper:
 
 ## Step 2: Create the MILESTONE File
 
-**This is the key change.** Instead of passing context through sub-agent prompts, you write a structured MILESTONE file that all agents read from and write to.
+Write a structured MILESTONE file that all agents read from and write to. The MILESTONE file is a **coordination document**: it names the active tasks and points sub-agents at the canonical PRD and TECH_PLAN, which each sub-agent reads directly.
 
-Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orchestrator Context` section using information from the PRD, PROGRESS, and TECH_PLAN:
+Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orchestrator Context` section using information from PROGRESS.md and the user's invocation context:
 
 ```markdown
 # Milestone: [ID] — [Name]
@@ -55,21 +55,20 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 ### Current Milestone
 [Milestone ID and name, with the full list of incomplete tasks in this milestone]
 
-### Relevant PRD Context
-[Extract from PRD.md: the Overview, Problem Statement, Technical Approach, and Out of Scope sections. Also extract the FULL task definitions for every incomplete task in this milestone — copy them verbatim from the PRD including all fields (description, solution, notes, verification, Figma URLs, etc.)]
-
-### Relevant Technical Context
-[Extract from TECH_PLAN.md: file structures, component specifications, TypeScript interfaces, implementation guidelines, and architecture decisions relevant to this milestone's tasks. Include code patterns and API specs. If no TECH_PLAN exists, write "No TECH_PLAN.md found."]
+### Active Task IDs
+[Comma-separated list of the incomplete task IDs in this milestone, e.g. `P0-1, P0-2, P1-3`. Sub-agents look up each task's full definition (description, solution, acceptance criteria, Figma URLs, notes) in {base}/PRD.md.]
 
 ### File Paths
-- **PRD**: {base}/PRD.md
+- **PRD**: {base}/PRD.md — authoritative task definitions, acceptance criteria, Figma URLs
+- **TECH_PLAN**: {base}/TECH_PLAN.md — technical specs (if present)
+- **Master TECH_PLAN**: .belmont/TECH_PLAN.md — cross-cutting architecture (if present)
 - **PROGRESS**: {base}/PROGRESS.md
 - **Feature Notes**: {base}/NOTES.md
 - **Global Notes**: .belmont/NOTES.md
 
 ### Scope Boundaries
-- **In Scope**: Only tasks listed above in this milestone
-- **Out of Scope**: [Copy the PRD's "Out of Scope" section verbatim]
+- **In Scope**: Only the task IDs listed above in this milestone
+- **Out of Scope**: See the "Out of Scope" section of {base}/PRD.md — nothing outside the listed task IDs
 - **Milestone Boundary**: Do NOT implement tasks from other milestones
 
 ### Learnings from Previous Sessions
@@ -90,7 +89,7 @@ Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orche
 [Written by implementation-agent — per-task status, files changed, commits, issues]
 ```
 
-**IMPORTANT**: The `## Orchestrator Context` section is the **single source of truth** for all sub-agents. It must contain ALL information they need — task definitions verbatim from the PRD, relevant TECH_PLAN specs, scope boundaries, and learnings from previous sessions. Sub-agents read ONLY the MILESTONE file, so anything not in it will be invisible to them. Copy task definitions verbatim — don't summarize.
+**IMPORTANT**: The `## Orchestrator Context` section is the **coordination hub** — it names the active tasks and points sub-agents at the PRD and TECH_PLAN. Sub-agents read the PRD and TECH_PLAN directly from the paths in `### File Paths` for full task definitions, acceptance criteria, Figma URLs, and technical specs. Do NOT copy PRD/TECH_PLAN content into this section — the pointers are enough, and duplicating content wastes context across every sub-agent invocation.
 
 The three section headings (`## Codebase Analysis`, `## Design Specifications`, `## Implementation Log`) should be present but empty — each agent will fill in its section.
 
@@ -272,9 +271,9 @@ If any check fails, STOP and report the issue rather than proceeding.
 
 ## Important Rules
 
-1. **Create the MILESTONE file first** - Write it with full orchestrator context (PRD + TECH_PLAN) before spawning any agent
-2. **MILESTONE is the single source of truth** - Sub-agents read ONLY the MILESTONE file. Everything they need must be in it.
-3. **Minimal agent prompts** - Agents read from the MILESTONE file, not from your prompt
+1. **Create the MILESTONE file first** - Write it with active task IDs and file-path pointers to PRD/TECH_PLAN before spawning any agent. Do NOT copy PRD/TECH_PLAN content verbatim.
+2. **MILESTONE is the coordination hub** - It lists active tasks and points sub-agents at the PRD/TECH_PLAN, which they read directly. Sub-agents fetch their own task definitions and technical specs from the canonical files.
+3. **Minimal agent prompts** - Agents read from the MILESTONE file (and the PRD/TECH_PLAN it points at), not from your prompt
 4. **All tasks, all phases** - Pass every task in the milestone through every phase. Exactly 3 sub-agents per milestone.
 5. **Parallel research, then implement** - Codebase + Design run simultaneously, then Implementation runs after both complete
 6. **Dispatch to sub-agents** - Spawn a sub-agent for each phase. Do NOT do the phase work inline.
