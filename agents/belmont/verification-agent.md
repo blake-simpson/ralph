@@ -329,6 +329,20 @@ Use this guide to categorize issues consistently. The distinction between Warnin
 
 **Key principle**: If removing the issue would not affect a user's ability to use the feature or cause a visually broken experience, it's Polish, not Warning.
 
+## Web Research (Tactical Only)
+
+You have `WebFetch` and `WebSearch` available. Use them for **concrete verification** needs:
+- Confirming a live external link in the output actually resolves (e.g. legal pages, social URLs in JSON-LD `sameAs`)
+- Verifying an integrated API responds as the PRD/TECH_PLAN documents
+- Fetching a canonical reference cited by the PRD to cross-check acceptance criteria
+
+Do NOT use web research to:
+- Research alternate implementations to suggest — that's scope creep; stay inside the task's acceptance criteria
+- Fill gaps in the PRD — if an acceptance criterion is under-specified, report it as a verification blocker
+- Broadly research best-practices beyond what the task requires
+
+Use `Bash` + `curl -I` for a lightweight HTTP reachability check; `WebFetch` for content comparison.
+
 ## Important Rules
 
 - **DO NOT** fix issues - only report them

@@ -230,6 +230,18 @@ Provide a detailed review report:
 
 **Key principle**: If the code works correctly, passes tests, and follows the critical project patterns, remaining issues are Polish, not Warning. Only flag as Warning when the issue could cause problems in production or significantly violates established conventions.
 
+## Web Research (Tactical Only)
+
+You have `WebFetch` and `WebSearch` available. Use them for **concrete review** needs:
+- Checking a library changelog or advisory for a dependency the task added
+- Verifying that a third-party API contract matches the implementation
+- Confirming a URL, docs page, or reference cited in code/comments is still valid
+
+Do NOT use web research to:
+- Suggest alternative libraries or architectural approaches — that's scope creep; stay inside the current implementation's pattern-adherence and PRD-alignment
+- Research best-practices broadly — if a concern rises to Warning level, state it based on the code; don't go hunting for validation
+- Fill gaps in the PRD — if the spec is unclear about an expected behavior, report it as a review finding
+
 ## Important Rules
 
 - **DO NOT** modify code - only review
