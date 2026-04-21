@@ -31,22 +31,23 @@ High-level implementation strategy.
 
 ### P0-1: Set up authentication
 **Severity**: CRITICAL
-**Task Description**: Implement OAuth2 login flow
-**Solution**: Use next-auth with Google provider
-**Verification**: npm run test, manual login test
+**Task Description**: Users can sign in to the product and return to a protected dashboard.
+**Solution**: A sign-in screen accepts a Google account; on success the user lands on the dashboard with their name and avatar. Signed-out users hitting a protected page are redirected to sign-in.
+**Verification**: New user completes Google sign-in and reaches the dashboard; signed-out visit to `/dashboard` redirects to sign-in.
 
 ### P1-1: Create dashboard layout
 **Severity**: HIGH
 **Task Description**: Build the main dashboard page
 **Figma**: https://figma.com/file/xxx/node-id=123
-**Solution**: Responsive grid layout with sidebar
-**Verification**: npm run build, visual comparison with Figma
+**Solution**: Responsive layout matching the Figma node at mobile, tablet, and desktop breakpoints. Sidebar is collapsible on mobile.
+**Verification**: Visual parity with Figma at all three breakpoints; sidebar collapses below md.
 ```
 
 **Key points:**
 - No status markers (emoji) on task headers -- status lives in PROGRESS.md only
 - Follow-up tasks discovered during implementation are added as plain tasks (no special tag)
 - The `**Verification**:` field lists *criteria* for the task, not a separate task. Do not create standalone "Verification", "QA", or "Unit Tests" tasks — verification runs automatically via `/belmont:verify` after each milestone.
+- PRD tasks describe **WHAT** the user sees or experiences, not HOW it's implemented. Technical decisions (libraries, file paths, wrapper components, endpoint names, regex syntax) belong in `TECH_PLAN.md`. The tech-plan step reconciles PRD and TECH_PLAN at the end of its session — see `skills/belmont/_partials/plan-separation.md` for the boundary rules.
 
 ## Priority Levels
 

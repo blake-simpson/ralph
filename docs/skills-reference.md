@@ -42,8 +42,9 @@ Technical planning session. Creates a detailed implementation specification.
 - Maps PRD tasks to specific code sections
 - Delegates framework / library / version / migration / security research to `Explore` / `general-purpose` sub-agents, flags stale sources (>12 months), and cites URLs in the `## References` section
 - Interactive Q&A until the exit criteria are met (every relevant domain covered, user explicitly confirms no more open questions)
+- **Reconciles the PRD and PROGRESS** at the end of the session (Phase 4.5): fixes contradictions, removes leaked tech detail from the PRD, adds product-facing decisions to `## Clarifications`, and aligns PROGRESS dependency annotations with the TECH_PLAN's Implementation Order. Respects milestone sizing rules (3–5 tasks, soft ceiling 6) — new tasks become new milestones rather than inflating existing ones.
 
-**Output**: `.belmont/TECH_PLAN.md`
+**Output**: `.belmont/TECH_PLAN.md`, plus reconciliation edits to `{base}/PRD.md` and `{base}/PROGRESS.md`
 
 ## `implement`
 

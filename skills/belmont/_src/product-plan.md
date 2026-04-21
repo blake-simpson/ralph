@@ -19,6 +19,8 @@ This session requires ultrathink-level reasoning — deeply consider product edg
 
 <!-- @include forbidden-actions.md -->
 
+<!-- @include plan-separation.md -->
+
 <!-- @include user-questions.md -->
 
 <!-- @include dynamic-questioning.md -->
@@ -175,7 +177,9 @@ This is a **product** planning session, NOT a technical planning session. Techni
 - Specific pricing values or placeholder content (these come from designs/implementation)
 - Whether to add a separate verification / QA / testing task or milestone — verification runs automatically after each milestone via `/belmont:verify`; per-task criteria live in the task's `**Verification**:` field.
 
-If the user volunteers technical preferences unprompted, note them in the "Technical Context" section of the PRD. But do NOT ask questions to solicit these decisions — the tech-plan step handles that.
+If the user volunteers technical preferences unprompted, record them as **open questions for the tech-plan step** — do NOT commit them as decisions in the PRD. The tech-plan step may well decide otherwise, and baking a technical idiom into the PRD creates drift (the PRD ends up saying "use `<Image>` directly" while the tech-plan correctly introduces a wrapper component). The only exceptions are genuinely cross-cutting product constraints the tech-plan must honor (e.g. "must ship inside the existing Next.js 15 app", "must reuse the existing design-system primitives") — never file paths, wrapper-vs-direct component choices, library imports, regex syntax, or endpoint names.
+
+See the plan-separation partial above for the full PRD ↔ TECH_PLAN boundary rules.
 
 <!-- @include commit-belmont-changes.md commit_context="after product planning" -->
 
@@ -242,16 +246,16 @@ And [additional assertions]
 **Severity**: CRITICAL
 
 **Task Description**:
-[Detailed description of the sub-task]
+[Detailed description of the sub-task — what problem this solves and what the user should experience when it's done]
 
 **Solution**:
-[Detailed description of the solution to the sub-task]
+[Describe WHAT the task produces from the user's perspective — screens, behaviors, invariants, acceptance conditions, content/copy. Do NOT describe HOW (file paths, components, wrappers, imports, regex syntax, endpoint names) — implementation is the tech-plan's responsibility. If you need to reference a Figma node or external source, do so by id / URL, not by implementation path.]
 
 **Notes**:
-[Notes needed by sub agents. Figma nodes, key choices, etc.]
+[Notes needed by sub agents. Figma nodes, key product decisions, open questions flagged for the tech-plan step. Avoid technical idioms.]
 
 **Verification**:
-[List of steps to verify the task is complete]
+[List of steps to verify the task is complete — user-observable outcomes and acceptance criteria. Leave build/lint/typecheck to the standard verify pipeline.]
 ```
 
 ## PROGRESS Format
