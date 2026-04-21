@@ -34,65 +34,15 @@ Optional helper:
 
 ## Step 2: Create the MILESTONE File
 
-**This is the key change.** Instead of passing context through sub-agent prompts, you write a structured MILESTONE file that all agents read from and write to.
+Write a structured MILESTONE file that all agents read from and write to. The MILESTONE file is a **coordination document**: it names the active tasks and points sub-agents at the canonical PRD and TECH_PLAN, which each sub-agent reads directly.
 
-Create `{base}/MILESTONE.md` with the following structure. Fill in the `## Orchestrator Context` section using information from the PRD, PROGRESS, and TECH_PLAN:
+**Read `references/implement-milestone-template.md` for the exact structure, then write `{base}/MILESTONE.md` using that template.** Fill in the `## Orchestrator Context` section using information from PROGRESS.md and the user's invocation context.
 
-```markdown
-# Milestone: [ID] — [Name]
+**Mandatory rules while writing MILESTONE** (these MUST be observed every run — they are not in the reference file because they can never be skipped):
 
-## Status
-- **Milestone**: [e.g., M2: Core Features]
-- **Git Baseline**: [Run `git rev-parse HEAD` and record the SHA here — this is used by verification agents to distinguish new code from pre-existing code]
-- **Created**: [timestamp]
-- **Tasks**:
-  - [ ] [Task ID]: [Task Name]
-  - [ ] [Task ID]: [Task Name]
-  ...
-
-## Orchestrator Context
-
-### Current Milestone
-[Milestone ID and name, with the full list of incomplete tasks in this milestone]
-
-### Relevant PRD Context
-[Extract from PRD.md: the Overview, Problem Statement, Technical Approach, and Out of Scope sections. Also extract the FULL task definitions for every incomplete task in this milestone — copy them verbatim from the PRD including all fields (description, solution, notes, verification, Figma URLs, etc.)]
-
-### Relevant Technical Context
-[Extract from TECH_PLAN.md: file structures, component specifications, TypeScript interfaces, implementation guidelines, and architecture decisions relevant to this milestone's tasks. Include code patterns and API specs. If no TECH_PLAN exists, write "No TECH_PLAN.md found."]
-
-### File Paths
-- **PRD**: {base}/PRD.md
-- **PROGRESS**: {base}/PROGRESS.md
-- **Feature Notes**: {base}/NOTES.md
-- **Global Notes**: .belmont/NOTES.md
-
-### Scope Boundaries
-- **In Scope**: Only tasks listed above in this milestone
-- **Out of Scope**: [Copy the PRD's "Out of Scope" section verbatim]
-- **Milestone Boundary**: Do NOT implement tasks from other milestones
-
-### Learnings from Previous Sessions
-[If `.belmont/NOTES.md` exists, copy its contents here under "#### Global Notes".]
-[If `{base}/NOTES.md` exists, copy its contents here under "#### Feature Notes".]
-[If neither exists, write "No previous learnings found."]
-
-### Additional User Instructions
-[If the user provided extra context or instructions when invoking this skill, copy it here verbatim. Otherwise write "None."]
-
-## Codebase Analysis
-[Written by codebase-agent — stack, patterns, conventions, related code, utilities]
-
-## Design Specifications
-[Written by design-agent — tokens, component specs, layout code, accessibility]
-
-## Implementation Log
-[Written by implementation-agent — per-task status, files changed, commits, issues]
-```
-
-**IMPORTANT**: The `## Orchestrator Context` section is the **single source of truth** for all sub-agents. It must contain ALL information they need — task definitions verbatim from the PRD, relevant TECH_PLAN specs, scope boundaries, and learnings from previous sessions. Sub-agents read ONLY the MILESTONE file, so anything not in it will be invisible to them. Copy task definitions verbatim — don't summarize.
-
-The three section headings (`## Codebase Analysis`, `## Design Specifications`, `## Implementation Log`) should be present but empty — each agent will fill in its section.
+- **Do NOT copy PRD or TECH_PLAN content into MILESTONE.** The pointers in `### File Paths` are enough. Duplicating content wastes context across every sub-agent invocation.
+- **`### Active Task IDs` lists IDs only** (e.g. `P0-1, P0-2`). The PRD holds the full definitions.
+- **The three sub-agent-written sections (`## Codebase Analysis`, `## Design Specifications`, `## Implementation Log`) remain the source of truth for downstream agents** — they ARE written into MILESTONE and ARE read by Phase 3. Only the PRD/TECH_PLAN content is externalised; the sub-agent hand-off data stays inside MILESTONE. Leave these three headings present but empty; each agent will fill in its section.
 
 ## Sub-Agent Dispatch Strategy
 
@@ -110,7 +60,7 @@ Run ALL incomplete tasks in the milestone through the three phases below. Each a
 
 **Phases 1 and 2 run simultaneously** (issue both `Task` calls in the same message). Phase 3 runs after both complete.
 
-Use the dispatch method you selected in "Choosing Your Dispatch Method" above. For Approach A, create the team first, then issue parallel `Task` calls. For Approach B, issue parallel `Task` calls directly. For Approach C, execute inline sequentially.
+Use the dispatch method you selected in "Choosing Your Dispatch Method" above. For the **Agent Teams** method (Approach A), create the team first, then issue parallel `Task` calls. For the **Parallel Task** method (Approach B), issue parallel `Task` calls directly. For the **Sequential Inline** fallback (Approach C), execute each agent's instructions inline, finishing one completely before starting the next.
 
 ---
 
@@ -210,13 +160,13 @@ When all tasks in the milestone are marked `[x]` (done):
 
 **IMPORTANT**: Do NOT delete the MILESTONE file — archive it. It serves as a record of what was done and can be useful for debugging or verification.
 
-### Tear down team (Approach A only)
+### Tear down team (Agent Teams method only)
 If you created a team:
 1. Send `shutdown_request` via `SendMessage` to each teammate still active
 2. Wait for shutdown confirmations
 3. Call `TeamDelete` to remove team resources
 
-Skip this if you used Approach B or C.
+Skip this if you used the Parallel Task method or the Sequential Inline fallback.
 
 <!-- @include commit-belmont-changes.md commit_context="after milestone implementation" -->
 
@@ -272,15 +222,8 @@ If any check fails, STOP and report the issue rather than proceeding.
 
 ## Important Rules
 
-1. **Create the MILESTONE file first** - Write it with full orchestrator context (PRD + TECH_PLAN) before spawning any agent
-2. **MILESTONE is the single source of truth** - Sub-agents read ONLY the MILESTONE file. Everything they need must be in it.
-3. **Minimal agent prompts** - Agents read from the MILESTONE file, not from your prompt
-4. **All tasks, all phases** - Pass every task in the milestone through every phase. Exactly 3 sub-agents per milestone.
-5. **Parallel research, then implement** - Codebase + Design run simultaneously, then Implementation runs after both complete
-6. **Dispatch to sub-agents** - Spawn a sub-agent for each phase. Do NOT do the phase work inline.
-7. **Read the Implementation Log** - After Phase 3 completes, read the `## Implementation Log` from the MILESTONE file to know what was done
-8. **Update PROGRESS.md** - Keep PROGRESS.md current with task state changes. Add follow-up `[ ]` tasks for any out-of-scope issues reported by the implementation agent.
-9. **Don't skip phases** - Even if no Figma design, still run the design phase (it handles the no-design case)
-10. **Clean up the MILESTONE file** - Archive it after the milestone is complete
-11. **Quality over speed** - Ensure build, tests, and self-checks pass before marking tasks done
-12. **Stay in scope** - Never implement anything not traceable to a PRD task in the current milestone
+1. **Create the MILESTONE file first** - Write it with active task IDs and file-path pointers to PRD/TECH_PLAN before spawning any agent. Do NOT copy PRD/TECH_PLAN content verbatim.
+2. **MILESTONE is the coordination hub** - It lists active tasks and points sub-agents at the PRD/TECH_PLAN, which they read directly. Sub-agents fetch their own task definitions and technical specs from the canonical files.
+3. **Minimal agent prompts** - Agents read from the MILESTONE file (and the PRD/TECH_PLAN it points at), not from your prompt
+
+Additional operational rules (phase ordering, cleanup, blocker handling, quality gates) are in `references/implement-important-rules.md`. Read it for the full operational checklist.

@@ -116,8 +116,6 @@ You are the **orchestrator**. You MUST NOT perform the agent work yourself. Each
 
 Use the **first** approach below whose required tools are available to you. Check your available tools **by name** — do not guess or skip ahead.
 
----
-
 #### Approach A: Agent Teams (preferred)
 
 **Required tools**: `TeamCreate`, `Task` (with `team_name` parameter), `SendMessage`, `TeamDelete`
@@ -131,14 +129,12 @@ If ALL of these tools are available to you, you MUST use this approach:
    - `name`: The agent role (e.g., `"codebase-agent"`, `"verification-agent"`)
    - `subagent_type`: `"general-purpose"` (all belmont agents need full tool access including file editing and bash)
    - `mode`: `"bypassPermissions"`
-   - Do **NOT** set `run_in_background: true`
+   - Do **NOT** set `run_in_background: true` — foreground parallel tasks return results directly; background tasks require `TaskOutput` polling which is fragile and can lose contact with sub-agents.
 3. Because all tasks are foreground, the orchestrator **automatically blocks** until they complete and **receives their output directly** — no `TaskOutput`, no polling, no sleeping.
 4. **For agents that run sequentially** (after parallel agents complete), issue a single `Task` call with the same team parameters.
 5. **Clean up after the skill's work completes** (at the cleanup timing specified above):
    - Send `shutdown_request` via `SendMessage` to each teammate
    - Call `TeamDelete` to remove team resources
-
----
 
 #### Approach B: Parallel Foreground Sub-Agents
 
@@ -149,13 +145,11 @@ If `Task` is available but `TeamCreate` is NOT:
 1. **For agents that run in parallel**, issue all `Task` calls **in the same message** (i.e., as parallel tool calls). All calls use:
    - `subagent_type`: `"general-purpose"` (all belmont agents need full tool access including file editing and bash)
    - `mode`: `"bypassPermissions"`
-   - Do **NOT** set `run_in_background: true`
+   - Do **NOT** set `run_in_background: true` — foreground parallel tasks return results directly; background tasks require `TaskOutput` polling which is fragile and can lose contact with sub-agents.
 2. Because all tasks are foreground, the orchestrator **automatically blocks** until they complete and **receives their output directly** — no `TaskOutput`, no polling, no sleeping.
 3. **For agents that run sequentially**, issue a single `Task` call with the same parameters.
 
 No team cleanup needed.
-
----
 
 #### Approach C: Sequential Inline Execution (fallback)
 
@@ -165,14 +159,6 @@ If neither `TeamCreate` nor `Task` is available:
 2. Execute its instructions fully within your own context
 3. Complete all output before moving to the next agent
 4. Do NOT blend agent work together — finish one completely before starting the next
-
----
-
-### Important: Foreground, Not Background
-
-**Do NOT use `run_in_background: true`** in Approaches A or B. Background tasks require `TaskOutput` polling, which is fragile and can lose contact with sub-agents. Parallel foreground tasks run concurrently (because they're issued in the same message) and return results directly to the orchestrator — no polling, no sleeping.
-
----
 
 ### User Context Forwarding (CRITICAL)
 
@@ -192,8 +178,6 @@ Append this block to the end of each sub-agent's prompt, after the standard prom
 
 **Why this matters**: The orchestrator seeing actionable instructions (e.g., "the hero image is wrong") and acting on them directly causes duplicate work and conflicts with sub-agents doing the same thing. The orchestrator's role is delegation, not execution.
 
----
-
 ### Dispatch Rules (apply to ALL approaches)
 
 1. **DO NOT** read `.agents/belmont/*-agent.md` files yourself (unless using Approach C) — the sub-agents read them
@@ -207,9 +191,9 @@ Append this block to the end of each sub-agent's prompt, after the standard prom
 
 ## Step 2: Run Verification and Code Review
 
-Use the dispatch method you selected above. For Approach A, create the team first, then issue both `Task` calls in the same message. For Approach B, issue both `Task` calls in the same message. For Approach C, execute inline sequentially.
+Use the dispatch method you selected above. For the **Agent Teams** method (Approach A), create the team first, then issue both `Task` calls in the same message. For the **Parallel Task** method (Approach B), issue both `Task` calls in the same message. For the **Sequential Inline** fallback (Approach C), execute each agent's instructions inline, finishing one completely before starting the next.
 
-Spawn these two sub-agents **simultaneously** (or sequentially if using Approach C):
+Spawn these two sub-agents **simultaneously** (or sequentially if using the Sequential Inline fallback):
 
 ---
 
@@ -348,73 +332,11 @@ These items are preserved for future reference but do **not** block milestone co
 
 **Only run this step if Critical or Warning issues were found.** Skip entirely if only Polish/Suggestion items exist.
 
-For each Critical or Warning issue, perform a root cause analysis using Amazon's Five Whys framework:
+When running: **read `references/verify-five-whys.md`** for the Five Whys framework, the grouping rule, and the `NOTES.md` entry format. Append each resulting entry to `{base}/NOTES.md` under `## Root Cause Patterns`.
 
-1. **Ask "Why?" up to five times**, tracing from the symptom to the root cause:
-   - Why 1: Immediate cause (what went wrong)
-   - Why 2: Contributing factor (why the immediate cause happened)
-   - Why 3: Process gap (what process failure allowed it)
-   - Why 4: Systemic reason (why the process gap exists)
-   - Why 5: Root pattern (the fundamental behavior to change)
-   - Stop early if the root cause is reached before the fifth why.
+### Determine Overall Status and Write the Report
 
-2. **Distill a prevention rule** — one concise, actionable statement the implementation agent can follow. Example: "Always use semantic design tokens instead of hex colors because the design system requires theme support."
-
-3. **Group similar issues** — if multiple issues share the same root cause, combine into one entry.
-
-4. **Write to NOTES.md** — Append to `{base}/NOTES.md` under a `## Root Cause Patterns` section (create section if absent). Format each entry as:
-
-```markdown
-### [YYYY-MM-DD] Pattern: <short descriptive name>
-**Issue**: <one-line description of what was found>
-**Root Cause**: <the deepest "why" — the fundamental pattern to change>
-**Prevention**: <actionable rule for the implementation agent>
-**Source**: <milestone ID / task ID where the issue was found>
-```
-
-Keep entries scannable — the implementation agent reads these before every task. Each entry should be understood in under 10 seconds.
-
-### Determine Overall Verification Status
-
-When deciding the overall status:
-- If **only** Polish and/or Suggestion items were found (no Critical, no Warning): report status as **ALL PASSED**. All tasks are marked `[v]` (verified).
-- If Critical or Warning items were found: report status as **ISSUES FOUND** or **CRITICAL ISSUES** as appropriate. Tasks with issues remain `[x]`, follow-up `[ ]` tasks are added.
-
-### Report Summary
-
-Output a combined summary:
-
-```markdown
-# Verification & Code Review Summary
-
-## Overall Status
-[ALL PASSED | ISSUES FOUND | CRITICAL ISSUES]
-
-## Verification Results
-- Acceptance Criteria: [X/Y passed]
-- Visual Verification: [PASS/FAIL/N/A]
-- i18n Check: [PASS/FAIL/N/A]
-- Functional Tests: [PASS/FAIL]
-- Lighthouse Audit: [PASS/WARNING/CRITICAL/N/A]
-
-## Code Review Results
-- Build: [PASS/FAIL]
-- Tests: [PASS/FAIL]
-- Pattern Adherence: [GOOD/ISSUES]
-- PRD Alignment: [ALIGNED/MISALIGNED]
-
-## Issues Found
-- Critical: [count]
-- Warnings: [count]
-- Polish: [count] (recorded in NOTES.md, not blocking)
-- Suggestions: [count]
-
-## Follow-up Tasks Created
-[List of new follow-up tasks added to PROGRESS.md]
-
-## Recommendations
-[Any overall recommendations for the project]
-```
+**Read `references/verify-report-format.md` and use its template to produce the final summary output.** It contains the overall-status decision rules (ALL PASSED vs ISSUES FOUND vs CRITICAL ISSUES) and the combined markdown summary template.
 
 ### Commit Planning File Changes
 
@@ -439,14 +361,14 @@ After completing all updates to `.belmont/` planning files, commit them:
 
 **Note**: PROGRESS.md is the single source of truth for task state. PRD.md is a pure spec document with no status markers — do not add emoji or state indicators to PRD task headers.
 
-## Step 4: Clean Up Team (Approach A only)
+## Step 4: Clean Up Team (Agent Teams method only)
 
 If you created a team in Step 2:
 1. Send `shutdown_request` via `SendMessage` to each teammate still active
 2. Wait for shutdown confirmations
 3. Call `TeamDelete` to remove team resources
 
-Skip this step if you used Approach B or C.
+Skip this step if you used the Parallel Task method or the Sequential Inline fallback.
 
 ## Important Rules
 

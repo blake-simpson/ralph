@@ -1,6 +1,8 @@
 # Agent Pipeline Details
 
-All implementation agents communicate through the **MILESTONE file** (`.belmont/MILESTONE.md`). Each agent reads its context from the file and writes its output to a designated section. This eliminates the need for the orchestrator to pass large outputs between agents.
+All implementation agents communicate through the **MILESTONE file** (`.belmont/MILESTONE.md`). The MILESTONE file is a **coordination document**: it lists the active task IDs and points sub-agents at the canonical PRD and TECH_PLAN. Each sub-agent reads the MILESTONE file, fetches the full task definitions from the PRD directly, and writes its output to a designated section of MILESTONE. The three sub-agent-written sections (`## Codebase Analysis`, `## Design Specifications`, `## Implementation Log`) remain the source of truth for the downstream agents in the pipeline.
+
+**Important**: Do not edit `{base}/PRD.md` while `/belmont:implement` or `/belmont:verify` is running — sub-agents now read the PRD live rather than receiving a pinned copy embedded in MILESTONE, so mid-run edits can cause agents to see inconsistent versions.
 
 ## Phase 1: Codebase Scan (codebase-agent) — *parallel with Phase 2*
 

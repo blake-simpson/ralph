@@ -70,9 +70,9 @@ Apply the following dispatch configuration:
 
 ## Step 2: Run Verification and Code Review
 
-Use the dispatch method you selected above. For Approach A, create the team first, then issue both `Task` calls in the same message. For Approach B, issue both `Task` calls in the same message. For Approach C, execute inline sequentially.
+Use the dispatch method you selected above. For the **Agent Teams** method (Approach A), create the team first, then issue both `Task` calls in the same message. For the **Parallel Task** method (Approach B), issue both `Task` calls in the same message. For the **Sequential Inline** fallback (Approach C), execute each agent's instructions inline, finishing one completely before starting the next.
 
-Spawn these two sub-agents **simultaneously** (or sequentially if using Approach C):
+Spawn these two sub-agents **simultaneously** (or sequentially if using the Sequential Inline fallback):
 
 ---
 
@@ -207,84 +207,22 @@ These items are preserved for future reference but do **not** block milestone co
 
 **Only run this step if Critical or Warning issues were found.** Skip entirely if only Polish/Suggestion items exist.
 
-For each Critical or Warning issue, perform a root cause analysis using Amazon's Five Whys framework:
+When running: **read `references/verify-five-whys.md`** for the Five Whys framework, the grouping rule, and the `NOTES.md` entry format. Append each resulting entry to `{base}/NOTES.md` under `## Root Cause Patterns`.
 
-1. **Ask "Why?" up to five times**, tracing from the symptom to the root cause:
-   - Why 1: Immediate cause (what went wrong)
-   - Why 2: Contributing factor (why the immediate cause happened)
-   - Why 3: Process gap (what process failure allowed it)
-   - Why 4: Systemic reason (why the process gap exists)
-   - Why 5: Root pattern (the fundamental behavior to change)
-   - Stop early if the root cause is reached before the fifth why.
+### Determine Overall Status and Write the Report
 
-2. **Distill a prevention rule** — one concise, actionable statement the implementation agent can follow. Example: "Always use semantic design tokens instead of hex colors because the design system requires theme support."
-
-3. **Group similar issues** — if multiple issues share the same root cause, combine into one entry.
-
-4. **Write to NOTES.md** — Append to `{base}/NOTES.md` under a `## Root Cause Patterns` section (create section if absent). Format each entry as:
-
-```markdown
-### [YYYY-MM-DD] Pattern: <short descriptive name>
-**Issue**: <one-line description of what was found>
-**Root Cause**: <the deepest "why" — the fundamental pattern to change>
-**Prevention**: <actionable rule for the implementation agent>
-**Source**: <milestone ID / task ID where the issue was found>
-```
-
-Keep entries scannable — the implementation agent reads these before every task. Each entry should be understood in under 10 seconds.
-
-### Determine Overall Verification Status
-
-When deciding the overall status:
-- If **only** Polish and/or Suggestion items were found (no Critical, no Warning): report status as **ALL PASSED**. All tasks are marked `[v]` (verified).
-- If Critical or Warning items were found: report status as **ISSUES FOUND** or **CRITICAL ISSUES** as appropriate. Tasks with issues remain `[x]`, follow-up `[ ]` tasks are added.
-
-### Report Summary
-
-Output a combined summary:
-
-```markdown
-# Verification & Code Review Summary
-
-## Overall Status
-[ALL PASSED | ISSUES FOUND | CRITICAL ISSUES]
-
-## Verification Results
-- Acceptance Criteria: [X/Y passed]
-- Visual Verification: [PASS/FAIL/N/A]
-- i18n Check: [PASS/FAIL/N/A]
-- Functional Tests: [PASS/FAIL]
-- Lighthouse Audit: [PASS/WARNING/CRITICAL/N/A]
-
-## Code Review Results
-- Build: [PASS/FAIL]
-- Tests: [PASS/FAIL]
-- Pattern Adherence: [GOOD/ISSUES]
-- PRD Alignment: [ALIGNED/MISALIGNED]
-
-## Issues Found
-- Critical: [count]
-- Warnings: [count]
-- Polish: [count] (recorded in NOTES.md, not blocking)
-- Suggestions: [count]
-
-## Follow-up Tasks Created
-[List of new follow-up tasks added to PROGRESS.md]
-
-## Recommendations
-[Any overall recommendations for the project]
-```
+**Read `references/verify-report-format.md` and use its template to produce the final summary output.** It contains the overall-status decision rules (ALL PASSED vs ISSUES FOUND vs CRITICAL ISSUES) and the combined markdown summary template.
 
 <!-- @include commit-belmont-changes.md commit_context="after verification" -->
 
-## Step 4: Clean Up Team (Approach A only)
+## Step 4: Clean Up Team (Agent Teams method only)
 
 If you created a team in Step 2:
 1. Send `shutdown_request` via `SendMessage` to each teammate still active
 2. Wait for shutdown confirmations
 3. Call `TeamDelete` to remove team resources
 
-Skip this step if you used Approach B or C.
+Skip this step if you used the Parallel Task method or the Sequential Inline fallback.
 
 ## Important Rules
 

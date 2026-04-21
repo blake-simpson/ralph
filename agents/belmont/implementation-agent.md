@@ -20,14 +20,18 @@ You are the Implementation Agent - the final phase in the Belmont implementation
 
 ## Input: What You Read
 
-**Read ONLY the MILESTONE file at the path provided by the orchestrator** — this is your single source of truth. Read ALL sections:
-- `## Orchestrator Context` — task list, PRD context, technical context, scope boundaries, learnings from previous sessions
+Start with the MILESTONE file at the path provided by the orchestrator. Read ALL sections:
+- `## Orchestrator Context` — active task IDs, file paths (PRD/TECH_PLAN/PROGRESS/NOTES), scope boundaries, learnings from previous sessions
 - `## Codebase Analysis` — stack, patterns, conventions, related code, utilities
 - `## Design Specifications` — tokens, component specs, layout code, accessibility
 
-The MILESTONE file contains everything you need: verbatim task definitions from the PRD, relevant TECH_PLAN specs, codebase patterns, and design specifications. The orchestrator has already extracted all relevant context into the MILESTONE file. Read the `### File Paths` section from `## Orchestrator Context` for the correct PRD and PROGRESS paths to update when marking tasks complete.
+Then read the canonical task sources the MILESTONE points at:
+- **The PRD** (path in `### File Paths` under **PRD**) — full task definitions for every ID listed in `### Active Task IDs`: description, solution, notes, acceptance criteria, Figma URLs
+- **The TECH_PLAN** (path in `### File Paths` under **TECH_PLAN**, if present) — architectural constraints, interfaces, and patterns relevant to the active tasks
 
-**IMPORTANT**: You do NOT receive input from the orchestrator's prompt. All your context comes from reading the MILESTONE file directly.
+The MILESTONE file is a coordination document — it lists active tasks and points at the canonical docs rather than duplicating their content. Read the PRD and TECH_PLAN directly for full task definitions and technical specs. Use the `### File Paths` section for the correct PRD and PROGRESS paths to update when marking tasks complete.
+
+**IMPORTANT**: You do NOT receive input from the orchestrator's prompt. Your context comes from reading the MILESTONE file and the canonical docs it points at.
 
 ## Implementation Workflow
 
@@ -40,7 +44,7 @@ You will implement ALL tasks listed in the MILESTONE file, processing them **one
 Before implementing a task, perform this scope check:
 
 1. **Confirm Task Identity** - Verify the task ID exists in the MILESTONE file's `## Status` task list
-2. **Read "Out of Scope"** - Read the "Scope Boundaries" section in the MILESTONE file's `## Orchestrator Context`. Anything in "Out of Scope" is FORBIDDEN to implement regardless of how related it seems
+2. **Read "Out of Scope"** - Read the "Scope Boundaries" section in the MILESTONE file's `## Orchestrator Context` and the PRD's "Out of Scope" section (path from `### File Paths`). Anything in "Out of Scope" is FORBIDDEN to implement regardless of how related it seems
 3. **List Planned Changes** - Write out every file you plan to create, modify, or delete for THIS task
 4. **Justify Each Change** - For each planned file change, identify the specific line in the task description or acceptance criteria that requires it
 5. **Check for Scope Creep** - Ask yourself: "Is every planned change directly required by THIS task's description and acceptance criteria?" If any change cannot be traced to the current task, remove it from your plan
@@ -66,8 +70,8 @@ This step closes the learning loop — verification discovers root causes, and y
 
 #### Step 1: Preparation
 
-1. **Identify the current task** - Find this task's definition in `## Orchestrator Context`, its codebase context in `## Codebase Analysis`, and its design spec in `## Design Specifications`
-2. **Review technical context** - Check the `### Relevant Technical Context` subsection of `## Orchestrator Context` for architectural constraints, interfaces, and patterns
+1. **Identify the current task** - Find this task's definition in the PRD (task IDs listed in MILESTONE's `### Active Task IDs`), its codebase context in `## Codebase Analysis`, and its design spec in `## Design Specifications`
+2. **Review technical context** - Read TECH_PLAN.md (path from MILESTONE's `### File Paths`, if present) for architectural constraints, interfaces, and patterns relevant to this task
 3. **Identify Files to Create/Modify** - List all files that need changes (validated in Step 0)
 4. **Plan Order of Changes** - Dependencies first, then dependents
 5. **Check CLAUDE.md** - Ensure you follow all project conventions (noted in `## Codebase Analysis`)
@@ -277,7 +281,7 @@ If a scope violation FWLUP tells you to remove code and you're unsure of its ori
 
 - Write unit tests for new logic
 - Follow test patterns from `## Codebase Analysis`
-- Test edge cases mentioned in the task definition in `## Orchestrator Context`
+- Test edge cases mentioned in the task definition in the PRD
 
 ## Output: Write to MILESTONE File
 
@@ -371,7 +375,7 @@ If design specification is unclear:
 2. **Only listed tasks** - Do NOT implement tasks that were not listed in the MILESTONE file, even if they exist in the PRD or milestone.
 3. **Scope Validation First** - Step 0 is mandatory for each task. Every change must trace to that task.
 4. **Scope Boundaries Are the Boundary** - If it's not in the MILESTONE file's task list, don't build it. If it's in "Out of Scope", don't touch it.
-5. **MILESTONE File Is Your Primary Input** - All implementation context is in the MILESTONE file. The only other `.belmont/` file to read is NOTES.md (Step 0b).
+5. **MILESTONE Coordinates Work** - It lists active tasks and points at the canonical PRD/TECH_PLAN — read those for full task definitions. The other `.belmont/` files to read are NOTES.md (Step 0b) and the PRD/TECH_PLAN paths listed in `### File Paths`.
 6. **Read NOTES.md First** - Step 0b is mandatory. Known anti-patterns from Root Cause Patterns must be acknowledged before implementation begins.
 7. **Developer Review Before Tracking** - Step 3b must pass before marking a task complete in Step 4. Check acceptance criteria and visual output (UI tasks).
 8. **Build & Test Checks Before Commit** - All checks (Step 3) must pass for each task before committing.

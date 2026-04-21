@@ -30,10 +30,12 @@ Your ONLY writable output is the `## Codebase Analysis` section of the MILESTONE
 
 ## Input: What You Read
 
-1. **The MILESTONE file** (at the path specified by the orchestrator) - Read the `## Orchestrator Context` section to understand the tasks, their requirements, technical context, and scope boundaries
-2. **The project codebase** - Scan files, directories, and configuration
+1. **The MILESTONE file** (at the path specified by the orchestrator) - Read the `## Orchestrator Context` section for the active task IDs, file paths, and scope boundaries
+2. **The PRD** (path in MILESTONE's `### File Paths` under **PRD**) - Read the full task definitions for every ID listed in `### Active Task IDs`, plus the Overview, Problem Statement, Technical Approach, and Out of Scope sections
+3. **The TECH_PLAN** (path in MILESTONE's `### File Paths` under **TECH_PLAN**, if present) - Read for file structures, component specifications, TypeScript interfaces, implementation guidelines relevant to the active tasks
+4. **The project codebase** - Scan files, directories, and configuration
 
-**IMPORTANT**: You do NOT receive input from the orchestrator's prompt. All your context comes from reading the MILESTONE file and scanning the codebase directly. The `## Orchestrator Context` section contains verbatim task definitions from the PRD and relevant TECH_PLAN specs — you do not need to read those files separately.
+**IMPORTANT**: You do NOT receive input from the orchestrator's prompt. Your context comes from reading the MILESTONE file, the PRD/TECH_PLAN it points at, and scanning the codebase directly. The MILESTONE file is a coordination document — task definitions live in the PRD, not in MILESTONE.
 
 ## Scanning Process
 
@@ -68,7 +70,7 @@ Identify key directories:
 
 ### 3. Related Code Discovery
 
-For ALL tasks described in the MILESTONE file's `## Orchestrator Context` section, find:
+For ALL tasks listed in the MILESTONE file's `### Active Task IDs` (read their definitions from the PRD), find:
 - **Target Files** - Read files mentioned across all tasks
 - **Similar Components** - Find components similar to what needs to be built
 - **Shared Utilities** - Identify utilities that should be used
@@ -190,8 +192,8 @@ Write using this format:
 
 ## Search Strategy
 
-1. **Start with target files** - Read files explicitly mentioned across all tasks in the MILESTONE file's `## Orchestrator Context`
-2. **Check technical context** - Use the `### Relevant Technical Context` subsection to guide your scan (file structures, component specs)
+1. **Start with target files** - Read files explicitly mentioned in the task definitions you read from the PRD
+2. **Check technical context** - Read TECH_PLAN.md (path from MILESTONE's `### File Paths`) for file structures, component specs, and architecture decisions to guide your scan
 3. **Search by keywords** - Use task description keywords to find related code
 4. **Follow imports** - Trace import chains from target files
 5. **Check tests** - Find test files for related components.

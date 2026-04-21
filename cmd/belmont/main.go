@@ -2094,6 +2094,77 @@ func syncMarkdownDir(sourceDir, targetDir string) error {
 		}
 	}
 
+	// Sync the references/ subdir if present (progressive-disclosure detail
+	// loaded on demand by skills via relative paths).
+	refsSrc := filepath.Join(sourceDir, "references")
+	refsDest := filepath.Join(targetDir, "references")
+	if dirExists(refsSrc) {
+		if err := syncReferencesDir(refsSrc, refsDest); err != nil {
+			return err
+		}
+	} else if dirExists(refsDest) {
+		fmt.Println("  - references/ (removed, no longer in source)")
+		if err := os.RemoveAll(refsDest); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// syncReferencesDir mirrors .md files in a references/ subdirectory.
+func syncReferencesDir(sourceDir, targetDir string) error {
+	if err := ensureDir(targetDir); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return err
+	}
+
+	sourceNames := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		sourceNames[entry.Name()] = struct{}{}
+		src := filepath.Join(sourceDir, entry.Name())
+		dest := filepath.Join(targetDir, entry.Name())
+		if fileExists(dest) {
+			same, err := filesEqual(src, dest)
+			if err != nil {
+				return err
+			}
+			if same {
+				fmt.Printf("  = references/%s (unchanged)\n", entry.Name())
+				continue
+			}
+			fmt.Printf("  ~ references/%s (updated)\n", entry.Name())
+		} else {
+			fmt.Printf("  + references/%s\n", entry.Name())
+		}
+		if err := copyFile(src, dest); err != nil {
+			return err
+		}
+	}
+
+	targetEntries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range targetEntries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		if _, ok := sourceNames[entry.Name()]; !ok {
+			fmt.Printf("  - references/%s (removed, no longer in source)\n", entry.Name())
+			if err := os.Remove(filepath.Join(targetDir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -2226,9 +2297,19 @@ func setupTool(projectRoot, tool string) error {
 		}
 	case "cursor":
 		fmt.Println("Linking Cursor...")
+		skillsSource := filepath.Join(projectRoot, ".agents", "skills", "belmont")
 		cursorDir := filepath.Join(projectRoot, ".cursor", "rules", "belmont")
-		if err := linkPerFileDir(filepath.Join(projectRoot, ".agents", "skills", "belmont"), cursorDir, ".md", ".mdc"); err != nil {
+		if err := linkPerFileDir(skillsSource, cursorDir, ".md", ".mdc"); err != nil {
 			return err
+		}
+		// Skills reference progressive-disclosure files via relative
+		// `references/*.md` paths, so link the references dir alongside.
+		refsSource := filepath.Join(skillsSource, "references")
+		refsLink := filepath.Join(cursorDir, "references")
+		if dirExists(refsSource) {
+			if err := ensureSymlink(refsLink, refsSource, true); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -2538,8 +2619,15 @@ func syncEmbeddedDir(embedFS embed.FS, root string, targetDir string) error {
 	}
 
 	sourceNames := make(map[string]struct{})
+	hasReferences := false
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+		if entry.IsDir() {
+			if entry.Name() == "references" {
+				hasReferences = true
+			}
+			continue
+		}
+		if !strings.HasSuffix(entry.Name(), ".md") {
 			continue
 		}
 		if entry.Name() == "SKILL.md" {
@@ -2583,6 +2671,78 @@ func syncEmbeddedDir(embedFS embed.FS, root string, targetDir string) error {
 		}
 		if _, ok := sourceNames[entry.Name()]; !ok {
 			fmt.Printf("  - %s (removed, no longer in source)\n", entry.Name())
+			if err := os.Remove(filepath.Join(targetDir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Sync references/ subdir from the embed FS.
+	refsDest := filepath.Join(targetDir, "references")
+	if hasReferences {
+		if err := syncEmbeddedReferences(embedFS, root+"/references", refsDest); err != nil {
+			return err
+		}
+	} else if dirExists(refsDest) {
+		fmt.Println("  - references/ (removed, no longer in source)")
+		if err := os.RemoveAll(refsDest); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// syncEmbeddedReferences mirrors the references/ subdir from an embed.FS.
+func syncEmbeddedReferences(embedFS embed.FS, root string, targetDir string) error {
+	if err := ensureDir(targetDir); err != nil {
+		return err
+	}
+
+	entries, err := fs.ReadDir(embedFS, root)
+	if err != nil {
+		return err
+	}
+
+	sourceNames := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		sourceNames[entry.Name()] = struct{}{}
+		data, err := fs.ReadFile(embedFS, root+"/"+entry.Name())
+		if err != nil {
+			return err
+		}
+		dest := filepath.Join(targetDir, entry.Name())
+		if fileExists(dest) {
+			existing, err := os.ReadFile(dest)
+			if err != nil {
+				return err
+			}
+			if string(existing) == string(data) {
+				fmt.Printf("  = references/%s (unchanged)\n", entry.Name())
+				continue
+			}
+			fmt.Printf("  ~ references/%s (updated)\n", entry.Name())
+		} else {
+			fmt.Printf("  + references/%s\n", entry.Name())
+		}
+		if err := os.WriteFile(dest, data, 0o644); err != nil {
+			return err
+		}
+	}
+
+	targetEntries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range targetEntries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		if _, ok := sourceNames[entry.Name()]; !ok {
+			fmt.Printf("  - references/%s (removed, no longer in source)\n", entry.Name())
 			if err := os.Remove(filepath.Join(targetDir, entry.Name())); err != nil {
 				return err
 			}
