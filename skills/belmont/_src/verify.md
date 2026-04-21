@@ -70,9 +70,9 @@ Apply the following dispatch configuration:
 
 ## Step 2: Run Verification and Code Review
 
-Use the dispatch method you selected above. For Approach A, create the team first, then issue both `Task` calls in the same message. For Approach B, issue both `Task` calls in the same message. For Approach C, execute inline sequentially.
+Use the dispatch method you selected above. For Agent Teams, create the team first, then issue both `Task` calls in the same message. For Direct Task, issue both `Task` calls in the same message. If `Task` is unavailable, execute inline sequentially.
 
-Spawn these two sub-agents **simultaneously** (or sequentially if using Approach C):
+Spawn these two sub-agents **simultaneously** (or sequentially if using the inline fallback):
 
 ---
 
@@ -277,14 +277,14 @@ Output a combined summary:
 
 <!-- @include commit-belmont-changes.md commit_context="after verification" -->
 
-## Step 4: Clean Up Team (Approach A only)
+## Step 4: Clean Up Team (Agent Teams only)
 
 If you created a team in Step 2:
 1. Send `shutdown_request` via `SendMessage` to each teammate still active
 2. Wait for shutdown confirmations
 3. Call `TeamDelete` to remove team resources
 
-Skip this step if you used Approach B or C.
+Skip this step if you used Direct Task or the inline fallback.
 
 ## Important Rules
 

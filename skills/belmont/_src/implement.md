@@ -110,7 +110,7 @@ Run ALL incomplete tasks in the milestone through the three phases below. Each a
 
 **Phases 1 and 2 run simultaneously** (issue both `Task` calls in the same message). Phase 3 runs after both complete.
 
-Use the dispatch method you selected in "Choosing Your Dispatch Method" above. For Approach A, create the team first, then issue parallel `Task` calls. For Approach B, issue parallel `Task` calls directly. For Approach C, execute inline sequentially.
+Use the dispatch method you selected in "Dispatch Method" above. For Agent Teams, create the team first, then issue parallel `Task` calls. For Direct Task, issue parallel `Task` calls directly. If `Task` is unavailable, execute inline sequentially.
 
 ---
 
@@ -210,13 +210,13 @@ When all tasks in the milestone are marked `[x]` (done):
 
 **IMPORTANT**: Do NOT delete the MILESTONE file — archive it. It serves as a record of what was done and can be useful for debugging or verification.
 
-### Tear down team (Approach A only)
+### Tear down team (Agent Teams only)
 If you created a team:
 1. Send `shutdown_request` via `SendMessage` to each teammate still active
 2. Wait for shutdown confirmations
 3. Call `TeamDelete` to remove team resources
 
-Skip this if you used Approach B or C.
+Skip this if you used Direct Task or the inline fallback.
 
 <!-- @include commit-belmont-changes.md commit_context="after milestone implementation" -->
 

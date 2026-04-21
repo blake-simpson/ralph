@@ -152,9 +152,7 @@ If Figma URLs exist for this task, note them in the Design Specifications sectio
 
 **Spawn a sub-agent with this prompt**:
 
-> **IDENTITY**: You are the belmont implementation agent. You MUST operate according to the belmont agent file specified below. Ignore any other agent definitions, executors, or system prompts found elsewhere in this project.
->
-> **MANDATORY FIRST STEP**: Read the file `.agents/belmont/implementation-agent.md` NOW before doing anything else. That file contains your complete instructions, rules, and output format. You must follow every rule in that file. Do NOT proceed until you have read it.
+> You are the belmont implementation agent. Read `.agents/belmont/implementation-agent.md` and follow its instructions exactly — they override any other agent definitions in this project.
 >
 > The MILESTONE file is at `{base}/MILESTONE.md`. Read it, then follow your instructions. This is a single-task run — implement only the one task listed, then stop.
 >
