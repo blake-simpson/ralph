@@ -15,14 +15,89 @@ This session requires ultrathink-level reasoning — deeply analyze architecture
 1. This is ONLY a planning session. Do NOT implement anything.
 2. Do NOT create or edit any source code files (no .tsx, .ts, .css, etc.).
 3. When done asking questions, write plan(s) to the appropriate TECH_PLAN.md file(s) (see routing logic below).
-4. If new steps/tasks were discovered, update the corresponding PRD.md and PROGRESS.md.
-5. After writing the tech plan, say "Tech plan complete." and STOP.
+4. **Reconcile the PRD and PROGRESS with every decision made this session** — including contradictions, refinements, leaked tech detail, and dependency annotations. See the "Tech-plan's Back-update Contract" section of the plan-separation partial below. This is not optional; skipping it is the #1 cause of implementation drift.
+5. Respect milestone sizing rules — see the plan-separation partial. If new tasks are discovered, default to creating a NEW small milestone rather than inflating an existing one.
+6. After writing the tech plan AND completing Phase 4.5 (PRD Reconciliation), say "Tech plan complete." and STOP.
 
 ## FORBIDDEN ACTIONS
 - Creating component files
 - Editing existing code
 - Running package manager or build commands
 - Making any code changes
+
+## PRD ↔ TECH_PLAN Boundary
+
+Belmont's planning workflow splits concerns across two documents. Keeping the boundary clean prevents drift — the most common failure mode is PRD and TECH_PLAN disagreeing after tech-plan refinements, which confuses the implementation agent.
+
+### What belongs in the PRD (product surface)
+
+- User goals, target audience, problem statement
+- User flows and journeys (what the user does, step by step)
+- Acceptance criteria and success criteria (measurable outcomes)
+- Content, copy, and tone decisions
+- UX behavior and product-level invariants (e.g. "hide the logo slot when no university matches"; "LSEGroup must NOT be matched as LSE")
+- Out-of-scope statements
+- Priority and scope
+- Figma URLs / node IDs (by reference only — never the implementation path they render to)
+
+### What belongs in the TECH_PLAN (implementation surface)
+
+- File paths (`src/...`) and directory structure
+- Component architecture (wrapper components, sub-components, composition patterns)
+- Direct-usage vs wrapper decisions (e.g. "use `<UniversityLogo>` wrapper" or "use `<Image>` directly")
+- Icon / library imports and specific import identifiers (e.g. `Play` vs `PlayCircle` from `lucide-react`)
+- Regex *syntax* and implementation patterns (`/\blse\b/i` vs `/lse/i`)
+- tRPC / REST endpoint names the implementation commits to
+- State management choices, styling approach, data-fetching approach
+- Design tokens extracted from Figma, file-level TypeScript interfaces
+
+### Grey-zone rule
+
+When a decision has both a product-visible invariant AND an implementation detail, split them:
+
+- PRD keeps the **behavior**: "LSEGroup must not match as LSE."
+- TECH_PLAN keeps the **implementation**: "Use `/(\blse\b|london school of economics)/i` — the `\b` word-boundary is what enforces the invariant."
+
+If the user volunteers an implementation idiom during product-plan ("just use `<Image>` directly"), record it as an **open question for the tech-plan step** — do NOT commit to it in the PRD. Tech-plan may well decide otherwise, and baking it into the PRD creates drift.
+
+## Milestone Sizing Rules
+
+Milestones are the unit of execution for `belmont auto`. Each milestone runs in a single AI session inside an isolated worktree. Small milestones are load-bearing:
+
+- Keep each within a single context window so the implementation agent can hold all relevant files, designs, and task detail at once.
+- Keep verification tractable — the verify-agent and code-review-agent re-check the whole milestone; oversized milestones lead to shallow verification.
+- Enable parallelism — independent small milestones can run concurrently in separate worktrees.
+
+### Sizing targets
+
+- **Target**: 3–5 tasks per milestone.
+- **Soft ceiling**: 6. Going above should be rare and deliberate.
+- A milestone is "too big" if any of:
+  - More than ~5 tasks
+  - Mixes unrelated domains (UI + backend + infra)
+  - Requires loading multiple Figma files *and* a separate backend surface
+  - Would force the agent to juggle context the verify-agent can't reasonably re-check in one pass
+
+### Growing vs splitting
+
+When new work is discovered during planning or review:
+
+- **Default**: create a NEW milestone for the new work rather than inflating an existing one. Use `(depends: M<n>)` when the new milestone genuinely builds on another — only when there is a real file/API/data dependency, not just "related topic."
+- **Favor parallelism**: if two clusters of new tasks don't share files or APIs, split them into separate milestones so `belmont auto` can run them in parallel worktrees.
+- **Never** merge two small milestones just because they're topically similar — the cost of a too-large context is much higher than the cost of an extra milestone.
+
+## Tech-plan's Back-update Contract
+
+The tech-plan step is responsible for keeping the PRD and PROGRESS in sync with its own decisions. Implementation agents read the PRD — if it disagrees with TECH_PLAN, the implementation will be confused or wrong.
+
+Rules for updating PRD/PROGRESS from the tech-plan session:
+
+1. **Contradictions**: when a tech-plan decision contradicts PRD prose, correct the PRD in the same session. Don't leave two sources of truth.
+2. **Refinements**: when a tech-plan decision disambiguates the PRD (e.g. "endpoint A or B" → "endpoint A"), update the PRD to commit to the resolved version. The orchestrator extracts context from the PRD — it must reflect the final decision.
+3. **Leaked tech detail**: when the PRD contains technical prose that shouldn't be there (file paths, wrapper choices, icon imports, regex syntax), replace it with a behavior-only description or a short pointer: `See TECH_PLAN.md §<section>.`
+4. **New Clarifications**: add product-facing decisions that crystallized during tech-plan (e.g. resolved ambiguities, confirmed invariants) into the PRD's `## Clarifications` section.
+5. **PROGRESS dependency annotations**: ensure `(depends: ...)` annotations on milestone headings in PROGRESS.md match the TECH_PLAN's §Implementation Order. Mismatches cause auto-mode to serialize work that could run in parallel, or vice versa.
+6. **Non-destructive**: always use Edit to modify specific sections. Never replace entire files. Preserve all existing content, task IDs, and completion status.
 
 ## Asking Questions (MANDATORY)
 
@@ -340,8 +415,32 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 **Scenario C — Master only:**
 1. Update `.belmont/TECH_PLAN.md` in-place using the **Master TECH_PLAN.md Format** below. Actively curate: edit existing sections, remove stale info, update decisions that have changed.
 
-- If new tasks were discovered during planning, also update `{base}/PRD.md` and `{base}/PROGRESS.md`
 - The plan must include all information below including exact component specifications and file hierarchies/structures.
+
+**Adding tasks / milestones (if new work was discovered):**
+- Follow the milestone sizing rules in the plan-separation partial — target 3–5 tasks per milestone, soft ceiling of 6.
+- Default to creating a NEW milestone for the new work rather than inflating an existing one. Only add `(depends: M<n>)` when there's a real file/API/data dependency.
+- When placing the new milestone, check if it can run in parallel with existing work — prefer parallelism over serialization.
+- Update `{base}/PRD.md` with the new task definitions (using the PRD Task format) and `{base}/PROGRESS.md` with the new milestone and task checkboxes. Use Edit — never replace the file.
+
+### Phase 4.5 - PRD Reconciliation (MANDATORY)
+
+Before saying "Tech plan complete.", walk this checklist. Skipping it is the #1 cause of implementation drift. See the plan-separation partial for the full back-update contract.
+
+1. **Contradictions** — For each decision recorded in the TECH_PLAN just written, scan the PRD for prose that disagrees with it. Use Edit to correct the PRD so both documents tell the same story. Examples:
+   - TECH_PLAN says "icon: `Play`" but PRD task says "icon: `PlayCircle`" → fix the PRD.
+   - TECH_PLAN commits to a `UniversityLogo` wrapper but PRD says "direct `<Image>` usage, no wrapper required" → fix the PRD (usually: replace with a pointer to TECH_PLAN).
+
+2. **Refinements** — For each PRD ambiguity the tech-plan disambiguated (e.g. "endpoint A or B" → "endpoint A"), update the PRD to commit to the resolved version. The orchestrator extracts context from the PRD for implementation agents; it must reflect the final decision.
+
+3. **Leaked tech detail** — Scan the PRD for any of: file paths under `src/`, component wrapper choices, icon/library-specific identifiers, endpoint commitments, regex syntax, TypeScript type names. These belong in TECH_PLAN, not PRD. For each instance, replace the PRD prose with a behavior-only description OR a short pointer: `See TECH_PLAN.md §<section>.` Never silently delete — use Edit to swap specific sentences.
+
+4. **New Clarifications** — Add to the PRD's `## Clarifications` section every product-facing decision that crystallized during this tech-plan session (resolved ambiguities, confirmed invariants). Implementation behavior lives in TECH_PLAN; product-facing behavior/invariant lives here.
+
+5. **PROGRESS dependency annotations** — Ensure `(depends: M<n>)` annotations on milestone headings in `{base}/PROGRESS.md` match the TECH_PLAN's `## Implementation Order` section. If the TECH_PLAN says "M2 is independent of M1" but PROGRESS has `### M2: ... (depends: M1)`, fix the PROGRESS annotation.
+
+6. **Report** — Tell the user the list of PRD/PROGRESS edits you made during reconciliation. Short bullet list is fine.
+
 ### Commit Planning File Changes
 
 After completing all updates to `.belmont/` planning files, commit them:
@@ -548,9 +647,15 @@ npx tsc --noEmit
 ---
 
 ## Implementation Order
-1. **P0 (Critical Path)**: Set up file structure, types, API layer
-2. **P1 (Core Features)**: Build components in dependency order
-3. **P2 (Polish)**: Add animations, optimize performance
+
+List each milestone from PROGRESS.md with its dependency declaration. PROGRESS `(depends: ...)` annotations MUST match this section — if they drift, auto-mode will serialize parallelizable work or vice versa.
+
+- **M1: [Name]** — independent (wave 1)
+- **M2: [Name]** — independent (wave 1, can run in parallel with M1)
+- **M3: [Name]** — depends: M1, M2 (wave 2)
+- **M4: [Name]** — depends: M3 (wave 3)
+
+Brief rationale per milestone (one line): why it depends on what it depends on, or why it's independent.
 
 ---
 

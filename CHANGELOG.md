@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.9.8
+
+**Released:** 2026-04-21
+
+### Changes since v0.9.7
+
+- Allow Belmont to understand the "other side" of the planning equation
+
+
+
 ## v0.9.7
 
 **Released:** 2026-04-21
