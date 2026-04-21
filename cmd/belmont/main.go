@@ -6571,6 +6571,13 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 		addCmd := exec.Command("git", "add", "-A")
 		addCmd.Dir = cfg.Root
 		addCmd.Run()
+
+		// `git add -A` sweeps up transient reconciliation artifacts too.
+		// Unstage the report explicitly so the merge commit doesn't include it;
+		// the caller deletes it from disk right after this returns.
+		unstage := exec.Command("git", "rm", "--cached", "--ignore-unmatch", "--", ".belmont/reconciliation-report.json")
+		unstage.Dir = cfg.Root
+		unstage.Run()
 	}
 
 	return nil
