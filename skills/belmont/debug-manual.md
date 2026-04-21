@@ -111,8 +111,6 @@ You are the **orchestrator**. You MUST NOT perform the agent work yourself. Each
 
 Use the **first** approach below whose required tools are available to you. Check your available tools **by name** — do not guess or skip ahead.
 
----
-
 #### Approach A: Agent Teams (preferred)
 
 **Required tools**: `TeamCreate`, `Task` (with `team_name` parameter), `SendMessage`, `TeamDelete`
@@ -126,14 +124,12 @@ If ALL of these tools are available to you, you MUST use this approach:
    - `name`: The agent role (e.g., `"codebase-agent"`, `"verification-agent"`)
    - `subagent_type`: `"general-purpose"` (all belmont agents need full tool access including file editing and bash)
    - `mode`: `"bypassPermissions"`
-   - Do **NOT** set `run_in_background: true`
+   - Do **NOT** set `run_in_background: true` — foreground parallel tasks return results directly; background tasks require `TaskOutput` polling which is fragile and can lose contact with sub-agents.
 3. Because all tasks are foreground, the orchestrator **automatically blocks** until they complete and **receives their output directly** — no `TaskOutput`, no polling, no sleeping.
 4. **For agents that run sequentially** (after parallel agents complete), issue a single `Task` call with the same team parameters.
 5. **Clean up after the skill's work completes** (at the cleanup timing specified above):
    - Send `shutdown_request` via `SendMessage` to each teammate
    - Call `TeamDelete` to remove team resources
-
----
 
 #### Approach B: Parallel Foreground Sub-Agents
 
@@ -144,13 +140,11 @@ If `Task` is available but `TeamCreate` is NOT:
 1. **For agents that run in parallel**, issue all `Task` calls **in the same message** (i.e., as parallel tool calls). All calls use:
    - `subagent_type`: `"general-purpose"` (all belmont agents need full tool access including file editing and bash)
    - `mode`: `"bypassPermissions"`
-   - Do **NOT** set `run_in_background: true`
+   - Do **NOT** set `run_in_background: true` — foreground parallel tasks return results directly; background tasks require `TaskOutput` polling which is fragile and can lose contact with sub-agents.
 2. Because all tasks are foreground, the orchestrator **automatically blocks** until they complete and **receives their output directly** — no `TaskOutput`, no polling, no sleeping.
 3. **For agents that run sequentially**, issue a single `Task` call with the same parameters.
 
 No team cleanup needed.
-
----
 
 #### Approach C: Sequential Inline Execution (fallback)
 
@@ -160,14 +154,6 @@ If neither `TeamCreate` nor `Task` is available:
 2. Execute its instructions fully within your own context
 3. Complete all output before moving to the next agent
 4. Do NOT blend agent work together — finish one completely before starting the next
-
----
-
-### Important: Foreground, Not Background
-
-**Do NOT use `run_in_background: true`** in Approaches A or B. Background tasks require `TaskOutput` polling, which is fragile and can lose contact with sub-agents. Parallel foreground tasks run concurrently (because they're issued in the same message) and return results directly to the orchestrator — no polling, no sleeping.
-
----
 
 ### User Context Forwarding (CRITICAL)
 
@@ -186,8 +172,6 @@ Format for including user context in sub-agent prompts:
 Append this block to the end of each sub-agent's prompt, after the standard prompt content. If the user provided no additional context, omit this block entirely.
 
 **Why this matters**: The orchestrator seeing actionable instructions (e.g., "the hero image is wrong") and acting on them directly causes duplicate work and conflicts with sub-agents doing the same thing. The orchestrator's role is delegation, not execution.
-
----
 
 ### Dispatch Rules (apply to ALL approaches)
 
@@ -427,13 +411,13 @@ Proceed to Step 6 (Cleanup).
    - On user stop: delete after reporting
    - On unrecoverable REGRESSION: delete after revert
 
-2. **Tear down team (Approach A only)**:
+2. **Tear down team (Agent Teams method only)**:
    If you created a team:
    - Send `shutdown_request` via `SendMessage` to each teammate still active
    - Wait for shutdown confirmations
    - Call `TeamDelete` to remove team resources
 
-   Skip this if you used Approach B or C.
+   Skip this if you used the Parallel Task method or the Sequential Inline fallback.
 
 ### Commit Planning File Changes
 
@@ -467,7 +451,7 @@ These are hard rules. Do not break them:
 
 1. **Fix only the reported issue** — no refactoring, no feature additions, no "improvements"
 2. **DEBUG.md is the shared context file** — agents read from and write to it
-3. **Dispatch to agents** — do NOT investigate, fix, or verify yourself (unless Approach C fallback)
+3. **Dispatch to agents** — do NOT investigate, fix, or verify yourself (unless the Sequential Inline fallback is in effect)
 4. **No PRD task creation** — if you discover new issues, mention them in the report but don't create tasks
 5. **Max 3 iterations** — if you can't fix it in 3 tries, escalate
 6. **Revert on regression** — if a fix makes things worse, undo it immediately

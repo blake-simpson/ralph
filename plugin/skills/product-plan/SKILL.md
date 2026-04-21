@@ -422,74 +422,11 @@ Final: Prompt user to "/clear" and then "/belmont:tech-plan"
 
 ## Important Considerations
 
-- Each task must include verification steps in its `**Verification**:` field (at minimum linting / tsc / test via the project's package manager). These are *criteria* captured inside the task — NOT a separate task.
-- **Do NOT create standalone verification, QA, or testing tasks** (e.g. "Run tests", "Responsive QA", "Cross-Breakpoint Verification", "Unit Tests", "Final verification"). Verification is owned by the `/belmont:verify` skill, which `belmont auto` dispatches automatically after every milestone. It spawns the verification-agent (visual/i18n/a11y/Lighthouse) and code-review-agent (build/test/lint/scope/quality) and creates its own follow-up tasks if issues are found. Implementation-agent also runs build/lint/typecheck/test locally before marking a task `[x]`. A standalone verify task therefore duplicates work that runs at least twice already and inflates progress counts.
-- **Exception:** tasks that set up *new* test infrastructure (e.g. "Configure Playwright", "Add vitest to the project", "Add a visual-regression harness") are legitimate implementation work and SHOULD be their own tasks. The forbidden pattern is tasks whose *body* is "run the checks that the verify agent already runs".
-- Detect blockers/dependencies on tasks and ensure blockers are addressed first
-- Always consider that the follow-up implementation agents communicate through a MILESTONE file. The orchestrator extracts relevant PRD context into this file, and each agent reads from it. Ensure the PRD contains all necessary detail so the orchestrator and agents can extract what they need.
-- It is critical that agents get every piece of information they need
-- List in the plan the relevant available skills the agent should load when implementing
-- When creating milestones, consider the work involved. For example: If design/UI work is required, group it with other design/UI work. This allows the design context to be loaded once and shared amongst that milestones tasks. By the same logic, group backend heavy tasks together and try to skip UI work for that milestone. Some tasks will need both but try your best to split where possible.
-- When milestones can be implemented independently (e.g., separate features that only share a common foundation), add dependency annotations: `### M3: Feature X (depends: M1)`. This enables `belmont auto` to run independent milestones in parallel via git worktrees. If a milestone has no dependency on another, it can run in the same wave. Only add `(depends: ...)` when there's a real dependency — don't over-constrain.
+Guidance on the verification anti-pattern, per-task verification fields, milestone grouping, and dependency annotations is in `references/product-plan-considerations.md`. Read it before breaking the feature down into milestones and tasks.
 
 ## PRD Format
 
-Write the PRD to `{base}/PRD.md` (i.e. `.belmont/features/<slug>/PRD.md`) with this structure:
-
-```markdown
-# PRD: [Feature Name]
-
-## Overview
-[1-2 sentence description]
-
-## Problem Statement
-[What problem does this solve?]
-
-## Success Criteria (Definition of Done)
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Criterion 3
-
-## Acceptance Criteria (BDD)
-
-### Scenario: [Scenario Name]
-Given [context]
-And [more context]
-When [action]
-Then [expected result]
-And [additional assertions]
-
-## Out of Scope
-[What this feature explicitly does NOT include]
-
-## Open Questions
-[Questions that need answers before implementation]
-
-## Clarifications
-[Answers to open questions, added during the planning phase]
-
-## Technical Context (for implementation agents)
-[Add all context needed for follow up agents (Figma URLs, technical decisions from interview, edge cases, conflicts, etc.)]
-
-## Tasks
-[List all sub-tasks required to complete the feature]
-[Provide all information needed for the implementation agents to understand their isolated task]
-
-### P0-1: [Task Name]
-**Severity**: CRITICAL
-
-**Task Description**:
-[Detailed description of the sub-task — what problem this solves and what the user should experience when it's done]
-
-**Solution**:
-[Describe WHAT the task produces from the user's perspective — screens, behaviors, invariants, acceptance conditions, content/copy. Do NOT describe HOW (file paths, components, wrappers, imports, regex syntax, endpoint names) — implementation is the tech-plan's responsibility. If you need to reference a Figma node or external source, do so by id / URL, not by implementation path.]
-
-**Notes**:
-[Notes needed by sub agents. Figma nodes, key product decisions, open questions flagged for the tech-plan step. Avoid technical idioms.]
-
-**Verification**:
-[List of steps to verify the task is complete — user-observable outcomes and acceptance criteria. Leave build/lint/typecheck to the standard verify pipeline.]
-```
+**Read `references/product-plan-prd-format.md` for the full PRD template**, then write it to `{base}/PRD.md` (i.e. `.belmont/features/<slug>/PRD.md`). Fill every section; leave empty placeholders only for "Out of Scope" and "Open Questions" when genuinely empty.
 
 ## PROGRESS Format
 

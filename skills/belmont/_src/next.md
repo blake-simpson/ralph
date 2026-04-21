@@ -89,21 +89,20 @@ Create `{base}/MILESTONE.md` with a focused, lightweight version of the mileston
 ### Current Task
 [Task ID and name — this is the only task being implemented]
 
-### Task Definition
-[Copy the FULL task definition from PRD.md verbatim — including all fields: description, solution, notes, verification, Figma URLs, etc.]
-
-### Relevant Technical Context
-[Extract sections from TECH_PLAN.md that are relevant to this specific task. If no TECH_PLAN exists, write "No TECH_PLAN.md found."]
+### Active Task IDs
+[The single task ID being implemented, e.g. `P1-3`. The implementation-agent will look up the full task definition (description, solution, acceptance criteria, Figma URLs, notes) in {base}/PRD.md.]
 
 ### File Paths
-- **PRD**: {base}/PRD.md
+- **PRD**: {base}/PRD.md — authoritative task definition, acceptance criteria, Figma URLs
+- **TECH_PLAN**: {base}/TECH_PLAN.md — technical specs (if present)
+- **Master TECH_PLAN**: .belmont/TECH_PLAN.md — cross-cutting architecture (if present)
 - **PROGRESS**: {base}/PROGRESS.md
 - **Feature Notes**: {base}/NOTES.md
 - **Global Notes**: .belmont/NOTES.md
 
 ### Scope Boundaries
-- **In Scope**: Only the single task listed above
-- **Out of Scope**: [Copy the PRD's "Out of Scope" section verbatim]
+- **In Scope**: Only the single task ID listed above
+- **Out of Scope**: See the "Out of Scope" section of {base}/PRD.md — nothing outside the listed task ID
 
 ### Learnings from Previous Sessions
 [If `.belmont/NOTES.md` exists, copy its contents here under "#### Global Notes".]

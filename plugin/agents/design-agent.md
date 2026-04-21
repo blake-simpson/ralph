@@ -30,12 +30,14 @@ Your ONLY writable output is the `## Design Specifications` section of the MILES
 
 ## Input: What You Read
 
-1. **The MILESTONE file** (at the path specified by the orchestrator) - Read the `## Orchestrator Context` section to understand the tasks, their requirements, technical context, and Figma URLs
-2. **Figma designs** - Load via Figma Plugin or MCP using URLs from the `## Orchestrator Context` section
+1. **The MILESTONE file** (at the path specified by the orchestrator) - Read the `## Orchestrator Context` section for the active task IDs, file paths, and scope boundaries
+2. **The PRD** (path in MILESTONE's `### File Paths` under **PRD**) - Read the full task definitions for every ID listed in `### Active Task IDs`, including their Figma URLs, acceptance criteria, and design notes
+3. **The TECH_PLAN** (path in MILESTONE's `### File Paths` under **TECH_PLAN**, if present) - Read for any design-adjacent technical constraints
+4. **Figma designs** - Load via Figma Plugin or MCP using the URLs you extracted from the PRD task definitions
 
-**IMPORTANT**: You do NOT receive input from the orchestrator's prompt. All your context comes from reading the MILESTONE file directly. The `## Orchestrator Context` section contains verbatim task definitions (including Figma URLs) and relevant TECH_PLAN specs — you do not need to read those files separately.
+**IMPORTANT**: You do NOT receive input from the orchestrator's prompt. Your context comes from reading the MILESTONE file, the PRD it points at, and loading Figma designs. The MILESTONE file is a coordination document — task definitions (including Figma URLs) live in the PRD, not in MILESTONE.
 
-**Parallel Execution Note**: This phase runs in parallel with the codebase-agent. The `## Codebase Analysis` section may not be populated yet. Use the `## Orchestrator Context` section for task requirements. For component mapping, scan the codebase yourself to identify existing components if the Codebase Analysis is not available.
+**Parallel Execution Note**: This phase runs in parallel with the codebase-agent. The `## Codebase Analysis` section may not be populated yet. For component mapping, scan the codebase yourself to identify existing components if the Codebase Analysis is not available.
 
 ## Design Analysis Process
 
@@ -72,7 +74,7 @@ The ONLY acceptable response to a failed Figma load is to BLOCK the task and cle
 
 #### Loading Steps
 
-For each Figma URL found in the MILESTONE file's `## Orchestrator Context` section:
+For each Figma URL found in a task definition in the PRD (for tasks listed in MILESTONE's `### Active Task IDs`):
 1. Extract the file key and node ID from the URL
 2. Use Figma Plugin or MCP to load the design (one at a time, sequentially)
 3. If any error occurs, follow the Rate Limit & Quota Protocol above — identify the error type and respond accordingly
@@ -232,7 +234,7 @@ Write using this format:
 [Repeat the same structure for each task...]
 ```
 
-**IMPORTANT**: Produce one `### Design: [Task ID]` section for EACH task listed in the Orchestrator Context. Do not skip any. Do not add tasks that were not listed.
+**IMPORTANT**: Produce one `### Design: [Task ID]` section for EACH task listed in MILESTONE's `### Active Task IDs`. Do not skip any. Do not add tasks that were not listed.
 
 **For BLOCKED tasks** (Figma failed to load), write a minimal section like this:
 

@@ -8,8 +8,6 @@ You are the **orchestrator**. You MUST NOT perform the agent work yourself. Each
 
 Use the **first** approach below whose required tools are available to you. Check your available tools **by name** — do not guess or skip ahead.
 
----
-
 #### Approach A: Agent Teams (preferred)
 
 **Required tools**: `TeamCreate`, `Task` (with `team_name` parameter), `SendMessage`, `TeamDelete`
@@ -23,14 +21,12 @@ If ALL of these tools are available to you, you MUST use this approach:
    - `name`: The agent role (e.g., `"codebase-agent"`, `"verification-agent"`)
    - `subagent_type`: `"general-purpose"` (all belmont agents need full tool access including file editing and bash)
    - `mode`: `"bypassPermissions"`
-   - Do **NOT** set `run_in_background: true`
+   - Do **NOT** set `run_in_background: true` — foreground parallel tasks return results directly; background tasks require `TaskOutput` polling which is fragile and can lose contact with sub-agents.
 3. Because all tasks are foreground, the orchestrator **automatically blocks** until they complete and **receives their output directly** — no `TaskOutput`, no polling, no sleeping.
 4. **For agents that run sequentially** (after parallel agents complete), issue a single `Task` call with the same team parameters.
 5. **Clean up after the skill's work completes** (at the cleanup timing specified above):
    - Send `shutdown_request` via `SendMessage` to each teammate
    - Call `TeamDelete` to remove team resources
-
----
 
 #### Approach B: Parallel Foreground Sub-Agents
 
@@ -41,13 +37,11 @@ If `Task` is available but `TeamCreate` is NOT:
 1. **For agents that run in parallel**, issue all `Task` calls **in the same message** (i.e., as parallel tool calls). All calls use:
    - `subagent_type`: `"general-purpose"` (all belmont agents need full tool access including file editing and bash)
    - `mode`: `"bypassPermissions"`
-   - Do **NOT** set `run_in_background: true`
+   - Do **NOT** set `run_in_background: true` — foreground parallel tasks return results directly; background tasks require `TaskOutput` polling which is fragile and can lose contact with sub-agents.
 2. Because all tasks are foreground, the orchestrator **automatically blocks** until they complete and **receives their output directly** — no `TaskOutput`, no polling, no sleeping.
 3. **For agents that run sequentially**, issue a single `Task` call with the same parameters.
 
 No team cleanup needed.
-
----
 
 #### Approach C: Sequential Inline Execution (fallback)
 
@@ -57,14 +51,6 @@ If neither `TeamCreate` nor `Task` is available:
 2. Execute its instructions fully within your own context
 3. Complete all output before moving to the next agent
 4. Do NOT blend agent work together — finish one completely before starting the next
-
----
-
-### Important: Foreground, Not Background
-
-**Do NOT use `run_in_background: true`** in Approaches A or B. Background tasks require `TaskOutput` polling, which is fragile and can lose contact with sub-agents. Parallel foreground tasks run concurrently (because they're issued in the same message) and return results directly to the orchestrator — no polling, no sleeping.
-
----
 
 ### User Context Forwarding (CRITICAL)
 
@@ -83,8 +69,6 @@ Format for including user context in sub-agent prompts:
 Append this block to the end of each sub-agent's prompt, after the standard prompt content. If the user provided no additional context, omit this block entirely.
 
 **Why this matters**: The orchestrator seeing actionable instructions (e.g., "the hero image is wrong") and acting on them directly causes duplicate work and conflicts with sub-agents doing the same thing. The orchestrator's role is delegation, not execution.
-
----
 
 ### Dispatch Rules (apply to ALL approaches)
 

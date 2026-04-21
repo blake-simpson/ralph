@@ -24,13 +24,13 @@ Proceed to Step 6 (Cleanup).
    - On user stop: delete after reporting
    - On unrecoverable REGRESSION: delete after revert
 
-2. **Tear down team (Approach A only)**:
+2. **Tear down team (Agent Teams method only)**:
    If you created a team:
    - Send `shutdown_request` via `SendMessage` to each teammate still active
    - Wait for shutdown confirmations
    - Call `TeamDelete` to remove team resources
 
-   Skip this if you used Approach B or C.
+   Skip this if you used the Parallel Task method or the Sequential Inline fallback.
 
 ### Commit Planning File Changes
 
@@ -64,7 +64,7 @@ These are hard rules. Do not break them:
 
 1. **Fix only the reported issue** — no refactoring, no feature additions, no "improvements"
 2. **DEBUG.md is the shared context file** — agents read from and write to it
-3. **Dispatch to agents** — do NOT investigate, fix, or verify yourself (unless Approach C fallback)
+3. **Dispatch to agents** — do NOT investigate, fix, or verify yourself (unless the Sequential Inline fallback is in effect)
 4. **No PRD task creation** — if you discover new issues, mention them in the report but don't create tasks
 5. **Max 3 iterations** — if you can't fix it in 3 tries, escalate
 6. **Revert on regression** — if a fix makes things worse, undo it immediately
