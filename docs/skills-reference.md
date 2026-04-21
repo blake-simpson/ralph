@@ -9,7 +9,7 @@ Amazon-style Working Backwards document creation. Produces a PR/FAQ with press r
 - Creates external (customer) and internal (stakeholder) FAQs
 - Includes appendix with product backlog, KPIs, and competitive analysis
 - Enforces writing quality: no weasel words, data over adjectives, under 30 words per sentence
-- Scales interview depth to scope via a tier classification (Trivial → Epic) confirmed with the user before Step 1
+- Scales interview depth to the work — calibrates silently from the brief, walks a fixed domain checklist, digs on ambiguity, and skips what's already settled (no round cap, no visible tier)
 - Delegates market, competitor, pricing, and regulatory research to `Explore` / `general-purpose` sub-agents and cites sources in the appendix
 - Does NOT create PRDs or implementation plans — that comes next
 
@@ -19,8 +19,8 @@ Amazon-style Working Backwards document creation. Produces a PR/FAQ with press r
 
 Interactive planning session. Creates the PRD and PROGRESS files. Supports multi-feature products with a master PRD (feature catalog) and per-feature PRDs.
 
-- Classifies task scope up front (Trivial → Epic) and shares the tier with the user before any domain questions; re-tiers mid-interview if new subsystems surface
-- Walks a fixed **Domains to Cover** checklist (user flows, edge cases, accessibility, privacy, notifications, monetization, etc.) — covering every relevant domain, not a fixed number of rounds
+- Calibrates silently from the brief (no visible tier) and walks a fixed **Domains to Cover** checklist (user flows, edge cases, accessibility, privacy, notifications, monetization, etc.) — running as many rounds per domain as the work requires
+- Digs on ambiguity, skips what the brief or prior answers already settle, and only exits when every relevant domain is resolved and the user explicitly confirms nothing more to add
 - Creates structured PRD with prioritized tasks (P0-P3)
 - Organizes tasks into milestones in PROGRESS.md
 - Includes Figma URLs, acceptance criteria, verification steps
@@ -35,8 +35,8 @@ Technical planning session. Creates a detailed implementation specification.
 
 - Requires an existing PRD (run plan first)
 - Acts as a senior architect reviewing and refining the plan
-- Classifies task scope up front (Trivial → Epic) and confirms the tier with the user; re-tiers mid-interview if a new subsystem surfaces
-- Walks a fixed **Domains to Cover** checklist (rendering, data model, auth, observability, testing, CI/CD, migration, etc.), skipping domains already settled by the master tech plan
+- Calibrates silently from the PRD and existing master tech plan (no visible tier) and walks a fixed **Domains to Cover** checklist (rendering, data model, auth, observability, testing, CI/CD, migration, etc.) — skipping domains already settled by the master tech plan or prior answers
+- Runs as many rounds per domain as the work requires; digs on ambiguity and only exits when every relevant domain is resolved
 - Loads Figma designs and extracts exact design tokens
 - Produces concrete file structures, component skeletons, API types
 - Maps PRD tasks to specific code sections

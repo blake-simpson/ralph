@@ -74,9 +74,9 @@ Before starting, read `.belmont/PR_FAQ.md`.
 
 ## Workflow
 
-### Step 0: Set the depth
+### Step 0: Calibrate depth (silently)
 
-Before Step 1, **classify the scope and confirm the tier with the user** (see *Dynamic Questioning Depth* above). A PR/FAQ can be anything from a short single-page alignment doc (Small) to a company-level strategic document with extensive internal FAQs and appendices (Epic). The tier drives how many **Domains to Cover** you interview and how much evidence you need. Kick off research sub-agents whenever a **Research Triggers** signal appears (see *Proactive Research* above) and loop findings back through the structured question tool.
+Before Step 1, silently read the brief and consider which of the **Domains to Cover** apply and where the open questions are (see *Dynamic Questioning Depth* above). A PR/FAQ can range from a short internal alignment doc to a company-level strategic document with extensive internal FAQs and appendices — depth is driven by how many domains are in play and how much ambiguity each one carries, not a pre-announced tier. Do not declare a size to the user; just ask the right questions. Kick off research sub-agents whenever a **Research Triggers** signal appears (see *Proactive Research* above) and loop findings back through the structured question tool.
 
 ### Step 1: Gather Context
 

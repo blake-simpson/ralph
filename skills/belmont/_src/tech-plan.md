@@ -136,11 +136,10 @@ Before starting, verify:
 - If the user says no / skip, proceed directly to interview questions.
 
 ### Phase 3 - Planning (interactive interview style questions)
-- With any upfront context in mind, **classify the scope and confirm the tier with the user** (see *Dynamic Questioning Depth* above). Do this before any domain questions.
-- Walk the **Domains to Cover** checklist. Run one `AskUserQuestion` round per relevant domain that isn't already settled in the master tech plan or by the user's upfront context. Skip already-answered domains — don't re-ask — and mark them as "resolved from master/upfront context" in `## Clarifications`.
+- With any upfront context in mind, **calibrate silently** (see *Dynamic Questioning Depth* above) — decide which domains are in scope and where the open questions are. Do not announce a tier to the user; just start asking.
+- Walk the **Domains to Cover** checklist. For each relevant domain, run as many rounds as it takes to resolve it. Dig on ambiguity; skip what the master tech plan, the PRD, or prior answers already settle. Mark already-resolved domains in `## Clarifications` ("Resolved from master tech plan: ..."). No round cap.
 - When research sub-agents return findings, loop them back through the user via `AskUserQuestion` with options (per *Proactive Research*). Research feeds more questions, not fewer.
-- Re-tier mid-interview if a new subsystem or constraint surfaces.
-- Exit only when the **exit criteria** from the Dynamic Questioning framework are met — every relevant domain covered, user explicitly confirms no more open questions, all answers captured in `## Clarifications` / the Decision Log.
+- Exit only when the **exit criteria** from the Dynamic Questioning framework are met — every relevant domain resolved, every follow-up thread closed, user explicitly confirms nothing more to add, all answers captured in `## Clarifications` / the Decision Log.
 
 #### Question Scope (CRITICAL)
 

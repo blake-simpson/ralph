@@ -135,13 +135,13 @@ If the existing PRD/PROGRESS already contains standalone verification/QA/testing
 ## Process
 
 1. Load relevant skills for the domain (figma:*, frontend-design, vercel-react-best-practices, security, etc.)
-2. Ask the user what they want to build
-3. **Classify scope and confirm tier with the user** (see *Dynamic Questioning Depth* above). Do this before any domain questions.
-4. Walk the **Domains to Cover** checklist. Run one `AskUserQuestion` round per relevant domain. Re-tier mid-interview if new subsystems surface.
+2. Ask the user what they want to build.
+3. **Calibrate silently** (see *Dynamic Questioning Depth* above) — read the brief, decide which domains are in scope, note the obvious unknowns. Do not announce a tier to the user; just start asking.
+4. Walk the **Domains to Cover** checklist. For each relevant domain, run as many rounds as it takes to actually resolve it. Dig on ambiguity; skip what the brief, PRD, or prior answers already settle. No round cap.
 5. **Trigger research proactively** (see *Proactive Research* above) whenever a signal from the **Research Triggers** checklist appears. Delegate deep research to a sub-agent; loop findings back to the user with options.
 6. If Figma design URLs are included, load them inline using Figma MCP tools. Extract design context and add exact Figma URLs to the PRD for future agents to use.
-7. Consider edge cases, dependencies, blockers. Be proactive — suggest questions the user may not have thought to ask.
-8. Verify the **exit criteria** from the Dynamic Questioning framework: every relevant domain covered (or explicitly marked skipped), user confirms no more open questions, all answers captured in `## Clarifications`.
+7. Consider edge cases, dependencies, blockers. Be proactive — surface questions the user may not have thought to ask.
+8. Verify the **exit criteria** from the Dynamic Questioning framework: every relevant domain resolved (or explicitly marked skipped), every follow-up thread closed, user has explicitly confirmed nothing more to add, all answers captured in `## Clarifications`.
 9. Break the feature down into implementable milestones and tasks. Keep milestones small and focused. Group related tasks that can be completed in a single session.
 10. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace). Include a `### Research Notes` subsection in `## Technical Context` if research was performed.
 11. Exit — do NOT start implementation.
