@@ -2319,10 +2319,22 @@ func ensureSymlink(linkPath, target string, isDir bool) error {
 	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
 		return err
 	}
+
+	// Compute a relative target from the link's directory to the target.
+	// Relative symlinks resolve identically in main and in git worktrees, so
+	// the symlink content is byte-identical across trees — prevents merge
+	// conflicts when the same install is re-run from different worktree roots.
+	// If relative computation fails (e.g. different volumes on Windows), fall
+	// back to the absolute target.
+	symlinkTarget := target
+	if rel, err := filepath.Rel(filepath.Dir(linkPath), target); err == nil {
+		symlinkTarget = rel
+	}
+
 	if existing, err := os.Lstat(linkPath); err == nil {
 		if existing.Mode()&os.ModeSymlink != 0 {
 			current, err := os.Readlink(linkPath)
-			if err == nil && current == target {
+			if err == nil && current == symlinkTarget {
 				fmt.Printf("  = %s (symlink ok)\n", linkPath)
 				return nil
 			}
@@ -2340,14 +2352,14 @@ func ensureSymlink(linkPath, target string, isDir bool) error {
 		}
 	}
 
-	if err := os.Symlink(target, linkPath); err != nil {
+	if err := os.Symlink(symlinkTarget, linkPath); err != nil {
 		fmt.Printf("  ! symlink failed for %s (copying instead)\n", linkPath)
 		if isDir {
 			return copyDir(target, linkPath)
 		}
 		return copyFile(target, linkPath)
 	}
-	fmt.Printf("  + %s -> %s\n", linkPath, target)
+	fmt.Printf("  + %s -> %s\n", linkPath, symlinkTarget)
 	return nil
 }
 
@@ -6499,7 +6511,7 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 
 		if f.Confidence == "high" || !interactive || autoAll {
 			// Auto-apply
-			if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+			if err := writeReconciliationResolution(filePath, f.ResolvedContent); err != nil {
 				return fmt.Errorf("write %s: %w", f.File, err)
 			}
 			addCmd := exec.Command("git", "add", f.File)
@@ -6520,7 +6532,7 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 		case "auto":
 			autoAll = true
 			// Apply this file and all remaining
-			if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+			if err := writeReconciliationResolution(filePath, f.ResolvedContent); err != nil {
 				return fmt.Errorf("write %s: %w", f.File, err)
 			}
 			addCmd := exec.Command("git", "add", f.File)
@@ -6531,7 +6543,7 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 		case "accept", "edited":
 			// File already written by reviewConflict for "edited", write for "accept"
 			if choice == "accept" {
-				if err := os.WriteFile(filePath, []byte(f.ResolvedContent), 0644); err != nil {
+				if err := writeReconciliationResolution(filePath, f.ResolvedContent); err != nil {
 					return fmt.Errorf("write %s: %w", f.File, err)
 				}
 			}
@@ -6562,6 +6574,40 @@ func applyReconciliationReport(cfg loopConfig, report reconciliationReport) erro
 	}
 
 	return nil
+}
+
+// writeReconciliationResolution writes a resolved conflict file to disk, handling:
+//   - Missing parent directories (git conflict handling can leave them unpopulated)
+//   - Existing symlinks at the target path (os.WriteFile would follow the symlink
+//     and fail if the symlink is broken or points at a directory)
+//   - Resolved content that is itself a symlink target (short single-line path) —
+//     recreates as a symlink to preserve the original file type
+func writeReconciliationResolution(filePath, content string) error {
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return err
+	}
+
+	// If the existing path is a symlink, remove it so we can decide fresh
+	// whether to write a regular file or recreate a symlink. Otherwise WriteFile
+	// follows the symlink and fails when the target is a dir or a broken path.
+	wasSymlink := false
+	if info, err := os.Lstat(filePath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		wasSymlink = true
+		if err := os.Remove(filePath); err != nil {
+			return err
+		}
+	}
+
+	// If the original was a symlink and the resolved content looks like a
+	// single-line path (no embedded newlines, reasonable length), recreate as
+	// a symlink rather than writing it as a text file.
+	trimmed := strings.TrimSpace(content)
+	if wasSymlink && !strings.ContainsAny(trimmed, "\n\x00") && len(trimmed) > 0 && len(trimmed) < 1024 {
+		return os.Symlink(trimmed, filePath)
+	}
+
+	return os.WriteFile(filePath, []byte(content), 0o644)
 }
 
 // reviewConflict prompts the user to review a low-confidence conflict resolution.
