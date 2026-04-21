@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 ---
 
 # Belmont: Implementation Agent

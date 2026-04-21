@@ -33,9 +33,10 @@ belmont/
 │   └── belmont/
 │       ├── codebase-agent.md    # Codebase scanning agent
 │       ├── design-agent.md      # Figma/design analysis agent
-│       ├── implementation-agent.md  # Implementation agent
+│       ├── implementation-agent.md  # Implementation agent (default: sonnet)
 │       ├── verification-agent.md    # Verification agent
-│       └── code-review-agent.md     # Code review agent
+│       ├── code-review-agent.md     # Code review agent
+│       └── reconciliation-agent.md  # Merge-conflict resolution agent (default: opus)
 ├── scripts/
 │   ├── build.sh                 # Build with embedded content + version injection
 │   ├── release.sh               # Prepare release (changelog + tag)
@@ -89,6 +90,7 @@ your-project/
 │   │       ├── PRD.md
 │   │       ├── TECH_PLAN.md
 │   │       ├── PROGRESS.md
+│   │       ├── models.yaml      # Per-feature model tiers (optional, written by /belmont:tech-plan)
 │   │       └── MILESTONE.md
 │   ├── MILESTONE.md             # Active milestone context (created during implement)
 │   └── MILESTONE-M1.done.md     # Archived milestone (after completion)

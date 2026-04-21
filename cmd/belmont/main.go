@@ -31,6 +31,204 @@ var (
 	BuildDate = "unknown"
 )
 
+// Model tier registry: maps (tool, tier) to the CLI --model identifier.
+// Tiers (low/medium/high) are stable across releases; model IDs get bumped
+// here as tools ship new versions. This is the single source of truth —
+// skill bodies reference the same mapping via _partials/tier-registry.md.
+var modelTiers = map[string]map[string]string{
+	"claude": {
+		"low":    "haiku",
+		"medium": "sonnet",
+		"high":   "opus",
+	},
+	"codex": {
+		"low":    "gpt-5.4-mini",
+		"medium": "gpt-5.3-codex",
+		"high":   "gpt-5.4",
+	},
+	"gemini": {
+		"low":    "gemini-2.5-flash-lite",
+		"medium": "gemini-2.5-flash",
+		"high":   "gemini-2.5-pro",
+	},
+	"cursor": {
+		"low":    "sonnet-4",
+		"medium": "sonnet-4-thinking",
+		"high":   "gpt-5",
+	},
+	"copilot": {
+		"low":    "haiku-4.5",
+		"medium": "claude-sonnet-4.5",
+		"high":   "gpt-5.4",
+	},
+}
+
+// toolSupportsModel indicates whether the tool's CLI accepts --model at all.
+var toolSupportsModel = map[string]bool{
+	"claude":  true,
+	"codex":   true,
+	"gemini":  true,
+	"cursor":  true,
+	"copilot": true,
+}
+
+// planningTier is always used for product-plan and tech-plan invocations.
+// Planning produces the spec downstream agents execute against, so it
+// always runs at the highest-capability tier regardless of per-feature
+// config. Editing this is a deliberate, global decision.
+const planningTier = "high"
+
+// reconciliationDefaultTier is used when no models.yaml is present.
+const reconciliationDefaultTier = "high"
+
+// resolveModelFlags returns the --model <id> flag pair for the given
+// tool+tier, or nil if the tool doesn't support model selection or the
+// tier is unknown/empty. For copilot with no tier, returns --model auto
+// (copilot's explicit "pick a sensible model" token).
+func resolveModelFlags(tool, tier string) []string {
+	if !toolSupportsModel[tool] {
+		return nil
+	}
+	if tier == "" {
+		if tool == "copilot" {
+			return []string{"--model", "auto"}
+		}
+		return nil
+	}
+	tiers, ok := modelTiers[tool]
+	if !ok {
+		return nil
+	}
+	model, ok := tiers[tier]
+	if !ok {
+		return nil
+	}
+	return []string{"--model", model}
+}
+
+// modelTierConfig holds the parsed contents of .belmont/features/<slug>/models.yaml.
+// Empty value is safe to pass everywhere — callers get nil tier strings and fall
+// back to agent-frontmatter defaults.
+type modelTierConfig struct {
+	Profile  string
+	Planning string
+	Tiers    map[string]string // agent name (e.g. "implementation") -> "low"|"medium"|"high"
+}
+
+// parseModelTiers reads .belmont/features/<slug>/models.yaml with a minimal
+// line-based parser. Flat schema only: top-level scalar keys (profile, planning)
+// and one nested map (tiers:). Unknown keys are ignored so users can add comments
+// or extra fields without breaking parse. Stdlib only (no YAML dependency).
+// Returns a zero-value struct if the file does not exist.
+func parseModelTiers(path string) (modelTierConfig, error) {
+	cfg := modelTierConfig{Tiers: map[string]string{}}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return cfg, err
+	}
+	inTiers := false
+	for _, raw := range strings.Split(string(data), "\n") {
+		// Strip # comments (naive — does not support # inside quoted values).
+		line := raw
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		isIndented := strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+		content := strings.TrimSpace(line)
+		if !isIndented {
+			inTiers = false
+			k, v, ok := splitYAMLKV(content)
+			if !ok {
+				continue
+			}
+			switch k {
+			case "profile":
+				cfg.Profile = v
+			case "planning":
+				cfg.Planning = v
+			case "tiers":
+				if v == "" {
+					inTiers = true
+				}
+			}
+			continue
+		}
+		if !inTiers {
+			continue
+		}
+		k, v, ok := splitYAMLKV(content)
+		if !ok || k == "" || v == "" {
+			continue
+		}
+		cfg.Tiers[k] = v
+	}
+	return cfg, nil
+}
+
+// splitYAMLKV splits "key: value" into trimmed parts with quotes stripped.
+func splitYAMLKV(line string) (string, string, bool) {
+	idx := strings.Index(line, ":")
+	if idx < 0 {
+		return "", "", false
+	}
+	k := strings.TrimSpace(line[:idx])
+	v := strings.TrimSpace(line[idx+1:])
+	v = strings.Trim(v, `"'`)
+	return k, v, true
+}
+
+// actionAgent maps a loop action type to the Belmont agent name that runs
+// the heaviest work for that action. Used for tier lookup. Empty string
+// means "no agent mapping" (tier falls through to empty → default model).
+func actionAgent(t loopActionType) string {
+	switch t {
+	case actionImplementMilestone, actionImplementNext, actionFixAll:
+		return "implementation"
+	case actionVerify:
+		return "verification"
+	case actionTriage:
+		return "verification" // triage reads verification output; share its tier
+	case actionReplan:
+		return "" // planning uses planningTier, handled separately
+	default:
+		return ""
+	}
+}
+
+// tierForAction returns the tier label ("low"|"medium"|"high") for the given
+// action under the supplied tier config. Planning actions always return the
+// global planningTier. Agent-mapped actions look up the agent's configured
+// tier. If the agent has no configured tier, returns "" so callers fall back
+// to the tool's default model (no --model flag).
+func tierForAction(t loopActionType, cfg modelTierConfig) string {
+	if t == actionReplan {
+		return planningTier
+	}
+	agent := actionAgent(t)
+	if agent == "" {
+		return ""
+	}
+	if tier, ok := cfg.Tiers[agent]; ok && tier != "" {
+		return tier
+	}
+	return ""
+}
+
+// reconciliationTier returns the tier for reconciliation work given a config,
+// falling back to reconciliationDefaultTier when not specified.
+func reconciliationTier(cfg modelTierConfig) string {
+	if t, ok := cfg.Tiers["reconciliation"]; ok && t != "" {
+		return t
+	}
+	return reconciliationDefaultTier
+}
+
 type taskStatus string
 
 const (
@@ -234,6 +432,7 @@ type loopConfig struct {
 	WorktreeEnv   map[string]string  // extra env vars from worktree.json
 	Tracker       *worktreeTracker   // process group tracker for cleanup on interrupt
 	TrackerID     string             // worktree ID for tracker operations
+	ModelTiers    modelTierConfig    // per-feature model tiers (from .belmont/features/<slug>/models.yaml)
 }
 
 // worktreeHooks defines lifecycle hooks for worktree isolation.
@@ -3084,6 +3283,13 @@ func runAutoCmd(args []string) error {
 		return fmt.Errorf("auto: feature %q not found at %s", cfg.Feature, featureDir)
 	}
 
+	// Load per-feature model tiers (if models.yaml exists)
+	tiers, tierErr := parseModelTiers(filepath.Join(featureDir, "models.yaml"))
+	if tierErr != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ failed to parse models.yaml: %s — falling back to defaults\033[0m\n", tierErr)
+	}
+	cfg.ModelTiers = tiers
+
 	// Read milestones and check for dependency syntax
 	progressPath := filepath.Join(absRoot, ".belmont", "features", cfg.Feature, "PROGRESS.md")
 	progressContent, err := os.ReadFile(progressPath)
@@ -3739,6 +3945,11 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		mCfg.WorktreeEnv = hooks.Env
 	}
 
+	// Load per-feature model tiers from the worktree's copy of models.yaml.
+	if t, err := parseModelTiers(filepath.Join(wtPath, ".belmont", "features", slug, "models.yaml")); err == nil {
+		mCfg.ModelTiers = t
+	}
+
 	return runLoop(mCfg)
 }
 
@@ -4337,25 +4548,35 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 		return executeTriageAction(cfg)
 	}
 
+	modelFlags := resolveModelFlags(cfg.Tool, tierForAction(action.Type, cfg.ModelTiers))
+
 	var cmd *exec.Cmd
 	switch cfg.Tool {
 	case "claude":
-		cmd = exec.Command("claude", "-p", prompt,
+		args := []string{"-p", prompt,
 			"--permission-mode", "bypassPermissions",
 			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
-			"--output-format", "stream-json", "--verbose")
+			"--output-format", "stream-json", "--verbose"}
+		args = append(args, modelFlags...)
+		cmd = exec.Command("claude", args...)
 	case "codex":
-		cmd = exec.Command("codex", "exec", prompt,
+		args := []string{"exec", prompt,
 			"--dangerously-bypass-approvals-and-sandbox",
-			"--json", "-C", cfg.Root)
+			"--json", "-C", cfg.Root}
+		args = append(args, modelFlags...)
+		cmd = exec.Command("codex", args...)
 	case "gemini":
-		cmd = exec.Command("gemini", prompt,
-			"--yolo", "--output-format", "json")
+		args := []string{prompt, "--yolo", "--output-format", "json"}
+		args = append(args, modelFlags...)
+		cmd = exec.Command("gemini", args...)
 	case "copilot":
-		cmd = exec.Command("copilot", "-p", prompt, "--yolo")
+		args := []string{"-p", prompt, "--yolo"}
+		args = append(args, modelFlags...)
+		cmd = exec.Command("copilot", args...)
 	case "cursor":
-		cmd = exec.Command("cursor", "agent", "-p", prompt,
-			"--force", "--output-format", "json")
+		args := []string{"agent", "-p", prompt, "--force", "--output-format", "json"}
+		args = append(args, modelFlags...)
+		cmd = exec.Command("cursor", args...)
 	default:
 		return executionResult{Success: false, Error: fmt.Sprintf("unsupported tool: %s", cfg.Tool)}
 	}
@@ -4484,7 +4705,8 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 		prompt = buf.String()
 	}
 
-	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	triageFlags := resolveModelFlags(cfg.Tool, tierForAction(actionTriage, cfg.ModelTiers))
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, triageFlags...)
 
 	// Worktree isolation: inject env vars and set process group
 	if cfg.Port != 0 {
@@ -5267,7 +5489,9 @@ Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"...
 		prompt = buf.String()
 	}
 
-	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root)
+	// AI decision calls are short classification tasks — use the low tier.
+	decisionFlags := resolveModelFlags(cfg.Tool, "low")
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, decisionFlags...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("tool execution: %w (output: %s)", err, truncateTail(string(output), 200))
@@ -5319,17 +5543,23 @@ func buildToolCommand(tool, prompt, root string, extraFlags ...string) *exec.Cmd
 		args = append(args, extraFlags...)
 		cmd = exec.Command("claude", args...)
 	case "codex":
-		cmd = exec.Command("codex", "exec", prompt,
+		args := []string{"exec", prompt,
 			"--dangerously-bypass-approvals-and-sandbox",
-			"--json", "-C", root)
+			"--json", "-C", root}
+		args = append(args, extraFlags...)
+		cmd = exec.Command("codex", args...)
 	case "gemini":
-		cmd = exec.Command("gemini", prompt,
-			"--yolo", "--output-format", "json")
+		args := []string{prompt, "--yolo", "--output-format", "json"}
+		args = append(args, extraFlags...)
+		cmd = exec.Command("gemini", args...)
 	case "copilot":
-		cmd = exec.Command("copilot", "-p", prompt, "--yolo")
+		args := []string{"-p", prompt, "--yolo"}
+		args = append(args, extraFlags...)
+		cmd = exec.Command("copilot", args...)
 	case "cursor":
-		cmd = exec.Command("cursor", "agent", "-p", prompt,
-			"--force", "--output-format", "json")
+		args := []string{"agent", "-p", prompt, "--force", "--output-format", "json"}
+		args = append(args, extraFlags...)
+		cmd = exec.Command("cursor", args...)
 	default:
 		cmd = exec.Command("echo", "unsupported tool")
 	}
@@ -6245,6 +6475,11 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 		mCfg.WorktreeEnv = hooks.Env
 	}
 
+	// Load per-feature model tiers from the worktree's copy of models.yaml.
+	if t, err := parseModelTiers(filepath.Join(wtPath, ".belmont", "features", cfg.Feature, "models.yaml")); err == nil {
+		mCfg.ModelTiers = t
+	}
+
 	return runLoop(mCfg)
 }
 
@@ -6407,8 +6642,9 @@ RULES:
 9. Include ALL conflicted files in the report
 10. When in doubt, mark "unresolvable" — blocking is safer than losing work`, conflictedFiles, milestoneID, branch, reportPath)
 
-	// Use Opus for reconciliation — needs strong reasoning for merge conflict analysis
-	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, "--model", "claude-opus-4-6")
+	// Reconciliation needs strong reasoning — use configured tier (defaults to high).
+	flags := resolveModelFlags(cfg.Tool, reconciliationTier(cfg.ModelTiers))
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, flags...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
@@ -6733,8 +6969,9 @@ Rules:
 
 Read each conflicted file, resolve the conflict markers by combining both sides, write the resolved version, and git add it.`, conflictedFiles, milestoneID, branch)
 
-	// Use Opus for reconciliation — needs strong reasoning for merge conflict analysis
-	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, "--model", "claude-opus-4-6")
+	// Reconciliation needs strong reasoning — use configured tier (defaults to high).
+	flags := resolveModelFlags(cfg.Tool, reconciliationTier(cfg.ModelTiers))
+	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, flags...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
@@ -7793,6 +8030,10 @@ func runReverifyCmd(args []string) error {
 	}
 	results := make([]msResult, 0, len(targets))
 
+	// Load per-feature model tiers once; reverify maps to the verification agent tier.
+	tiers, _ := parseModelTiers(filepath.Join(featuresDir, feature, "models.yaml"))
+	verifyModelFlags := resolveModelFlags(tool, tiers.Tiers["verification"])
+
 	for i, m := range targets {
 		fmt.Fprintf(os.Stderr, "━━ [%d/%d] VERIFY ━━ %s › %s: %s ━━\n", i+1, len(targets), feature, m.ID, m.Name)
 
@@ -7804,22 +8045,30 @@ func runReverifyCmd(args []string) error {
 		var cmd *exec.Cmd
 		switch tool {
 		case "claude":
-			cmd = exec.Command("claude", "-p", prompt,
+			args := []string{"-p", prompt,
 				"--permission-mode", "bypassPermissions",
 				"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
-				"--output-format", "stream-json", "--verbose")
+				"--output-format", "stream-json", "--verbose"}
+			args = append(args, verifyModelFlags...)
+			cmd = exec.Command("claude", args...)
 		case "codex":
-			cmd = exec.Command("codex", "exec", prompt,
+			args := []string{"exec", prompt,
 				"--dangerously-bypass-approvals-and-sandbox",
-				"--json", "-C", root)
+				"--json", "-C", root}
+			args = append(args, verifyModelFlags...)
+			cmd = exec.Command("codex", args...)
 		case "gemini":
-			cmd = exec.Command("gemini", prompt,
-				"--yolo", "--output-format", "json")
+			args := []string{prompt, "--yolo", "--output-format", "json"}
+			args = append(args, verifyModelFlags...)
+			cmd = exec.Command("gemini", args...)
 		case "copilot":
-			cmd = exec.Command("copilot", "-p", prompt, "--yolo")
+			args := []string{"-p", prompt, "--yolo"}
+			args = append(args, verifyModelFlags...)
+			cmd = exec.Command("copilot", args...)
 		case "cursor":
-			cmd = exec.Command("cursor", "agent", "-p", prompt,
-				"--force", "--output-format", "json")
+			args := []string{"agent", "-p", prompt, "--force", "--output-format", "json"}
+			args = append(args, verifyModelFlags...)
+			cmd = exec.Command("cursor", args...)
 		default:
 			return fmt.Errorf("reverify: unsupported tool: %s", tool)
 		}

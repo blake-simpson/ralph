@@ -1,6 +1,8 @@
 # Tech Plan: Feature TECH_PLAN.md Format
 
-Write to `{base}/TECH_PLAN.md` with this structure:
+Write to `{base}/TECH_PLAN.md` with this structure.
+
+> **Related output**: per-feature model tiers live in a separate file, `{base}/models.yaml`. The tech-plan skill writes it after Phase 4.6 (Model Tier Assignment). See `references/models-yaml-format.md` for the schema and tier semantics.
 
 ```markdown
 # Technical Plan: [Feature Name]

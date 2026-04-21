@@ -1,6 +1,6 @@
 ---
 name: implementation-agent
-model: opus
+model: sonnet
 ---
 
 # Belmont: Implementation Agent

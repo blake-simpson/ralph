@@ -156,6 +156,29 @@ If neither `TeamCreate` nor `Task` is available:
 3. Complete all output before moving to the next agent
 4. Do NOT blend agent work together — finish one completely before starting the next
 
+### Model Tier Overrides (Claude Code only)
+
+Each Belmont agent has a default model in its frontmatter (`model: sonnet` / `model: opus`). When running on Claude Code with Approach A or B, you can override that default per-dispatch via the Task tool's `model:` parameter — this takes precedence over frontmatter.
+
+**When to pass `model:`**: read `.belmont/features/<slug>/models.yaml` at start-of-skill (if it exists) and translate each agent's tier into the appropriate model alias for this session:
+
+- `low` → `haiku`
+- `medium` → `sonnet`
+- `high` → `opus`
+
+Then include `model: "<alias>"` in the Task call for each agent whose tier appears in `models.yaml`. Agents not listed in `models.yaml` inherit their frontmatter default — do NOT pass `model:` for those.
+
+Example (Approach A):
+```
+Task(team_name: "...", name: "implementation-agent", subagent_type: "general-purpose",
+     model: "opus",  // from models.yaml: tiers.implementation = high
+     mode: "bypassPermissions", prompt: "...")
+```
+
+**If `models.yaml` is absent**, omit `model:` entirely — agent frontmatter defaults apply.
+
+**Non-Claude CLIs** (Codex, Gemini, Cursor, Copilot): they don't have a Task-tool-style sub-agent dispatch, so mid-session model override is impossible. Use the preflight partial (`tier-preflight.md`) instead, which surfaces a warning if the session model doesn't match the tier the skill expects.
+
 ### User Context Forwarding (CRITICAL)
 
 When the user provides **additional instructions or context** alongside the skill invocation (e.g., `/belmont:verify The hero image is wrong...`), you MUST:

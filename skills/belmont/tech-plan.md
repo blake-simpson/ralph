@@ -257,6 +257,7 @@ Kick off a research sub-agent (per the Proactive Research framework above) when 
 - Asking the user questions
 - Writing to `.belmont/TECH_PLAN.md` (master tech plan — create or update)
 - Writing to `{base}/TECH_PLAN.md` (feature tech plan — primary output)
+- Writing to `{base}/models.yaml` (per-feature model tiers — see Phase 4.6)
 - Updating `{base}/PRD.md` and `{base}/PROGRESS.md` if new tasks discovered
 - Using WebFetch for inline lookups of single user-provided URLs or specific docs pages
 - Spawning `Explore` or `general-purpose` sub-agents for deep web research (see Proactive Research)
@@ -439,6 +440,38 @@ Before saying "Tech plan complete.", walk this checklist. Skipping it is the #1 
 5. **PROGRESS dependency annotations** — Ensure `(depends: M<n>)` annotations on milestone headings in `{base}/PROGRESS.md` match the TECH_PLAN's `## Implementation Order` section. If the TECH_PLAN says "M2 is independent of M1" but PROGRESS has `### M2: ... (depends: M1)`, fix the PROGRESS annotation.
 
 6. **Report** — Tell the user the list of PRD/PROGRESS edits you made during reconciliation. Short bullet list is fine.
+
+### Phase 4.6 - Model Tier Assignment (MANDATORY)
+
+Decide per-agent model tiers for this feature so downstream work uses the right-capability model per domain. Tiers are user-facing (`low`/`medium`/`high`); the Belmont CLI maps them to the correct model ID for whichever AI CLI is in use.
+
+1. **Reason about the effort profile from the tech-plan you just wrote** — what will the design-agent actually do on this feature? How much visual matching will verification need? Is the implementation work novel or boilerplate? Pick a free-form profile label that fits (`frontend-heavy`, `backend-heavy`, `fullstack`, `infra`, `docs`, `research`, `refactor`, or anything else that describes this feature).
+
+2. **Pick a starting recommendation for each agent** — `codebase`, `design`, `implementation`, `verification`, `code-review`, `reconciliation`. Base the pick on what that agent will concretely do for THIS feature, not a pattern-match to the profile label. The reference file `references/models-yaml-format.md` lists a few loose starting-point examples (frontend-heavy features *typically* warrant design=high + verification=high, etc.), but these are illustrative, not definitive — exercise judgment.
+
+3. **Confirm with the user via `AskUserQuestion`**. Present the recommendation as a compact table in the question body and offer three options:
+   - (a) Accept recommendation as-is.
+   - (b) Adjust specific agents — follow up with per-agent `AskUserQuestion` prompts for the ones the user wants to change (each with low/medium/high options).
+   - (c) Accept Belmont defaults — skip writing `models.yaml` so agent frontmatter (Sonnet for most, Opus for reconciliation) applies.
+
+4. **Write `.belmont/features/<slug>/models.yaml`** if the user picked (a) or (b). Format:
+   ```yaml
+   # Generated during /belmont:tech-plan. Safe to hand-edit.
+   profile: <your free-form label>
+   planning: high
+   tiers:
+     codebase: <low|medium|high>
+     design: <low|medium|high>
+     implementation: <low|medium|high>
+     verification: <low|medium|high>
+     code-review: <low|medium|high>
+     reconciliation: <low|medium|high>
+   ```
+   If the user picked (c), do NOT create the file (or explicitly delete it if one exists from a prior session) so the runtime falls back to agent-frontmatter defaults.
+
+5. **Log the rationale** in the `## Decisions Log` section of `{base}/PROGRESS.md` — one line per agent that deviates from Sonnet, plus the profile label.
+
+6. **Note to the user**: mention that the reconciliation tier applies at merge-time (not per-milestone), and that `planning` is always `high` by design.
 
 ### Commit Planning File Changes
 

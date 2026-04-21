@@ -74,6 +74,7 @@ git push origin main --tags
 - **`--from`/`--to` is single-feature only**: Milestone range flags (`--from`, `--to`) are blocked in multi-feature mode (`--features`, `--all`) because milestone IDs (M1, M3, etc.) are local to each feature — the same ID means different things across features.
 - **Ports: primary vs additional servers**: `PORT`/`BELMONT_PORT` is allocated by the Go CLI for the primary dev server (frameworks auto-detect it). All other servers (Storybook, Prisma Studio, etc.) must dynamically allocate their own free port at runtime — this is handled by agent instructions, not Go code. See `_partials/worktree-awareness.md`.
 - **Unified state tracking**: PROGRESS.md is the single source of truth for all task/milestone state. PRD.md is a pure spec with no status markers. See "State Tracking" section below.
+- **Per-feature model tiers**: each feature may carry a `.belmont/features/<slug>/models.yaml` that maps agents (codebase / design / implementation / verification / code-review / reconciliation) to `low` / `medium` / `high` tiers. The `cmd/belmont/main.go` registry (`modelTiers`) translates tiers to CLI-specific model IDs; planning phases always force `high` via the `planningTier` constant. Absent file → agent frontmatter defaults apply. Skill-side dispatch honors tiers via the Task tool's `model:` parameter on Claude; other CLIs get a preflight warning (see `skills/belmont/_partials/tier-preflight.md`). `cmd/belmont/main.go` must remain stdlib-only — the YAML parser is hand-rolled for this flat schema.
 
 ## State Tracking
 

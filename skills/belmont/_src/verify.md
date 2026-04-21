@@ -18,11 +18,22 @@ Read these files first:
 - `{base}/PROGRESS.md` - Current progress tracking
 - `{base}/TECH_PLAN.md` - Technical implementation plan (if exists)
 - `.belmont/TECH_PLAN.md` - Master tech plan for architecture context (if in feature mode and exists)
+- `{base}/models.yaml` - Per-feature model tiers (if exists — see "Model Tiers" below)
 
 Also check for archived MILESTONE files (`{base}/MILESTONE-*.done.md`) — these contain the implementation context from the most recent milestone and can provide useful reference for verification.
 
 Optional helper:
 - If the CLI is available, `belmont status --format json` can provide a quick summary of completed tasks. Still read the files above for full context.
+
+## Model Tiers
+
+Per-agent model tiers (low/medium/high) are defined in `{base}/models.yaml`. If that file is absent, each agent uses its frontmatter default (Sonnet for most) and you can skip the rest of this section.
+
+<!-- @include tier-registry.md -->
+
+<!-- @include tier-preflight.md -->
+
+When dispatching the verification-agent and code-review-agent below, apply the tier overrides per `dispatch-strategy.md → Model Tier Overrides`. Specifically: if `models.yaml` lists `tiers.verification` or `tiers.code-review`, include `model: "<alias>"` in the corresponding Task call using the tier-registry mapping. Agents not listed inherit their frontmatter default — do NOT pass `model:` for those.
 
 ## Focused Re-verification Mode
 

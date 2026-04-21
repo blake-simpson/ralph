@@ -357,7 +357,8 @@ If the existing PRD/PROGRESS already contains standalone verification/QA/testing
 8. Verify the **exit criteria** from the Dynamic Questioning framework: every relevant domain resolved (or explicitly marked skipped), every follow-up thread closed, user has explicitly confirmed nothing more to add, all answers captured in `## Clarifications`.
 9. Break the feature down into implementable milestones and tasks. Keep milestones small and focused. Group related tasks that can be completed in a single session.
 10. Write the finalized PRD.md and PROGRESS.md (in UPDATE mode, only add/modify — never replace). Include a `### Research Notes` subsection in `## Technical Context` if research was performed.
-11. Exit — do NOT start implementation.
+11. **Effort-profile hint (optional)**: if the feature is obviously heavy in a specific domain (frontend visual match, novel backend logic, infra/plumbing, docs-only, etc.), note this as a one-liner in the PRD under `## Technical Context` — e.g. "Effort profile (hint): frontend-heavy, heavy Figma fidelity." This is a hint only — tech-plan is authoritative for per-agent model tier assignment (see `/belmont:tech-plan` Phase 4.6). Do NOT pick tiers yourself.
+12. Exit — do NOT start implementation.
 
 ## Question Scope (CRITICAL)
 

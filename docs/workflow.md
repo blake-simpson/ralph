@@ -59,6 +59,7 @@ Other:        Load skills/belmont/tech-plan.md as context
 - AI reads the PRD and explores the codebase
 - Interactive discussion about architecture, patterns, edge cases
 - AI writes `.belmont/TECH_PLAN.md` with file structures, component specs, API types
+- AI assesses per-agent effort (codebase / design / implementation / verification / code-review / reconciliation) and proposes **model tiers** — `low` / `medium` / `high` per agent. You confirm or adjust; the choice is written to `.belmont/features/<slug>/models.yaml`. If you accept Belmont defaults, no file is written and the runtime falls back to agent frontmatter (Sonnet for most, Opus for reconciliation). See `skills/belmont/references/models-yaml-format.md` for the schema and tier → model mapping per CLI.
 
 ## 4. Implement
 

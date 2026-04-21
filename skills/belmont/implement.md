@@ -59,9 +59,61 @@ Read these files first:
 - `.belmont/TECH_PLAN.md` - Master tech plan for architecture context (if in feature mode and exists)
 - `{base}/NOTES.md` - Feature-level learnings from previous sessions (if exists)
 - `.belmont/NOTES.md` - Global learnings from previous sessions (if exists)
+- `{base}/models.yaml` - Per-feature model tiers (if exists — see "Model Tiers" below)
 
 Optional helper:
 - If the CLI is available, `belmont status --format json` can provide a quick summary of milestones/tasks. Still read the files above for full context.
+
+## Model Tiers
+
+Per-agent model tiers (low/medium/high) are defined in `{base}/models.yaml`. If that file is absent, each agent uses its frontmatter default (Sonnet for most, Opus for reconciliation) and you can skip the rest of this section.
+
+### Model Tier Registry
+
+Belmont uses three user-facing tiers — `low`, `medium`, `high` — which map to concrete model identifiers per AI CLI. When you need to pass a model override explicitly (see `dispatch-strategy.md` Model Tier Overrides or `tier-preflight.md`), translate via this table.
+
+| Tier   | Claude  | Codex          | Gemini                | Cursor             | Copilot              |
+|--------|---------|----------------|-----------------------|--------------------|----------------------|
+| low    | haiku   | gpt-5.4-mini   | gemini-2.5-flash-lite | sonnet-4           | haiku-4.5            |
+| medium | sonnet  | gpt-5.3-codex  | gemini-2.5-flash      | sonnet-4-thinking  | claude-sonnet-4.5    |
+| high   | opus    | gpt-5.4        | gemini-2.5-pro        | gpt-5              | gpt-5.4              |
+
+The canonical source is the `modelTiers` map in `cmd/belmont/main.go`. If this table drifts from the Go registry, the Go registry wins — file an issue and update this partial. `scripts/generate-skills.sh --check` is the place to add a drift guard.
+
+### Model Tier Preflight (non-Claude CLIs)
+
+Non-Claude CLIs (Codex, Gemini, Cursor, Copilot) run the entire skill in a single top-level session at whichever model the session was started with — there's no sub-agent dispatch to override mid-session. Before doing any heavy work, compare the **required tier** for the current skill to the **session's current model** and surface a warning if they diverge. Do NOT block execution; let the user decide.
+
+**Workflow at start-of-skill (non-Claude only)**:
+
+1. **Read** `.belmont/features/<slug>/models.yaml`. If absent, skip this preflight (defaults apply).
+2. **Determine the required tier for this skill**:
+   - `implement` → `tiers.implementation`
+   - `verify` → `tiers.verification`
+   - `code-review` (if applicable) → `tiers.code-review`
+   - others → skip preflight unless the skill specifies its own tier.
+3. **Map the required tier to a model ID for the current CLI** using `tier-registry.md`.
+4. **Compare to the session's current model**:
+   - Codex: run `/model` or check session settings.
+   - Gemini: check `/model`.
+   - Cursor: check `/model`.
+   - Copilot: check `/model`.
+5. **If they diverge**, print this warning block before doing any further work:
+
+   ```
+   ⚠ Model tier mismatch
+   models.yaml says this phase should run at <tier> (<expected-model-id>).
+   Your session is currently on <current-model-id>.
+   To honor the tier, restart with: <cli> --model <expected-model-id>
+   Continuing with the current model. Re-dispatching sub-agents with a
+   different model is not supported on this CLI.
+   ```
+
+6. **Proceed with the skill**. The warning is informational; it never blocks execution.
+
+**Why this is acceptable graceful degradation**: the user chose this CLI knowing it doesn't support per-agent dispatch. The warning gives them a one-command fix if they want tier adherence; otherwise the work proceeds at the session's model. Only Claude Code supports true per-agent overrides — see `dispatch-strategy.md` Model Tier Overrides for that path.
+
+When dispatching sub-agents (Step 3 below), apply the tier overrides per `dispatch-strategy.md → Model Tier Overrides`. Specifically: for each Task call, if the corresponding agent has an entry in `models.yaml` `tiers:`, include `model: "<alias>"` in the Task call using the tier-registry mapping. Agents not listed in `models.yaml` inherit their frontmatter default — do NOT pass `model:` for those.
 
 ## Step 1: Find Next Milestone
 
@@ -144,6 +196,29 @@ If neither `TeamCreate` nor `Task` is available:
 2. Execute its instructions fully within your own context
 3. Complete all output before moving to the next agent
 4. Do NOT blend agent work together — finish one completely before starting the next
+
+### Model Tier Overrides (Claude Code only)
+
+Each Belmont agent has a default model in its frontmatter (`model: sonnet` / `model: opus`). When running on Claude Code with Approach A or B, you can override that default per-dispatch via the Task tool's `model:` parameter — this takes precedence over frontmatter.
+
+**When to pass `model:`**: read `.belmont/features/<slug>/models.yaml` at start-of-skill (if it exists) and translate each agent's tier into the appropriate model alias for this session:
+
+- `low` → `haiku`
+- `medium` → `sonnet`
+- `high` → `opus`
+
+Then include `model: "<alias>"` in the Task call for each agent whose tier appears in `models.yaml`. Agents not listed in `models.yaml` inherit their frontmatter default — do NOT pass `model:` for those.
+
+Example (Approach A):
+```
+Task(team_name: "...", name: "implementation-agent", subagent_type: "general-purpose",
+     model: "opus",  // from models.yaml: tiers.implementation = high
+     mode: "bypassPermissions", prompt: "...")
+```
+
+**If `models.yaml` is absent**, omit `model:` entirely — agent frontmatter defaults apply.
+
+**Non-Claude CLIs** (Codex, Gemini, Cursor, Copilot): they don't have a Task-tool-style sub-agent dispatch, so mid-session model override is impossible. Use the preflight partial (`tier-preflight.md`) instead, which surfaces a warning if the session model doesn't match the tier the skill expects.
 
 ### User Context Forwarding (CRITICAL)
 
