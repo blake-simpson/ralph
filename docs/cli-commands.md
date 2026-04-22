@@ -26,10 +26,47 @@ belmont recover --list                   # Same as above
 belmont recover --merge auth             # Retry merge for a preserved worktree
 belmont recover --clean auth             # Delete worktree and branch
 belmont recover --clean-all              # Clean all preserved worktrees
+belmont steer --message "pin all axes"   # Inject instructions into an in-flight auto run
+belmont steer --milestone M5 --file fix.md   # Scope to one milestone, read from file
+belmont steer -                          # Read steering text from stdin
+belmont steer                            # Opens $EDITOR when a TTY is attached
 belmont version                         # Show version, commit, build date
 # Note: "belmont loop" still works as an alias for "belmont auto"
 # If a previous run was interrupted, auto detects stale branches and prompts to resume or restart
 ```
+
+## Steering a running auto run
+
+`belmont steer` is the way to hand new instructions to an `auto` run that's
+already in progress — headless agent invocations never see stdin, so typing
+into the terminal does nothing. The command appends a pending entry to
+`STEERING.md` inside each active worktree (or the master feature directory
+for non-parallel runs). Before the next agent phase fires, the auto loop
+reads any matching entries and prepends them to the agent's prompt as a
+high-priority block (higher than `NOTES.md`).
+
+Lifecycle:
+
+- Consumed entries are **dropped from disk** — they don't accumulate inside
+  `STEERING.md`. When the last pending entry is consumed the file is
+  deleted, so agents that explore `.belmont/features/<slug>/` never
+  re-read steering text that's already been injected into the prompt.
+- The durable audit trail lives in the auto run's stderr stream — look for
+  `[feature][milestone]: [STEERING] injected N instruction(s) — "…"`
+  lines with their timestamps.
+
+Rules:
+
+- Only works while `belmont auto` has an active `.belmont/auto.json`.
+  Manual CLI sessions are steered by typing directly into the running
+  terminal.
+- With no `--milestone`, writes to every active worktree for the feature.
+- With `--milestone M5`, writes only to that milestone's worktree.
+- Exactly one input source is required: `--message "text"`, `--file PATH`,
+  `-` (stdin), or no source with `$EDITOR` set and a TTY attached.
+- `copyBelmontStateToWorktree` preserves `STEERING.md` across the
+  resume-time state refresh, so steering you drop before resuming a
+  preserved worktree survives.
 
 ## Worktree Environment Variables
 

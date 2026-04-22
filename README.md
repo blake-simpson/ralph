@@ -371,6 +371,11 @@ belmont reverify --feature my-feature --from M3 --to M10
 
 # Sync master PROGRESS.md with actual feature states
 belmont sync
+
+# Steer an in-flight auto run — injects instructions into active worktrees
+belmont steer --message "pin the ital and MONO axes too"
+belmont steer --milestone M5 --file fix-notes.md
+belmont steer -   # read from stdin; or run with no source for $EDITOR
 ```
 
 The auto command auto-detects which AI tool CLI you have installed (Claude Code, Codex, Gemini, Copilot, Cursor) and shells out to it in headless mode. Override with `--tool`.

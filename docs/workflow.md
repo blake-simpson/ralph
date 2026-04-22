@@ -159,6 +159,36 @@ After implementing a milestone:
 - Run `/belmont:status` to check progress
 - Continue until all milestones are complete
 
+## 9b. Steering an auto run mid-flight
+
+When `belmont auto` is running and you want to hand the agent a new piece
+of context — a fix direction, a "don't keep retrying this" guard, a
+reminder about project conventions — use `belmont steer`:
+
+```bash
+belmont steer --message "pin the ital and MONO axes too when regenerating fonts"
+belmont steer --milestone M5 --file fix-notes.md
+cat instructions.md | belmont steer --feature my-feature -
+belmont steer   # no source → opens $EDITOR (when attached to a TTY)
+```
+
+Each call appends a pending entry to `STEERING.md` inside the relevant
+worktree(s). Before the next agent phase fires, the auto loop consumes
+matching entries and prepends them to the agent prompt as an URGENT
+block (higher priority than NOTES.md). Consumed entries are dropped
+from disk and `STEERING.md` is deleted once nothing pending remains —
+the live file only exists while there's something an agent hasn't
+seen yet, so skills exploring `.belmont/features/<slug>/` never
+re-read steering text that's already been injected into the prompt.
+The durable audit lives in the auto run's stderr stream (the
+`[STEERING] injected …` line with timestamps). Entries with no
+`--milestone` broadcast across every active worktree; `--milestone
+M5` targets one.
+
+Steering only works while an auto run is active (i.e. `.belmont/auto.json`
+is present). Manual skill sessions are steered by typing directly into
+the terminal — no sidecar needed.
+
 ## 10. Cleanup
 
 When your project has accumulated completed features and stale state:

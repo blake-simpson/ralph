@@ -617,6 +617,8 @@ func main() {
 		must(runUpdate(os.Args[2:]))
 	case "recover":
 		must(runRecover(os.Args[2:]))
+	case "steer":
+		must(runSteerCmd(os.Args[2:]))
 	case "reverify":
 		must(runReverifyCmd(os.Args[2:]))
 	case "sync":
@@ -645,6 +647,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont reverify [--feature SLUG] [--from M1] [--to M5] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont sync [--root PATH]")
 	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--tool claude|codex|gemini|copilot|cursor] [--root PATH] [--format text|json]")
+	fmt.Fprintln(w, "  belmont steer [--feature SLUG] [--milestone M5] [--message \"text\" | --file PATH | -] [--root PATH]")
 	fmt.Fprintln(w, "  belmont version")
 }
 
@@ -4543,9 +4546,22 @@ func describeMilestone(action *loopAction, report statusReport) string {
 func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	prompt := buildLoopPrompt(action, cfg.Feature)
 
+	// Consume any pending user steering for this milestone. Runs before any
+	// shell-out so a single injection maps to one agent run — the auto loop
+	// re-enters the same milestone across phases and we don't want the same
+	// instruction to fire repeatedly.
+	steeringBlock, steeringCount := consumePendingSteering(cfg.Root, cfg.Feature, action.MilestoneID, string(action.Type))
+	if steeringCount > 0 {
+		logSteeringInjection(cfg.Feature, action.MilestoneID, steeringCount, steeringBlock)
+	}
+
 	// Triage uses its own prompt template
 	if action.Type == actionTriage {
-		return executeTriageAction(cfg)
+		return executeTriageAction(cfg, steeringBlock)
+	}
+
+	if steeringCount > 0 {
+		prompt = steeringBlock + prompt
 	}
 
 	modelFlags := resolveModelFlags(cfg.Tool, tierForAction(action.Type, cfg.ModelTiers))
@@ -4675,7 +4691,8 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 }
 
 // executeTriageAction runs the triage prompt template as a full tool-equipped invocation.
-func executeTriageAction(cfg loopConfig) executionResult {
+// steeringPrefix, if non-empty, is prepended to the prompt before the template body.
+func executeTriageAction(cfg loopConfig, steeringPrefix string) executionResult {
 	featureBase := filepath.Join(".belmont", "features", cfg.Feature)
 
 	// Determine fix round from milestone states
@@ -4703,6 +4720,10 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 			return executionResult{Success: false, Error: fmt.Sprintf("execute triage template: %s", err)}
 		}
 		prompt = buf.String()
+	}
+
+	if steeringPrefix != "" {
+		prompt = steeringPrefix + prompt
 	}
 
 	triageFlags := resolveModelFlags(cfg.Tool, tierForAction(actionTriage, cfg.ModelTiers))
@@ -4796,7 +4817,11 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 func buildLoopPrompt(action loopAction, feature string) string {
 	switch action.Type {
 	case actionImplementMilestone:
-		return fmt.Sprintf("/belmont:implement --feature %s", feature)
+		prompt := fmt.Sprintf("/belmont:implement --feature %s", feature)
+		if action.MilestoneID != "" {
+			prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED IMPLEMENTATION: Only implement tasks in milestone %s. Do NOT touch tasks in other milestones — they are either already complete, in progress elsewhere, or intentionally queued for later. Do NOT flip task checkboxes, add/remove tasks, or edit notes for any milestone other than %s.\n\nCRITICAL: In PROGRESS.md only the heading and tasks for %s may change. Other milestones may be intentionally incomplete (parallel worktree, queued re-verify, blocked). Treat their state as read-only context.", action.MilestoneID, action.MilestoneID, action.MilestoneID)
+		}
+		return prompt
 	case actionImplementNext:
 		prompt := fmt.Sprintf("/belmont:next --feature %s", feature)
 		if action.MilestoneID != "" {
@@ -6078,8 +6103,12 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	for _, w := range waves {
 		fmt.Fprintf(os.Stderr, "\033[1m━━ Wave %d ━━\033[0m\n", w.Index+1)
 
-		if len(w.Milestones) == 1 {
-			// Single milestone: run directly in main tree
+		if len(w.Milestones) == 1 && !singleMilestoneHasExistingWorktree(cfg, w.Milestones[0]) {
+			// Single milestone with no existing worktree: run directly in
+			// main tree (skip worktree overhead for fresh work). If a branch
+			// or worktree dir already exists we fall through to the wave
+			// path so the user gets a resume prompt and any worktree-local
+			// state (STEERING.md, follow-up commits, etc.) is honoured.
 			m := w.Milestones[0]
 			fmt.Fprintf(os.Stderr, "  Running %s: %s\n", m.ID, m.Name)
 			mCfg := cfg
@@ -6089,7 +6118,9 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 				return fmt.Errorf("auto: wave %d, %s failed: %w", w.Index+1, m.ID, err)
 			}
 		} else {
-			// Multiple milestones: run in parallel via worktrees
+			// Multiple milestones OR single milestone with an existing
+			// worktree: run via worktrees so resume prompts fire and
+			// isolation holds.
 			if err := runWaveParallel(cfg, w, activeWorktrees); err != nil {
 				return err
 			}
@@ -6297,6 +6328,23 @@ func (wt *worktreeTracker) gracefulShutdown(root string) {
 }
 
 // runWaveParallel runs multiple milestones in parallel using git worktrees.
+// singleMilestoneHasExistingWorktree reports whether this milestone already
+// has a branch or worktree directory on disk from a prior run. When true,
+// runAutoParallel skips its single-milestone master-tree shortcut so resume
+// prompts fire and any worktree-local state (STEERING.md, in-progress
+// commits) is honoured.
+func singleMilestoneHasExistingWorktree(cfg loopConfig, m milestone) bool {
+	branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(m.ID))
+	wtPath := filepath.Join(worktreeBasePath(cfg.Root), fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(m.ID)))
+	if dirExists(wtPath) {
+		return true
+	}
+	// `git show-ref` exits 0 if the ref exists.
+	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	cmd.Dir = cfg.Root
+	return cmd.Run() == nil
+}
+
 func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 	semaphore := make(chan struct{}, cfg.MaxParallel)
 	var wg sync.WaitGroup
@@ -7152,10 +7200,24 @@ func copyBelmontStateToWorktree(root, wtPath, slug string) error {
 	srcFeature := filepath.Join(srcBelmont, "features", slug)
 	dstFeature := filepath.Join(dstBelmont, "features", slug)
 	if dirExists(srcFeature) {
+		// Preserve worktree-local STEERING.md / STEERING.log.md (written by
+		// `belmont steer` and by consumption) across the wipe-and-recopy.
+		// Master never holds these, so without the preserve they would be
+		// silently clobbered when auto resumes a preserved worktree.
+		var steeringData []byte
+		steeringPath := filepath.Join(dstFeature, "STEERING.md")
+		if data, err := os.ReadFile(steeringPath); err == nil {
+			steeringData = data
+		}
 		// Remove just this feature's dir to get a clean copy
 		os.RemoveAll(dstFeature)
 		if err := copyDir(srcFeature, dstFeature); err != nil {
 			return fmt.Errorf("copy feature state: %w", err)
+		}
+		if steeringData != nil {
+			if err := os.WriteFile(filepath.Join(dstFeature, "STEERING.md"), steeringData, 0644); err != nil {
+				return fmt.Errorf("restore STEERING.md: %w", err)
+			}
 		}
 	}
 
@@ -8687,4 +8749,515 @@ func recoverCleanAll(root string, worktrees []worktreeEntry, format string) erro
 	}
 	return nil
 }
+
+// ============================================================================
+// belmont steer — inject user instructions into an in-flight auto run.
+//
+// The auto loop runs headless AI CLI invocations inside isolated worktrees;
+// there is no channel for the user to interject. `belmont steer` writes an
+// append-only STEERING.md in each active worktree (or the master feature
+// directory for non-parallel runs). executeLoopAction consumes pending
+// entries before each phase and prepends them to the agent prompt as a
+// higher-priority block than NOTES.md.
+// ============================================================================
+
+// steeringEntry represents a single block in STEERING.md.
+type steeringEntry struct {
+	Timestamp string // RFC3339 UTC from the header
+	Milestone string // optional — empty means applies to any milestone
+	State     string // "pending" or "consumed <ts> by <phase>"
+	Body      string // free-form text between this header and the next
+}
+
+var steeringHeaderRe = regexp.MustCompile(`^##\s+(\S+)(?:\s+\[([^\]]+)\])?\s+\(([^)]+)\)\s*$`)
+
+// parseSteeringEntries walks STEERING.md and returns every block it finds.
+// Unrecognised preamble or garbage between entries is ignored.
+func parseSteeringEntries(data string) []steeringEntry {
+	lines := strings.Split(data, "\n")
+	var entries []steeringEntry
+	var current *steeringEntry
+	var body []string
+	flush := func() {
+		if current == nil {
+			return
+		}
+		current.Body = strings.TrimRight(strings.Join(body, "\n"), "\n")
+		entries = append(entries, *current)
+		current = nil
+		body = nil
+	}
+	for _, line := range lines {
+		if m := steeringHeaderRe.FindStringSubmatch(line); m != nil {
+			flush()
+			current = &steeringEntry{
+				Timestamp: m[1],
+				Milestone: m[2],
+				State:     m[3],
+			}
+			continue
+		}
+		if current != nil {
+			body = append(body, line)
+		}
+	}
+	flush()
+	return entries
+}
+
+// renderSteeringEntries serialises entries back to STEERING.md format.
+// Preserves order.
+func renderSteeringEntries(entries []steeringEntry) string {
+	var b strings.Builder
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString("## ")
+		b.WriteString(e.Timestamp)
+		if e.Milestone != "" {
+			b.WriteString(" [")
+			b.WriteString(e.Milestone)
+			b.WriteString("]")
+		}
+		b.WriteString(" (")
+		b.WriteString(e.State)
+		b.WriteString(")\n")
+		if trimmed := strings.TrimSpace(e.Body); trimmed != "" {
+			b.WriteString(trimmed)
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// steeringHeader returns the prompt-side framing for injected instructions.
+// The wording is deliberately forceful — the point of steering is to override
+// the normal prompt flow when the user has new information.
+func steeringHeader() string {
+	return `## URGENT — User steering (higher priority than NOTES.md)
+
+The user has injected the following instruction(s) into this feature loop. They override or amend the surrounding task. Read them carefully, apply them to your current action, and acknowledge them at the start of your reply.
+
+`
+}
+
+// consumePendingSteering reads STEERING.md for the given feature, takes any
+// pending entry that matches the current milestone (or has no milestone tag),
+// and returns the formatted user-steering block (prefixed with steeringHeader)
+// plus a count. Returns ("", 0) when there is nothing pending.
+//
+// Invariant: STEERING.md contains only (pending) entries. Consumed entries
+// are dropped from disk entirely (the audit lives in the auto run's stderr
+// stream — the `[STEERING] injected …` line and its timestamp). STEERING.md
+// is deleted when no pending entries remain so agents exploring the feature
+// dir don't see a stale file and burn input tokens re-reading text that's
+// already in the prompt.
+//
+// Legacy (consumed) entries written by older versions of this code are
+// silently dropped on first encounter, same migration path.
+//
+// All filesystem errors are non-fatal.
+func consumePendingSteering(root, feature, milestoneID, phase string) (string, int) {
+	if root == "" || feature == "" {
+		return "", 0
+	}
+	path := filepath.Join(root, ".belmont", "features", feature, "STEERING.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0
+	}
+	entries := parseSteeringEntries(string(data))
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	var remainingPending []steeringEntry
+	var newlyConsumed []steeringEntry
+	for _, e := range entries {
+		if e.State != "pending" {
+			// Legacy consumed entries from older code — drop silently.
+			continue
+		}
+		if e.Milestone == "" || e.Milestone == milestoneID {
+			e.State = fmt.Sprintf("consumed %s by %s", now, phase)
+			newlyConsumed = append(newlyConsumed, e)
+		} else {
+			remainingPending = append(remainingPending, e)
+		}
+	}
+
+	// Rewrite STEERING.md with only pending entries; delete when empty so
+	// the live file acts purely as the agent-facing inbox.
+	if len(remainingPending) == 0 {
+		_ = os.Remove(path)
+	} else {
+		_ = os.WriteFile(path, []byte(renderSteeringEntries(remainingPending)), 0644)
+	}
+
+	if len(newlyConsumed) == 0 {
+		return "", 0
+	}
+
+	var b strings.Builder
+	b.WriteString(steeringHeader())
+	for i, e := range newlyConsumed {
+		if i > 0 {
+			b.WriteString("\n---\n\n")
+		}
+		if e.Milestone != "" {
+			fmt.Fprintf(&b, "Scope: milestone %s\n\n", e.Milestone)
+		}
+		b.WriteString(strings.TrimSpace(e.Body))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String(), len(newlyConsumed)
+}
+
+// logSteeringInjection prints a one-line notice to stderr matching the
+// `[feature][milestone]: ...` prefix used by the auto loop. The preview
+// is the first ~100 chars of the first consumed entry's body, truncated
+// with `…` so the stream stays one line per injection.
+func logSteeringInjection(feature, milestoneID string, count int, block string) {
+	preview := steeringPreview(block)
+	noun := "instruction"
+	if count != 1 {
+		noun = "instructions"
+	}
+	var prefix string
+	if feature != "" {
+		if milestoneID != "" {
+			prefix = fmt.Sprintf("\033[36m[%s][%s]\033[0m: ", feature, milestoneID)
+		} else {
+			prefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", feature)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "%s\033[35m[STEERING]\033[0m injected %d %s — \"%s\"\n", prefix, count, noun, preview)
+}
+
+// steeringPreview extracts the first non-header line of the injected block
+// and truncates to ~100 chars.
+func steeringPreview(block string) string {
+	for _, line := range strings.Split(block, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "##") || strings.HasPrefix(trimmed, "---") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "The user has injected") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "Scope:") {
+			continue
+		}
+		if len(trimmed) > 100 {
+			return trimmed[:99] + "…"
+		}
+		return trimmed
+	}
+	return ""
+}
+
+// steeringTarget identifies a single worktree (or master root) to write
+// STEERING.md into.
+type steeringTarget struct {
+	MilestoneID string // empty for non-parallel runs
+	Root        string // absolute worktree path (or master root)
+	Label       string // e.g. "M5" or "serial" — for log output
+}
+
+// runSteerCmd implements `belmont steer`.
+func runSteerCmd(args []string) error {
+	fs := flag.NewFlagSet("steer", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var root, feature, milestone, message, file string
+	fs.StringVar(&root, "root", ".", "project root")
+	fs.StringVar(&feature, "feature", "", "feature slug (auto-detected if only one active)")
+	fs.StringVar(&milestone, "milestone", "", "narrow steering to a single milestone (e.g. M5)")
+	fs.StringVar(&message, "message", "", "steering text (inline)")
+	fs.StringVar(&file, "file", "", "read steering text from file")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("steer: %w", err)
+	}
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("steer: resolve root: %w", err)
+	}
+
+	// Resolve the active auto run and its feature.
+	aj, err := readActiveAutoJSON(absRoot)
+	if err != nil {
+		return err
+	}
+	resolvedFeature, err := resolveSteerFeature(aj, feature)
+	if err != nil {
+		return err
+	}
+
+	// Read the steering text from exactly one source.
+	text, err := readSteeringInput(fs.Args(), message, file, resolvedFeature, milestone)
+	if err != nil {
+		return err
+	}
+
+	// Figure out targets: every active worktree for the feature, optionally
+	// narrowed to one milestone. In serial mode the only target is the master
+	// feature directory.
+	targets, err := resolveSteeringTargets(absRoot, aj, resolvedFeature, milestone)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		return fmt.Errorf("steer: no active worktree matched feature=%q milestone=%q", resolvedFeature, milestone)
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	for _, t := range targets {
+		entryMilestone := milestone
+		if entryMilestone == "" && t.MilestoneID != "" && len(targets) > 1 {
+			// Broadcast into a parallel run: tag each entry with the target
+			// milestone so it only fires when that milestone runs.
+			entryMilestone = t.MilestoneID
+		}
+		path := filepath.Join(t.Root, ".belmont", "features", resolvedFeature, "STEERING.md")
+		if err := appendSteeringEntry(path, timestamp, entryMilestone, text); err != nil {
+			return fmt.Errorf("steer: write %s: %w", path, err)
+		}
+		fmt.Fprintf(os.Stderr, "  \033[32m✓\033[0m injected → %s", path)
+		if entryMilestone != "" {
+			fmt.Fprintf(os.Stderr, " \033[2m[%s]\033[0m", entryMilestone)
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+	return nil
+}
+
+// readActiveAutoJSON returns auto.json if there's an active run; errors
+// otherwise with a helpful message.
+func readActiveAutoJSON(root string) (autoJSON, error) {
+	autoPath := filepath.Join(root, ".belmont", "auto.json")
+	data, err := os.ReadFile(autoPath)
+	if err != nil {
+		return autoJSON{}, fmt.Errorf("steer: no active auto run (missing %s). steering only applies to in-flight auto mode — start one with `belmont auto`, or steer a manual CLI session by typing directly into it", autoPath)
+	}
+	var aj autoJSON
+	if err := json.Unmarshal(data, &aj); err != nil {
+		return autoJSON{}, fmt.Errorf("steer: parse auto.json: %w", err)
+	}
+	if !aj.Active {
+		return autoJSON{}, fmt.Errorf("steer: auto.json exists but no active run — nothing to steer")
+	}
+	return aj, nil
+}
+
+// resolveSteerFeature picks the feature slug from --feature or auto.json.
+func resolveSteerFeature(aj autoJSON, requested string) (string, error) {
+	if requested != "" {
+		if aj.Feature != "" && aj.Feature != requested {
+			return "", fmt.Errorf("steer: feature %q is not the active auto run (active: %q)", requested, aj.Feature)
+		}
+		return requested, nil
+	}
+	if aj.Feature != "" {
+		return aj.Feature, nil
+	}
+	// Multi-feature runs don't set aj.Feature; require explicit selection.
+	return "", fmt.Errorf("steer: --feature required (auto.json does not record a single active feature)")
+}
+
+// resolveSteeringTargets returns the writable targets for a steer request.
+// When auto.json has per-milestone worktree entries, each entry becomes a
+// target; otherwise the single target is the master feature directory.
+func resolveSteeringTargets(root string, aj autoJSON, feature, milestone string) ([]steeringTarget, error) {
+	// Parallel: one target per active worktree entry for the feature.
+	if len(aj.Worktrees) > 0 {
+		var targets []steeringTarget
+		for id, entry := range aj.Worktrees {
+			if milestone != "" && id != milestone {
+				continue
+			}
+			// Verify the worktree still exists — stale entries shouldn't
+			// silently accept writes.
+			if !dirExists(entry.Path) {
+				continue
+			}
+			targets = append(targets, steeringTarget{
+				MilestoneID: id,
+				Root:        entry.Path,
+				Label:       id,
+			})
+		}
+		sort.Slice(targets, func(i, j int) bool { return targets[i].MilestoneID < targets[j].MilestoneID })
+		return targets, nil
+	}
+	// Serial: single target is the master feature directory under root.
+	featureDir := filepath.Join(root, ".belmont", "features", feature)
+	if !dirExists(featureDir) {
+		return nil, fmt.Errorf("steer: feature directory not found: %s", featureDir)
+	}
+	return []steeringTarget{{Root: root, Label: "serial"}}, nil
+}
+
+// readSteeringInput reads steering text from exactly one source (errors if
+// zero or two+ sources are provided). Sources are, in order: --message,
+// --file, "-" positional for stdin, or $EDITOR fallback when stdin is a
+// TTY and $EDITOR is set.
+func readSteeringInput(positional []string, message, file, feature, milestone string) (string, error) {
+	wantStdin := false
+	for _, a := range positional {
+		if a == "-" {
+			wantStdin = true
+		}
+	}
+	sourceCount := 0
+	if message != "" {
+		sourceCount++
+	}
+	if file != "" {
+		sourceCount++
+	}
+	if wantStdin {
+		sourceCount++
+	}
+	if sourceCount > 1 {
+		return "", fmt.Errorf("steer: provide exactly one of --message, --file, or `-` (stdin)")
+	}
+
+	var text string
+	switch {
+	case message != "":
+		text = message
+	case file != "":
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return "", fmt.Errorf("steer: read --file: %w", err)
+		}
+		text = string(data)
+	case wantStdin:
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("steer: read stdin: %w", err)
+		}
+		text = string(data)
+	default:
+		// $EDITOR fallback — only when attached to a TTY and EDITOR is set.
+		if !isTerminal(os.Stdin) {
+			return "", fmt.Errorf("steer: no input provided — pass --message \"text\", --file PATH, or `-` (stdin)")
+		}
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			return "", fmt.Errorf("steer: no input provided and $EDITOR is unset — pass --message \"text\", --file PATH, or `-` (stdin)")
+		}
+		edited, err := runSteerEditor(editor, feature, milestone)
+		if err != nil {
+			return "", err
+		}
+		text = edited
+	}
+
+	// Strip lines beginning with `#` when the text came through $EDITOR;
+	// harmless for other sources (users rarely write literal `#` lines at
+	// the column 0 position).
+	text = stripSteerComments(text)
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", fmt.Errorf("steer: empty steering text — aborting")
+	}
+	return trimmed, nil
+}
+
+// stripSteerComments drops lines beginning with `#` and any trailing blank
+// lines left behind. Used for $EDITOR input so the seeded template comments
+// don't end up in STEERING.md.
+func stripSteerComments(text string) string {
+	var keep []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "#") {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	return strings.Join(keep, "\n")
+}
+
+// runSteerEditor opens $EDITOR on a seeded temp file and returns the saved
+// contents. An empty edit (after comment stripping) returns an error.
+func runSteerEditor(editor, feature, milestone string) (string, error) {
+	tmp, err := os.CreateTemp("", "belmont-steer-*.md")
+	if err != nil {
+		return "", fmt.Errorf("steer: create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	seed := "# Belmont steer — lines starting with `#` are ignored.\n"
+	seed += fmt.Sprintf("# Feature: %s\n", feature)
+	if milestone != "" {
+		seed += fmt.Sprintf("# Milestone: %s\n", milestone)
+	}
+	seed += "# Write the instructions for the agent below this comment and save.\n\n"
+	if _, err := tmp.WriteString(seed); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("steer: seed temp file: %w", err)
+	}
+	tmp.Close()
+
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("%s %q", editor, tmpPath))
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("steer: $EDITOR exited non-zero: %w", err)
+	}
+	data, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("steer: re-read temp file: %w", err)
+	}
+	return string(data), nil
+}
+
+// appendSteeringEntry appends a pending entry to STEERING.md, creating the
+// file (and parent dir) if needed.
+func appendSteeringEntry(path, timestamp, milestone, body string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	var header strings.Builder
+	header.WriteString("## ")
+	header.WriteString(timestamp)
+	if milestone != "" {
+		header.WriteString(" [")
+		header.WriteString(milestone)
+		header.WriteString("]")
+	}
+	header.WriteString(" (pending)\n")
+	header.WriteString(strings.TrimSpace(body))
+	header.WriteString("\n\n")
+
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// Ensure there's a blank line before the new entry when the file was
+	// non-empty and didn't end with one.
+	info, _ := f.Stat()
+	if info != nil && info.Size() > 0 {
+		last := make([]byte, 2)
+		// Best-effort peek at the last two bytes; ignore errors.
+		_, _ = f.Seek(-2, io.SeekEnd)
+		_, _ = f.Read(last)
+		_, _ = f.Seek(0, io.SeekEnd)
+		if !(last[0] == '\n' && last[1] == '\n') {
+			if _, err := f.WriteString("\n"); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = f.WriteString(header.String())
+	return err
+}
+
 
