@@ -11,6 +11,8 @@ This is ideal for small follow-up tasks from verification, quick fixes, and well
 
 <!-- @include feature-detection.md feature_action="Ask which feature to implement the next task for, or auto-select the one with pending tasks" -->
 
+<!-- @include milestone-immutability.md -->
+
 ## When to Use This
 
 - Follow-up tasks created by verification

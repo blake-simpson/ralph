@@ -30,10 +30,27 @@ belmont steer --message "pin all axes"   # Inject instructions into an in-flight
 belmont steer --milestone M5 --file fix.md   # Scope to one milestone, read from file
 belmont steer -                          # Read steering text from stdin
 belmont steer                            # Opens $EDITOR when a TTY is attached
+belmont validate                         # Lint PROGRESS.md for milestone-structure violations
+belmont validate --feature about         # Scope lint to one feature
 belmont version                         # Show version, commit, build date
 # Note: "belmont loop" still works as an alias for "belmont auto"
 # If a previous run was interrupted, auto detects stale branches and prompts to resume or restart
 ```
+
+## Milestone-structure validation
+
+`belmont validate` lints `PROGRESS.md` for milestone-structure violations — the class of bug documented in [`knowledge/cross-cutting/milestone-immutability.md`](../knowledge/cross-cutting/milestone-immutability.md). It detects two patterns:
+
+- **Polish / follow-up milestone names.** Milestones whose name matches `polish`, `follow-ups`, `cleanup`, `verification fixes`, `deviations from M<N>`, `from M<N> implementation`, `fwlup(s)`. These violate the rule that follow-ups stay in the milestone that discovered them.
+- **Cross-milestone task IDs.** Task IDs like `P3-FWLUP-M2-1` that embed a milestone number should live under that milestone; when they're found under a different one, the milestone structure is lying about ownership and parallel merges will collide.
+
+```bash
+belmont validate                            # Scan every feature
+belmont validate --feature about            # One feature
+belmont validate --format json              # Machine-readable output
+```
+
+Exit code `1` on violations. `belmont auto` runs this lint at startup; interactive runs get a `[y/N]` override prompt, non-interactive runs abort. Restructure via `/belmont:tech-plan` before rerunning.
 
 ## Steering a running auto run
 

@@ -11,6 +11,8 @@ You are the implementation orchestrator. Your job is to implement the next pendi
 
 <!-- @include worktree-awareness.md -->
 
+<!-- @include milestone-immutability.md -->
+
 ## Setup
 
 Read these files first:
@@ -132,9 +134,7 @@ If you ARE using Agent Teams: Add an implementation-agent into the team per task
 Read the `## Implementation Log` section from `{base}/MILESTONE.md`. For each task:
 
 1. **Verify tracking updates** — The implementation agent should have already marked tasks `[x]` (done, not yet verified) in `{base}/PROGRESS.md`. If any were missed, update them now: `[>]` -> `[x]` for completed tasks.
-2. **Handle follow-up tasks** — If the implementation log listed out-of-scope issues:
-   - Add them as new `[ ]` tasks to the current milestone in `{base}/PROGRESS.md`
-   - If they are not related to the current milestone, add them to the appropriate existing milestone, or create a **new milestone** with the next sequential number
+2. **Handle follow-up tasks** — If the implementation log listed out-of-scope issues, add them as new `[ ]` tasks to the **current milestone** in `{base}/PROGRESS.md`. Follow the milestone-immutability rule below — do not create a new milestone for follow-ups and do not retarget them at a different milestone.
 3. **Handle blocked tasks** — If any tasks were reported as blocked during implementation:
    - Mark them as `[!]` in `{base}/PROGRESS.md` with a note about why they are blocked
 4. **Update master docs** — After implementing, update `.belmont/PRD.md` and `.belmont/TECH_PLAN.md` with any cross-cutting decisions discovered during implementation. Edit existing sections, remove stale info. These are living documents — actively curate them.

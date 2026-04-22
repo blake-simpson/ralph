@@ -17,6 +17,8 @@ The verification agent automatically checks each fix attempt. For faster iterati
 
 <!-- @include feature-detection.md feature_action="Ask which feature the bug relates to, or auto-select if obvious from context" -->
 
+<!-- @include milestone-immutability.md -->
+
 ## Step 0: Understand the Problem
 
 1. If the user provided a description with the skill invocation, use it as the problem statement

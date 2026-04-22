@@ -15,10 +15,12 @@ This session requires ultrathink-level reasoning — deeply analyze architecture
 2. Do NOT create or edit any source code files (no .tsx, .ts, .css, etc.).
 3. When done asking questions, write plan(s) to the appropriate TECH_PLAN.md file(s) (see routing logic below).
 4. **Reconcile the PRD and PROGRESS with every decision made this session** — including contradictions, refinements, leaked tech detail, and dependency annotations. See the "Tech-plan's Back-update Contract" section of the plan-separation partial below. This is not optional; skipping it is the #1 cause of implementation drift.
-5. Respect milestone sizing rules — see the plan-separation partial. If new tasks are discovered, default to creating a NEW small milestone rather than inflating an existing one.
+5. Respect milestone sizing rules — see the plan-separation partial. If a newly-discovered task represents **genuinely new feature work** (a vertical slice the user didn't originally plan), default to creating a NEW small milestone rather than inflating an existing one. **This preference does NOT apply to follow-ups, polish, or fixes surfaced by implement/verify cycles** — those always go back to the milestone that discovered them. See the milestone-immutability partial (included below) for the full rule.
 6. After writing the tech plan AND completing Phase 4.5 (PRD Reconciliation), say "Tech plan complete." and STOP.
 
 <!-- @include forbidden-actions.md -->
+
+<!-- @include milestone-immutability.md -->
 
 <!-- @include plan-separation.md -->
 
@@ -208,8 +210,9 @@ If something in the PRD is ambiguous or incomplete, ask for clarification — bu
 
 **Adding tasks / milestones (if new work was discovered):**
 - Follow the milestone sizing rules in the plan-separation partial — target 3–5 tasks per milestone, soft ceiling of 6.
-- Default to creating a NEW milestone for the new work rather than inflating an existing one. Only add `(depends: M<n>)` when there's a real file/API/data dependency.
-- When placing the new milestone, check if it can run in parallel with existing work — prefer parallelism over serialization.
+- For **genuinely new feature work** (a fresh vertical slice the user didn't originally plan), default to creating a NEW milestone rather than inflating an existing one. Only add `(depends: M<n>)` when there's a real file/API/data dependency.
+- For **follow-ups, polish, fixes, or deviations surfaced by prior implement/verify cycles**, DO NOT create a new milestone — those belong in the source milestone. Re-read the milestone-immutability partial at the top of this skill. A "polish from M<N>" milestone is a dependency-graph lie and will cause silent merge conflicts if it runs in parallel with downstream milestones.
+- When placing a new feature milestone, check if it can run in parallel with existing work — prefer parallelism over serialization. But never create a milestone that would run in parallel with siblings whose outputs it is about to modify.
 - Update `{base}/PRD.md` with the new task definitions (using the PRD Task format) and `{base}/PROGRESS.md` with the new milestone and task checkboxes. Use Edit — never replace the file.
 
 ### Phase 4.5 - PRD Reconciliation (MANDATORY)

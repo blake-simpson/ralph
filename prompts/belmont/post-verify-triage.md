@@ -56,6 +56,9 @@ Apply these rules in order:
 ## Actions to Take
 
 ### If `defer_and_proceed`:
+
+**Deferral NEVER means creating a new milestone.** Deferral means moving items to `NOTES.md` (for cosmetic / nice-to-have items) or leaving them as `[ ]` tasks inside the current milestone (for items that must be fixed but can wait). Under no circumstances should deferral spawn a "Polish", "Follow-ups", "Fixes", or "MX: Deviations from M<N>" milestone. Even if `PROGRESS.md` already contains such a milestone from a prior run, do not add to it and do not create siblings of it.
+
 You MUST update the state files yourself:
 1. For each deferrable follow-up task:
    - Remove its task definition section from `{{.FeatureBase}}/PRD.md`

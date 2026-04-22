@@ -37,19 +37,97 @@ Once the base path is resolved, use `{base}` as shorthand:
 
 ## Worktree Environment
 
-If the environment variable `BELMONT_WORKTREE` is set to `1`, you are running in an isolated git worktree for parallel execution. The following rules apply:
+If the environment variable `BELMONT_WORKTREE` is set to `1`, you are running in an isolated git worktree for parallel execution. Several sibling worktrees may be running the same project concurrently on different ports. Ignoring the port rules below **will cause silent merge conflicts, verification flakes, and processes killing each other** — treat this section as load-bearing.
 
-- **Ports**: Use `$PORT` (or `$BELMONT_PORT`) when starting the **primary dev server**. Do NOT hardcode port numbers like 3000, 5173, or 8080. Examples: `next dev -p $PORT`, `vite --port $PORT`, `PORT=$PORT npm start`.
-  - **For any OTHER server** (Storybook, Prisma Studio, documentation server, etc.): you MUST dynamically find a free port. Do NOT use the port from `package.json` scripts — it will conflict with other worktrees. Find a free port:
-    ```bash
-    FREE_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
-    ```
-    Then start the server on that port: `npx storybook dev -p $FREE_PORT --no-open`, `npx prisma studio --port $FREE_PORT`, etc.
-  - **NEVER run `npm run storybook`** or similar package.json scripts that hardcode ports. Always invoke the underlying command directly with your dynamically chosen port.
-  - If a port is already in use, find another one — do not retry the same port.
-- **Dependencies**: Worktree setup hooks have already run (e.g., `npm install`). Do NOT re-install dependencies unless a task specifically requires adding new packages.
-- **Build isolation**: Your `.next/`, `dist/`, `node_modules/`, and other gitignored directories are local to this worktree. Other worktrees are unaffected by your builds.
-- **Scope**: Only modify files within this worktree. Changes will be merged back via git.
+### Port variables set for you
+
+Belmont populates these before your process starts. Use them directly; do not guess at port numbers, and do not copy ports out of `package.json` or config files.
+
+| Variable | Purpose |
+|---|---|
+| `BELMONT_PORT` | Unique primary port for this worktree. Use for the project's dev server. |
+| `PORT` | Mirror of `BELMONT_PORT`. Most bundlers (Next.js, many Node servers) honor this. |
+| `BELMONT_BASE_URL` | `http://localhost:$BELMONT_PORT`. Use anywhere a URL is expected. |
+| `PLAYWRIGHT_BASE_URL` | Overrides `use.baseURL` / `webServer.url` in `playwright.config.*` at runtime. Playwright reads this automatically. |
+| `CYPRESS_baseUrl` | Overrides `baseUrl` in `cypress.config.*` at runtime. Cypress reads this automatically. |
+| `VITE_PORT` | Mirror of `BELMONT_PORT` for Vite-based projects. |
+| `BELMONT_WORKTREE` | Set to `1`. Presence signals that worktree rules apply. |
+
+### Port decision tree
+
+**Question 1 — is this the project's primary dev server?**
+
+Yes: invoke the bundler CLI directly with the worktree's port. **Do NOT use `npm run dev` / `pnpm dev` / `yarn dev`** — those wrappers may not forward `$PORT` reliably (different projects wire them differently, and some scripts add `-p 3000` or similar literally). Go around the wrapper.
+
+| Project stack | Command to run |
+|---|---|
+| Next.js | `next dev -p $BELMONT_PORT` (add `--turbo` if the project uses Turbopack) |
+| Vite | `vite --port $BELMONT_PORT` |
+| Astro | `astro dev --port $BELMONT_PORT` |
+| Nuxt | `nuxt dev --port $BELMONT_PORT` |
+| Remix | `remix dev` with `PORT=$BELMONT_PORT` (Remix honors `PORT`) |
+| SvelteKit | `vite dev --port $BELMONT_PORT` |
+| Rails / Django / Flask | pass the port via the framework's `-p`/`--port` flag |
+
+No, it's a secondary server (Storybook, Prisma Studio, docs, mock API, etc.): **dynamically allocate a free port and pass it explicitly.** Do NOT use the port from `package.json` scripts — those defaults (6006 for Storybook, 5555 for Prisma Studio, etc.) collide across parallel worktrees.
+
+```bash
+FREE_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
+
+# Then pass FREE_PORT to the tool, bypassing the npm wrapper:
+npx storybook dev -p $FREE_PORT --no-open
+npx prisma studio --port $FREE_PORT
+npx @stoplight/prism mock api.yaml --port $FREE_PORT
+```
+
+### Hard rules
+
+1. **Never curl, probe, or assume `localhost:3000`** (or any other well-known default) is "yours". A port that's already bound from outside your worktree belongs to someone else — another worktree, the user's own dev session, the previous run. Always use `$BELMONT_PORT` / `$BELMONT_BASE_URL`.
+2. **Hardcoded ports in committed config files are stale.** If `playwright.config.ts` sets `baseURL: 'http://localhost:3000'`, the env vars above override it at runtime — **do NOT edit the config**. Run tests as normal; Playwright/Cypress/etc. will pick up the env var. Editing a checked-in config to change the port would pollute the merge.
+3. **Hardcoded ports in planning docs are stale.** If a `TECH_PLAN.md`, `PRD.md`, `NOTES.md`, or archived `MILESTONE-*.done.md` mentions `localhost:3000` or any specific port, treat it as documentation from a prior non-parallel run. Your ground truth is `$BELMONT_BASE_URL`.
+4. **Never run `npm run dev` / `pnpm dev` / `yarn dev` / `npm run storybook` / `npm run test:e2e` without first confirming** the wrapped command forwards `$PORT` and `$PLAYWRIGHT_BASE_URL`. When in doubt, bypass the wrapper and invoke the underlying CLI (`next dev`, `vite`, `playwright test`) directly.
+5. **Kill only what you own.** If your dev server fails to start because the port is taken, STOP and report it as a blocker — do not free the port by killing unknown processes. Another worktree, the user, or a system service may own it.
+6. **If a port is in use, find another one — do not retry the same port.** The `FREE_PORT=$(python3 -c ...)` snippet above is idempotent and safe.
+
+### Beyond ports
+
+- **Dependencies**: worktree setup hooks have already run (e.g., `npm install`). Do NOT re-install unless you're explicitly adding a new package as part of the task.
+- **Build isolation**: `.next/`, `dist/`, `node_modules/`, and other gitignored directories are local to this worktree. Other worktrees are unaffected by your builds.
+- **Scope**: only modify files within this worktree. Changes will be merged back via git — the scope guard will revert edits outside your target milestone.
+
+<!-- Canonical milestone-immutability rule. Included by every skill that can modify PROGRESS.md. Do not paraphrase in skill bodies — @include this partial so the rule stays a single source of truth. -->
+
+## Milestone structure is immutable outside `/belmont:tech-plan`
+
+**You MUST NOT add, remove, rename, re-scope, or re-parent any `## M<N>:` milestone heading in `PROGRESS.md`.** Only `/belmont:tech-plan` may restructure milestones. Every other skill — `implement`, `verify`, `next`, `debug-auto`, `debug-manual`, the triage phase — may only edit tasks **inside** existing milestone headings.
+
+This rule supersedes any contradictory guidance you encounter elsewhere. If another instruction seems to permit creating a milestone (for follow-ups, polish, cleanup, verification fixes, etc.), prefer this rule.
+
+### Where follow-ups go
+
+- **Issue discovered while implementing or verifying milestone `M<N>`** → new `[ ]` task inside `M<N>`, under the same `## M<N>:` heading. Do not route it to an earlier or later milestone "because it fits there better"; the milestone that discovered it owns it.
+- **Issue blocked by work that will land in a later milestone `M<N+k>`** → new `[!]` task inside `M<N>`, with a one-line reason that names `M<N+k>`. Auto surfaces `[!]` tasks as blockers; the task can be reopened as `[ ]` once the blocker lifts.
+- **Cosmetic / nice-to-have item the user may never want** → append to `NOTES.md` under a `## Polish` section, creating the file if needed. These are context, not tasks.
+- **Never a new milestone.** Not "M<last+1>: Polish", not "M<N>-FIX", not "MX: Deviations from M<N>", not "MY: Verification Fixes". Even if the existing `PROGRESS.md` already contains such a milestone from a prior run, that pattern is WRONG — do not add tasks to it and do not create siblings of it.
+
+### Why this rule is non-negotiable
+
+A polish/follow-up milestone looks tidy on paper but quietly breaks two invariants of the auto loop:
+
+1. **Dependency graph lies.** A milestone labelled "polish M<N>" typically declares `(depends: M<N>)`. That makes it a sibling of every other `M<N+i>` that depends on `M<N>`. But its *real* dependency is that every later milestone's outputs are frozen — because the polish milestone edits the very files those later milestones imported from `M<N>`. Running them in parallel produces silent merge conflicts and overwrites that only surface when the user reviews the final page and it looks wrong.
+2. **Auto loop grows without bound.** Every verify pass can discover follow-ups. If those follow-ups become a new milestone instead of new tasks in the current one, a 5-milestone feature can turn into 9 milestones mid-run, each re-triggering its own verify-fix-reverify cycle, compounding scope drift with every iteration.
+
+Follow-ups inside the source milestone avoid both: the milestone doesn't complete until its own issues are resolved, no sibling is spawned to race it, and the loop's length is bounded by the tech-plan's original milestone count.
+
+### If you find a pre-existing bad milestone
+
+If `PROGRESS.md` already contains a milestone whose name or description matches the forbidden patterns (polish, follow-ups, cleanup, verification fixes, deviations from M<N>, etc.), do the following:
+
+- Do NOT add new tasks to it.
+- Do NOT create new milestones that depend on it or reference its tasks.
+- Surface the issue in your summary/report to the user, suggesting `belmont validate` and `/belmont:tech-plan` to restructure.
+
+Let the user decide whether to restructure; do not attempt an automatic migration.
 
 ## Setup
 
@@ -323,9 +401,7 @@ If you ARE using Agent Teams: Add an implementation-agent into the team per task
 Read the `## Implementation Log` section from `{base}/MILESTONE.md`. For each task:
 
 1. **Verify tracking updates** — The implementation agent should have already marked tasks `[x]` (done, not yet verified) in `{base}/PROGRESS.md`. If any were missed, update them now: `[>]` -> `[x]` for completed tasks.
-2. **Handle follow-up tasks** — If the implementation log listed out-of-scope issues:
-   - Add them as new `[ ]` tasks to the current milestone in `{base}/PROGRESS.md`
-   - If they are not related to the current milestone, add them to the appropriate existing milestone, or create a **new milestone** with the next sequential number
+2. **Handle follow-up tasks** — If the implementation log listed out-of-scope issues, add them as new `[ ]` tasks to the **current milestone** in `{base}/PROGRESS.md`. Follow the milestone-immutability rule below — do not create a new milestone for follow-ups and do not retarget them at a different milestone.
 3. **Handle blocked tasks** — If any tasks were reported as blocked during implementation:
    - Mark them as `[!]` in `{base}/PROGRESS.md` with a note about why they are blocked
 4. **Update master docs** — After implementing, update `.belmont/PRD.md` and `.belmont/TECH_PLAN.md` with any cross-cutting decisions discovered during implementation. Edit existing sections, remove stale info. These are living documents — actively curate them.

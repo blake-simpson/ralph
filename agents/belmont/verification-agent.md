@@ -79,17 +79,17 @@ If no design references of any kind were found in Step 2.0, that's fine — note
 #### Step 2.2: Start the Project's Preview Tool
 
 You need a running server to navigate to:
-- Check `package.json` scripts (or equivalent) for available preview tools (e.g., `dev`, `storybook`, `start`)
 - For component-only tasks (no full page), prefer a component preview tool if available (e.g., Storybook) — it renders components in isolation
-- **Port selection — CRITICAL**:
-  - For the primary dev server: use `$BELMONT_PORT` if set, otherwise the project default. Example: `next dev -p $BELMONT_PORT`
-  - For ANY other server (Storybook, Prisma Studio, etc.): find a free port dynamically. **NEVER use the port from package.json** — it will conflict with other worktrees:
+- **Port selection — CRITICAL** (worktree parallel runs will collide if you ignore this):
+  - Every URL you navigate to is `$BELMONT_BASE_URL/...`. Never `http://localhost:3000/...` or any other hardcoded port, even if `playwright.config.ts`, `cypress.config.*`, or the PRD/TECH_PLAN says otherwise. Belmont sets `PLAYWRIGHT_BASE_URL` and `CYPRESS_baseUrl` so those tools pick up the right port automatically — do NOT edit the checked-in configs.
+  - For the **primary dev server**: invoke the bundler CLI directly with `$BELMONT_PORT`. `next dev -p $BELMONT_PORT`, `vite --port $BELMONT_PORT`, `astro dev --port $BELMONT_PORT`, etc. Do NOT use `npm run dev` / `pnpm dev` / `yarn dev` — the wrapper script may hardcode a port.
+  - For **any other server** (Storybook, Prisma Studio, mock APIs): find a free port dynamically:
     ```bash
     FREE_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")
     npx storybook dev -p $FREE_PORT --no-open
     ```
-  - **NEVER run `npm run storybook`** or similar scripts that hardcode ports — invoke the underlying CLI directly with your chosen port
-- Wait for the server to be ready before proceeding (poll with `curl -s -o /dev/null -w "%{http_code}" http://localhost:$FREE_PORT` in a loop, max 60s)
+  - Poll for readiness: `curl -s -o /dev/null -w "%{http_code}" $BELMONT_BASE_URL/` (or `http://localhost:$FREE_PORT/` for secondary servers) in a loop, max 60s.
+  - If your port is already in use, STOP and report a blocker — never kill unknown processes to free a port (another worktree or the user may own it).
 
 #### Step 2.3: Capture Implementation Screenshots
 
@@ -159,10 +159,10 @@ Run this phase when **all** of the following are true:
 - At least one signal is present: PRD/TECH_PLAN mentions SEO, performance, Core Web Vitals, Lighthouse scores, or the task is a landing/marketing/home page
 
 Steps:
-1. **Determine URL** — reuse the dev server from Phase 2 if still running; otherwise check TECH_PLAN or `package.json` for a dev server command; if neither works, ask the user
-2. **Run Lighthouse** — execute:
+1. **Determine URL** — reuse the dev server from Phase 2 if still running. The URL is `$BELMONT_BASE_URL/<path>` in worktree mode — never `localhost:3000/...` even if the TECH_PLAN mentions it. If no dev server is available, start one per the port rules in Phase 2 and re-use it.
+2. **Run Lighthouse** — execute (substitute the actual URL — do NOT pass the literal string `<url>`):
    ```bash
-   npx lighthouse <url> --output=json --output-path=./lighthouse-report.json --chrome-flags="--headless --no-sandbox" --quiet
+   npx lighthouse "$BELMONT_BASE_URL/<path>" --output=json --output-path=./lighthouse-report.json --chrome-flags="--headless --no-sandbox" --quiet
    ```
 3. **Parse scores** — read `categories.{performance,accessibility,best-practices,seo}.score` from the JSON (multiply each by 100)
 4. **Clean up** — delete `lighthouse-report.json` after parsing

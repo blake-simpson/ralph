@@ -247,10 +247,11 @@ type task struct {
 }
 
 type milestone struct {
-	ID    string
-	Name  string
-	Tasks []task   // tasks in this milestone (from PROGRESS.md)
-	Deps  []string // e.g. ["M1", "M3"] — nil for no explicit deps
+	ID        string
+	Name      string
+	Tasks     []task   // tasks in this milestone (from PROGRESS.md)
+	Deps      []string // e.g. ["M1", "M3"] — nil for no explicit deps
+	LiveFrom  string   `json:"live_from,omitempty"` // worktree path when state was read from an active worktree (buildStatus only)
 }
 
 // Milestone computed state helpers
@@ -491,10 +492,23 @@ func allocatePort() (int, error) {
 func buildWorktreeEnv(port int, extraEnv map[string]string) []string {
 	env := os.Environ()
 	if port != 0 {
+		baseURL := fmt.Sprintf("http://localhost:%d", port)
 		env = append(env,
+			// Belmont-native vars
 			fmt.Sprintf("PORT=%d", port),
 			fmt.Sprintf("BELMONT_PORT=%d", port),
+			fmt.Sprintf("BELMONT_BASE_URL=%s", baseURL),
 			"BELMONT_WORKTREE=1",
+			// Framework-native vars so common test/e2e tools auto-redirect to
+			// the worktree's port without the agent having to remember:
+			//   - Playwright: overrides config `use.baseURL` and `webServer.url`
+			//   - Cypress: overrides `baseUrl` in cypress.config.*
+			//   - Vite: consumed if the project's dev script honors VITE_PORT
+			// These close the hole where a hardcoded `localhost:3000` in a
+			// committed test config would otherwise win over the assigned port.
+			fmt.Sprintf("PLAYWRIGHT_BASE_URL=%s", baseURL),
+			fmt.Sprintf("CYPRESS_baseUrl=%s", baseURL),
+			fmt.Sprintf("VITE_PORT=%d", port),
 		)
 	}
 	for k, v := range extraEnv {
@@ -619,6 +633,8 @@ func main() {
 		must(runRecover(os.Args[2:]))
 	case "steer":
 		must(runSteerCmd(os.Args[2:]))
+	case "validate":
+		must(runValidateCmd(os.Args[2:]))
 	case "reverify":
 		must(runReverifyCmd(os.Args[2:]))
 	case "sync":
@@ -648,6 +664,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont sync [--root PATH]")
 	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--tool claude|codex|gemini|copilot|cursor] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont steer [--feature SLUG] [--milestone M5] [--message \"text\" | --file PATH | -] [--root PATH]")
+	fmt.Fprintln(w, "  belmont validate [--feature SLUG] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont version")
 }
 
@@ -720,9 +737,16 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 	if feature != "" {
 		// Specific feature requested
 		featurePath := filepath.Join(featuresDir, feature)
-		// If there's an active worktree for this feature, read state from there
-		if override, ok := worktreeOverrides[feature]; ok {
-			featurePath = override
+		// If there's an active worktree for this feature (serial mode or
+		// multi-feature mode), read state from there instead of the master
+		// copy. In single-feature parallel mode we fall through to the
+		// per-milestone merge below — master is still the baseline and we
+		// overlay each milestone's live state from its own worktree.
+		liveFeature, perMilestoneLive := loadAutoWorktreeStateByMilestone(root)
+		if perMilestoneLive == nil {
+			if override, ok := worktreeOverrides[feature]; ok {
+				featurePath = override
+			}
 		}
 		if !dirExists(featurePath) {
 			return report, fmt.Errorf("status: feature %q not found in %s", feature, featuresDir)
@@ -744,6 +768,16 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 
 		report.Feature = extractFeatureName(string(prdContent))
 		report.Milestones = parseMilestones(string(progressContent))
+
+		// Single-feature parallel mode: overlay each active worktree's view
+		// of its own milestone on top of master's baseline. Only the
+		// worktree's owning milestone is overlaid; other milestones stay at
+		// master's (possibly stale) state. Each overlaid milestone carries a
+		// LiveFrom pointer so renderers can annotate it.
+		if perMilestoneLive != nil && liveFeature == feature {
+			report.Milestones = overlayLiveMilestones(report.Milestones, perMilestoneLive)
+		}
+
 		report.Tasks = flattenTasks(report.Milestones, maxName)
 
 		report.TaskCounts["total"] = len(report.Tasks)
@@ -805,8 +839,110 @@ func extractProductName(prdPath string) string {
 }
 
 // loadAutoWorktrees reads .belmont/auto.json and returns a map of feature slug → worktree feature path.
-// If auto.json doesn't exist or isn't active, returns nil.
+// If auto.json doesn't exist or isn't active, returns nil. In multi-feature
+// mode the map key is the feature slug (one worktree per feature). In single-
+// feature parallel mode there may be multiple worktrees for one feature; this
+// function picks a representative (alphabetically first milestone's worktree)
+// so legacy callers that look up "is there a worktree for this feature" still
+// get a sensible answer. New callers that need per-milestone live state
+// should use loadAutoWorktreeStateByMilestone.
 func loadAutoWorktrees(root string) map[string]string {
+	aj := readActiveAutoJSONOrNil(root)
+	if aj == nil {
+		return nil
+	}
+	result := make(map[string]string)
+	if aj.Mode == "single-feature-parallel" && aj.Feature != "" {
+		// All entries are milestones under this one feature. Pick the
+		// alphabetically first milestone as the representative path.
+		var keys []string
+		for id := range aj.Worktrees {
+			keys = append(keys, id)
+		}
+		sort.Strings(keys)
+		for _, id := range keys {
+			wtFeaturePath := filepath.Join(aj.Worktrees[id].Path, ".belmont", "features", aj.Feature)
+			if dirExists(wtFeaturePath) {
+				result[aj.Feature] = wtFeaturePath
+				break
+			}
+		}
+		return result
+	}
+	// Multi-feature (or legacy) mode: keys are feature slugs.
+	for slug, entry := range aj.Worktrees {
+		wtFeaturePath := filepath.Join(entry.Path, ".belmont", "features", slug)
+		if dirExists(wtFeaturePath) {
+			result[slug] = wtFeaturePath
+		}
+	}
+	return result
+}
+
+// loadAutoWorktreeStateByMilestone returns the active feature slug and a map
+// of milestone ID → worktree feature directory for single-feature parallel
+// runs. Returns ("", nil) in serial or multi-feature modes (neither has
+// per-milestone worktrees). Only entries whose worktree directory still
+// exists on disk are included.
+func loadAutoWorktreeStateByMilestone(root string) (string, map[string]string) {
+	aj := readActiveAutoJSONOrNil(root)
+	if aj == nil {
+		return "", nil
+	}
+	if aj.Mode != "single-feature-parallel" || aj.Feature == "" {
+		return "", nil
+	}
+	perMS := map[string]string{}
+	for msID, entry := range aj.Worktrees {
+		wtFeaturePath := filepath.Join(entry.Path, ".belmont", "features", aj.Feature)
+		if dirExists(wtFeaturePath) {
+			perMS[msID] = wtFeaturePath
+		}
+	}
+	if len(perMS) == 0 {
+		return "", nil
+	}
+	return aj.Feature, perMS
+}
+
+// overlayLiveMilestones returns `base` with each milestone whose ID matches an
+// entry in `perMilestoneLive` replaced by that worktree's current view of the
+// milestone. Milestones with no active worktree are returned unchanged.
+// Overlaid milestones carry a LiveFrom pointer so renderers can annotate them.
+func overlayLiveMilestones(base []milestone, perMilestoneLive map[string]string) []milestone {
+	out := make([]milestone, 0, len(base))
+	for _, m := range base {
+		live, ok := perMilestoneLive[m.ID]
+		if !ok {
+			out = append(out, m)
+			continue
+		}
+		wtProgressPath := filepath.Join(live, "PROGRESS.md")
+		data, err := os.ReadFile(wtProgressPath)
+		if err != nil {
+			out = append(out, m) // worktree lost its PROGRESS.md — fall back to master
+			continue
+		}
+		wtMilestones := parseMilestones(string(data))
+		var replaced bool
+		for _, wm := range wtMilestones {
+			if wm.ID == m.ID {
+				wm.LiveFrom = live
+				out = append(out, wm)
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			// Worktree doesn't have this milestone (shouldn't happen) — keep master.
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// readActiveAutoJSONOrNil is a shared helper for the readers above.
+func readActiveAutoJSONOrNil(root string) *autoJSON {
 	autoPath := filepath.Join(root, ".belmont", "auto.json")
 	data, err := os.ReadFile(autoPath)
 	if err != nil {
@@ -816,15 +952,7 @@ func loadAutoWorktrees(root string) map[string]string {
 	if err := json.Unmarshal(data, &aj); err != nil || !aj.Active {
 		return nil
 	}
-	result := make(map[string]string)
-	for slug, entry := range aj.Worktrees {
-		// Verify the worktree still exists before using it
-		wtFeaturePath := filepath.Join(entry.Path, ".belmont", "features", slug)
-		if dirExists(wtFeaturePath) {
-			result[slug] = wtFeaturePath
-		}
-	}
-	return result
+	return &aj
 }
 
 func listFeatures(featuresDir string, maxName int) []featureSummary {
@@ -1573,9 +1701,26 @@ func renderStatus(report statusReport, color bool) string {
 	if len(report.Milestones) == 0 {
 		sb.WriteString("  (none)\n")
 	} else {
+		anyLive := false
 		for _, m := range report.Milestones {
 			icon := milestoneStatusIcon(m, color)
-			sb.WriteString(fmt.Sprintf("  %s %s: %s\n", icon, m.ID, m.Name))
+			line := fmt.Sprintf("  %s %s: %s", icon, m.ID, m.Name)
+			if m.LiveFrom != "" {
+				anyLive = true
+				if color {
+					line += " \033[2m(live from worktree)\033[0m"
+				} else {
+					line += " (live from worktree)"
+				}
+			}
+			sb.WriteString(line + "\n")
+		}
+		if anyLive {
+			if color {
+				sb.WriteString("  \033[2m⟳ live-tagged milestones reflect the worktree's in-flight state (not yet merged to master)\033[0m\n")
+			} else {
+				sb.WriteString("  live-tagged milestones reflect the worktree's in-flight state (not yet merged to master)\n")
+			}
 		}
 	}
 	sb.WriteString("\n")
@@ -3302,6 +3447,28 @@ func runAutoCmd(args []string) error {
 	milestones := parseMilestones(string(progressContent))
 	inRange := milestonesInRange(milestones, cfg.From, cfg.To)
 
+	// Structural lint: warn on polish/follow-up milestone patterns before
+	// starting the loop. These are the exact shape that causes parallel merge
+	// conflicts (per skills/belmont/_partials/milestone-immutability.md).
+	// Prompt the user to continue or abort; non-interactive runs abort on
+	// violations to avoid silent damage.
+	if violations := detectViolations(cfg.Feature, milestones); len(violations) > 0 {
+		fmt.Fprintf(os.Stderr, "\033[31m✗ Milestone-structure violation(s) detected:\033[0m\n\n")
+		renderValidationReport(os.Stderr, violations)
+		if !isTerminal(os.Stdin) {
+			return fmt.Errorf("auto: %d milestone-structure violation(s); restructure via `/belmont:tech-plan` before rerunning, or run with a TTY to override interactively", len(violations))
+		}
+		fmt.Fprintf(os.Stderr, "Proceed anyway? [y/N]: ")
+		var answer string
+		fmt.Scanln(&answer)
+		if strings.ToLower(strings.TrimSpace(answer)) != "y" {
+			return fmt.Errorf("auto: aborted — restructure milestones via `/belmont:tech-plan` then rerun")
+		}
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ Proceeding despite violations — you are on your own for merge fallout\033[0m\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "\033[32m✓\033[0m milestone structure valid (%d milestone(s) scanned, no polish/follow-up patterns)\n", len(milestones))
+	}
+
 	// Interactive milestone selection when stdin is a terminal and no --from/--to
 	if cfg.From == "" && cfg.To == "" && isTerminal(os.Stdin) {
 		selectedFrom, selectedTo, err := interactiveMilestoneSelect(inRange)
@@ -3603,7 +3770,12 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	}
 
 	// Set up worktree tracker and signal handler
-	activeWorktrees := &worktreeTracker{root: cfg.Root, entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
+	activeWorktrees := &worktreeTracker{
+		root:    cfg.Root,
+		mode:    "multi-feature",
+		entries: make(map[string]worktreeEntry),
+		hooks:   loadWorktreeHooks(cfg.Root),
+	}
 	sigCh := make(chan os.Signal, 1)
 	notifySignals(sigCh)
 	go func() {
@@ -4546,6 +4718,10 @@ func describeMilestone(action *loopAction, report statusReport) string {
 func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	prompt := buildLoopPrompt(action, cfg.Feature)
 
+	// Snapshot PROGRESS.md before the agent runs — the post-phase scope guard
+	// uses this baseline to revert out-of-scope milestone structure changes.
+	preSnap := snapshotProgress(cfg.Root, cfg.Feature)
+
 	// Consume any pending user steering for this milestone. Runs before any
 	// shell-out so a single injection maps to one agent run — the auto loop
 	// re-enters the same milestone across phases and we don't want the same
@@ -4557,7 +4733,10 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 
 	// Triage uses its own prompt template
 	if action.Type == actionTriage {
-		return executeTriageAction(cfg, steeringBlock)
+		result := executeTriageAction(cfg, steeringBlock)
+		runScopeGuard(cfg, action, preSnap)
+		runEvidenceCheck(cfg, action, preSnap)
+		return result
 	}
 
 	if steeringCount > 0 {
@@ -4675,6 +4854,8 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 	durationMs := time.Since(start).Milliseconds()
 
 	if err != nil {
+		runScopeGuard(cfg, action, preSnap)
+		runEvidenceCheck(cfg, action, preSnap)
 		return executionResult{
 			Success:    false,
 			Output:     tw.String(),
@@ -4683,6 +4864,8 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 		}
 	}
 
+	runScopeGuard(cfg, action, preSnap)
+	runEvidenceCheck(cfg, action, preSnap)
 	return executionResult{
 		Success:    true,
 		Output:     tw.String(),
@@ -6090,7 +6273,13 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	fmt.Fprintln(os.Stderr)
 
 	// Set up signal handler for cleanup
-	activeWorktrees := &worktreeTracker{root: cfg.Root, entries: make(map[string]worktreeEntry), hooks: loadWorktreeHooks(cfg.Root)}
+	activeWorktrees := &worktreeTracker{
+		root:    cfg.Root,
+		feature: cfg.Feature,
+		mode:    "single-feature-parallel",
+		entries: make(map[string]worktreeEntry),
+		hooks:   loadWorktreeHooks(cfg.Root),
+	}
 	sigCh := make(chan os.Signal, 1)
 	notifySignals(sigCh)
 	go func() {
@@ -6103,27 +6292,14 @@ func runAutoParallel(cfg loopConfig, milestones []milestone) error {
 	for _, w := range waves {
 		fmt.Fprintf(os.Stderr, "\033[1m━━ Wave %d ━━\033[0m\n", w.Index+1)
 
-		if len(w.Milestones) == 1 && !singleMilestoneHasExistingWorktree(cfg, w.Milestones[0]) {
-			// Single milestone with no existing worktree: run directly in
-			// main tree (skip worktree overhead for fresh work). If a branch
-			// or worktree dir already exists we fall through to the wave
-			// path so the user gets a resume prompt and any worktree-local
-			// state (STEERING.md, follow-up commits, etc.) is honoured.
-			m := w.Milestones[0]
-			fmt.Fprintf(os.Stderr, "  Running %s: %s\n", m.ID, m.Name)
-			mCfg := cfg
-			mCfg.From = m.ID
-			mCfg.To = m.ID
-			if err := runLoop(mCfg); err != nil {
-				return fmt.Errorf("auto: wave %d, %s failed: %w", w.Index+1, m.ID, err)
-			}
-		} else {
-			// Multiple milestones OR single milestone with an existing
-			// worktree: run via worktrees so resume prompts fire and
-			// isolation holds.
-			if err := runWaveParallel(cfg, w, activeWorktrees); err != nil {
-				return err
-			}
+		// Every wave — including single-milestone waves — runs through the
+		// worktree path. The tiny startup overhead is worth the uniformity:
+		// scope-guard amends don't rewrite the user's working branch, rollback
+		// is a worktree remove rather than a reset, and state visibility via
+		// `belmont status` behaves the same regardless of wave size. See
+		// knowledge/auto-mode/parallel-wave-orchestration.md.
+		if err := runWaveParallel(cfg, w, activeWorktrees); err != nil {
+			return err
 		}
 
 		fmt.Fprintf(os.Stderr, "\033[32m  ✓ Wave %d complete\033[0m\n\n", w.Index+1)
@@ -6157,8 +6333,10 @@ type worktreeEntry struct {
 type worktreeTracker struct {
 	mu      sync.Mutex
 	root    string                   // project root for persisting auto.json
-	entries map[string]worktreeEntry // ID -> worktree entry
-	hooks   *worktreeHooks          // shared hooks config (nil if no worktree.json)
+	feature string                   // feature slug for single-feature parallel mode (empty in multi-feature mode)
+	mode    string                   // "single-feature-parallel" | "multi-feature" (used by live-status readers)
+	entries map[string]worktreeEntry // ID -> worktree entry (milestone IDs in single-feature, feature slugs in multi-feature)
+	hooks   *worktreeHooks           // shared hooks config (nil if no worktree.json)
 }
 
 // autoJSON is the on-disk format for .belmont/auto.json, enabling belmont status
@@ -6219,6 +6397,8 @@ func (wt *worktreeTracker) persistAutoJSON() {
 	aj := autoJSON{
 		Active:    len(wt.entries) > 0,
 		Started:   time.Now().UTC().Format(time.RFC3339),
+		Mode:      wt.mode,
+		Feature:   wt.feature,
 		Worktrees: make(map[string]autoJSONEntry),
 	}
 	for id, entry := range wt.entries {
@@ -6327,24 +6507,10 @@ func (wt *worktreeTracker) gracefulShutdown(root string) {
 	wt.entries = make(map[string]worktreeEntry)
 }
 
-// runWaveParallel runs multiple milestones in parallel using git worktrees.
-// singleMilestoneHasExistingWorktree reports whether this milestone already
-// has a branch or worktree directory on disk from a prior run. When true,
-// runAutoParallel skips its single-milestone master-tree shortcut so resume
-// prompts fire and any worktree-local state (STEERING.md, in-progress
-// commits) is honoured.
-func singleMilestoneHasExistingWorktree(cfg loopConfig, m milestone) bool {
-	branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(m.ID))
-	wtPath := filepath.Join(worktreeBasePath(cfg.Root), fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(m.ID)))
-	if dirExists(wtPath) {
-		return true
-	}
-	// `git show-ref` exits 0 if the ref exists.
-	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
-	cmd.Dir = cfg.Root
-	return cmd.Run() == nil
-}
-
+// runWaveParallel runs every milestone in a wave in its own worktree, even
+// single-milestone waves. Uniform behavior is worth the small startup cost;
+// see knowledge/auto-mode/parallel-wave-orchestration.md on the removed
+// master-tree shortcut.
 func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 	semaphore := make(chan struct{}, cfg.MaxParallel)
 	var wg sync.WaitGroup
@@ -6417,6 +6583,11 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 		return parseMilestoneNum(successes[i].MilestoneID) < parseMilestoneNum(successes[j].MilestoneID)
 	})
 
+	// Track files already merged from earlier siblings in this wave so we
+	// can warn when a later merge overlaps with them — the signature of
+	// cross-milestone scope leak that survived Layer 1 guards.
+	mergedFiles := map[string][]string{} // file -> []milestoneIDs that touched it
+
 	for i, s := range successes {
 		// Ensure repo is in a clean merge state before each merge
 		if err := ensureCleanMergeState(cfg.Root); err != nil {
@@ -6426,8 +6597,19 @@ func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
 			}
 			break
 		}
+
+		// Pre-merge overlap report: list files this branch touches that are
+		// also touched by siblings we've already merged. Does not block.
+		reportMergeOverlap(cfg.Root, s.Branch, s.MilestoneID, mergedFiles)
+
 		if err := mergeWorktreeBranch(cfg, s.MilestoneID, s.Branch, s.WorktreePath, tracker); err != nil {
 			return fmt.Errorf("auto: merge failed for %s: %w", s.MilestoneID, err)
+		}
+
+		// Record this branch's touched files so the next iteration can detect
+		// overlap.
+		for _, f := range branchTouchedFiles(cfg.Root, s.Branch) {
+			mergedFiles[f] = append(mergedFiles[f], s.MilestoneID)
 		}
 	}
 
@@ -9260,4 +9442,872 @@ func appendSteeringEntry(path, timestamp, milestone, body string) error {
 	return err
 }
 
+// ============================================================================
+// belmont validate — detect milestone structure violations in PROGRESS.md.
+//
+// Catches the "polish milestone" anti-pattern — where a skill (implement,
+// verify, etc.) invents a new milestone like "M5: Polish / follow-ups from
+// M1" to hold deferred items. Such milestones declare dependency on their
+// source but actually mutate siblings' outputs, producing silent merge
+// conflicts in parallel auto runs. See skills/belmont/_partials/milestone-
+// immutability.md for the canonical rule this command enforces.
+// ============================================================================
+
+// validationViolation is one finding from `belmont validate`.
+type validationViolation struct {
+	Feature       string `json:"feature"`
+	Milestone     string `json:"milestone"`
+	MilestoneName string `json:"milestone_name"`
+	TaskID        string `json:"task_id,omitempty"`
+	Rule          string `json:"rule"`
+	Message       string `json:"message"`
+}
+
+// Matches milestone names that look like polish / follow-up catch-alls.
+// Conservative — only fires on unambiguously bad patterns so legitimate
+// cross-cutting milestones ("Accessibility audit across routes") aren't
+// flagged. Case-insensitive via (?i).
+var polishMilestoneNameRe = regexp.MustCompile(`(?i)(\bpolish\b|\bfollow[- ]?ups?\b|\bcleanup\b|\bverification fixes?\b|\bdesign fidelity fixes?\b|\bdeviations from\s+m\d+|from\s+m\d+\s+implementation\b|\bfwlup[s]?\b)`)
+
+// Matches task IDs that embed a milestone number, e.g. P3-FWLUP-M2-1 or
+// P1-M4-FIX-2. Capture group 1 is the milestone number referenced by the ID.
+var taskIDMilestoneRefRe = regexp.MustCompile(`^P\d+-(?:FWLUP-)?M(\d+)(?:-|$)`)
+
+// runValidateCmd implements `belmont validate`.
+func runValidateCmd(args []string) error {
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var root, feature, format string
+	fs.StringVar(&root, "root", ".", "project root")
+	fs.StringVar(&feature, "feature", "", "feature slug (default: scan every feature)")
+	fs.StringVar(&format, "format", "text", "output format (text|json)")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("validate: %w", err)
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("validate: resolve root: %w", err)
+	}
+
+	var violations []validationViolation
+	if feature != "" {
+		v, err := validateFeature(absRoot, feature)
+		if err != nil {
+			return err
+		}
+		violations = v
+	} else {
+		featuresDir := filepath.Join(absRoot, ".belmont", "features")
+		entries, err := os.ReadDir(featuresDir)
+		if err != nil {
+			return fmt.Errorf("validate: read features dir %s: %w", featuresDir, err)
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			v, err := validateFeature(absRoot, entry.Name())
+			if err != nil {
+				// Missing PROGRESS.md etc. is not fatal across features.
+				fmt.Fprintf(os.Stderr, "\033[33m⚠ %s: %s\033[0m\n", entry.Name(), err)
+				continue
+			}
+			violations = append(violations, v...)
+		}
+	}
+
+	switch strings.ToLower(format) {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(violations); err != nil {
+			return err
+		}
+	default:
+		renderValidationReport(os.Stdout, violations)
+	}
+
+	if len(violations) > 0 {
+		return fmt.Errorf("validate: found %d milestone-structure violation(s)", len(violations))
+	}
+	return nil
+}
+
+// validateFeature reads a feature's PROGRESS.md and returns any violations.
+func validateFeature(root, slug string) ([]validationViolation, error) {
+	featuresDir := filepath.Join(root, ".belmont", "features", slug)
+	if !dirExists(featuresDir) {
+		return nil, fmt.Errorf("feature %q not found at %s", slug, featuresDir)
+	}
+	// Prefer live worktree state if one exists for this feature, same as
+	// `belmont status` does.
+	progressPath := filepath.Join(featuresDir, "PROGRESS.md")
+	if override := loadAutoWorktrees(root); override != nil {
+		if wtFeature, ok := override[slug]; ok {
+			if p := filepath.Join(wtFeature, "PROGRESS.md"); fileExists(p) {
+				progressPath = p
+			}
+		}
+	}
+	data, err := os.ReadFile(progressPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", progressPath, err)
+	}
+	milestones := parseMilestones(string(data))
+	return detectViolations(slug, milestones), nil
+}
+
+// detectViolations is the pure rule engine — no IO. Takes parsed milestones,
+// returns a list of findings. Safe for test coverage.
+func detectViolations(slug string, milestones []milestone) []validationViolation {
+	var out []validationViolation
+	for _, m := range milestones {
+		// Rule 1: milestone name matches a polish/follow-up pattern.
+		if polishMilestoneNameRe.MatchString(m.Name) {
+			out = append(out, validationViolation{
+				Feature:       slug,
+				Milestone:     m.ID,
+				MilestoneName: m.Name,
+				Rule:          "polish_milestone_name",
+				Message: fmt.Sprintf(
+					"milestone %s %q looks like a polish/follow-up catch-all. Follow-ups belong in their source milestone (the one that discovered them) as new `[ ]` tasks, not a dedicated milestone. Run `/belmont:tech-plan` to restructure.",
+					m.ID, m.Name),
+			})
+		}
+		// Rule 2: task IDs reference a milestone other than the one they live in.
+		currentNum := milestoneNumber(m.ID)
+		for _, t := range m.Tasks {
+			match := taskIDMilestoneRefRe.FindStringSubmatch(t.ID)
+			if len(match) < 2 {
+				continue
+			}
+			refNum, err := strconv.Atoi(match[1])
+			if err != nil {
+				continue
+			}
+			if refNum != currentNum {
+				out = append(out, validationViolation{
+					Feature:       slug,
+					Milestone:     m.ID,
+					MilestoneName: m.Name,
+					TaskID:        t.ID,
+					Rule:          "cross_milestone_task_id",
+					Message: fmt.Sprintf(
+						"task %q in milestone %s names milestone M%d in its ID. It belongs under M%d. Move it there — keeping it here is the dependency-graph lie that causes parallel merge conflicts.",
+						t.ID, m.ID, refNum, refNum),
+				})
+			}
+		}
+	}
+	return out
+}
+
+// milestoneNumber extracts the integer from a milestone ID like "M5".
+func milestoneNumber(id string) int {
+	trimmed := strings.TrimPrefix(id, "M")
+	if n, err := strconv.Atoi(trimmed); err == nil {
+		return n
+	}
+	return -1
+}
+
+// renderValidationReport writes a human-readable summary to w.
+func renderValidationReport(w io.Writer, violations []validationViolation) {
+	if len(violations) == 0 {
+		fmt.Fprintln(w, "\033[32m✓ No milestone-structure violations found.\033[0m")
+		return
+	}
+	fmt.Fprintf(w, "\033[31m✗ %d violation(s) found:\033[0m\n\n", len(violations))
+	// Group by feature → milestone for readability.
+	byFeat := map[string][]validationViolation{}
+	var featOrder []string
+	for _, v := range violations {
+		if _, seen := byFeat[v.Feature]; !seen {
+			featOrder = append(featOrder, v.Feature)
+		}
+		byFeat[v.Feature] = append(byFeat[v.Feature], v)
+	}
+	for _, feat := range featOrder {
+		fmt.Fprintf(w, "  \033[1m%s\033[0m\n", feat)
+		for _, v := range byFeat[feat] {
+			if v.TaskID != "" {
+				fmt.Fprintf(w, "    • [%s/%s] %s — %s\n", v.Milestone, v.TaskID, v.Rule, v.Message)
+			} else {
+				fmt.Fprintf(w, "    • [%s] %s — %s\n", v.Milestone, v.Rule, v.Message)
+			}
+		}
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, "\033[2mRerun after fixing with `belmont validate`. See skills/belmont/_partials/milestone-immutability.md for the canonical rule.\033[0m")
+}
+
+// ============================================================================
+// Layer 1 — post-phase scope guard.
+//
+// After each agent subprocess exits, we compare PROGRESS.md's milestone
+// structure to the snapshot taken before the shell-out. Two kinds of
+// violation are reverted:
+//
+//   (A) New `## M<N>:` milestone headings added during a non-tech-plan phase.
+//   (B) Checkbox state flips on tasks belonging to a milestone other than the
+//       action's target.
+//
+// Revert rewrites PROGRESS.md to restore the pre-phase bytes for the
+// violating milestone blocks, preserves in-scope edits (target milestone
+// body, non-milestone sections like activity log), amends the agent's last
+// commit (best-effort), and injects a STEERING correction so the next phase
+// sees an explicit "do not do that" before it starts work.
+//
+// This is unbypassable by `git commit --no-verify` because it runs in the
+// Belmont Go process after the agent subprocess has exited.
+// ============================================================================
+
+// milestoneBlockText captures a single milestone block's exact bytes along
+// with its task state map, so we can both diff state and rewrite verbatim.
+type milestoneBlockText struct {
+	ID         string
+	Name       string
+	RawLines   []string          // the header line plus every line up to (exclusive) the next block boundary
+	TaskStates map[string]string // taskID -> marker rune as string ([ ], [x], [v], [>], [!])
+}
+
+// progressSnapshot preserves enough of PROGRESS.md to rebuild it after
+// reverting out-of-scope edits. Non-milestone lines (preamble, activity log,
+// decisions section) are stored too so they can be preserved verbatim.
+type progressSnapshot struct {
+	Path     string
+	Raw      string
+	Blocks   []milestoneBlockText
+	ByID     map[string]int // milestone ID -> index in Blocks
+}
+
+// snapshotProgress reads PROGRESS.md for the feature and builds a snapshot.
+// Returns nil on any read/parse error — the caller should treat nil as
+// "no baseline, skip guard."
+func snapshotProgress(root, feature string) *progressSnapshot {
+	if root == "" || feature == "" {
+		return nil
+	}
+	path := filepath.Join(root, ".belmont", "features", feature, "PROGRESS.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return parseProgressSnapshot(path, string(data))
+}
+
+// parseProgressSnapshot splits the PROGRESS.md content into milestone blocks.
+// A block begins at a line matching the milestone header regex; it ends when
+// the next block begins, or when a `## ` level-2 heading is encountered, or
+// at EOF. Non-milestone content is not stored as a separate block; instead
+// the Raw field is kept so the rebuilder can do line-boundary-preserving
+// replacement via string operations.
+func parseProgressSnapshot(path, content string) *progressSnapshot {
+	snap := &progressSnapshot{Path: path, Raw: content, ByID: map[string]int{}}
+	msHeaderRe := regexp.MustCompile(`(?m)^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):\s*(.+)$`)
+	depsRe := regexp.MustCompile(`\(depends:\s*(M[\d]+(?:\s*,\s*M[\d]+)*)\)\s*$`)
+	taskRe := regexp.MustCompile(`(?m)^\s*-\s+\[(.)\]\s+(\S+?):`)
+
+	lines := strings.Split(content, "\n")
+	var current *milestoneBlockText
+	flush := func() {
+		if current != nil {
+			snap.ByID[current.ID] = len(snap.Blocks)
+			snap.Blocks = append(snap.Blocks, *current)
+			current = nil
+		}
+	}
+	for _, line := range lines {
+		if m := msHeaderRe.FindStringSubmatch(line); len(m) >= 3 {
+			flush()
+			id := "M" + m[1]
+			name := strings.TrimSpace(m[2])
+			name = strings.TrimSpace(depsRe.ReplaceAllString(name, ""))
+			current = &milestoneBlockText{ID: id, Name: name, TaskStates: map[string]string{}}
+			current.RawLines = append(current.RawLines, line)
+			continue
+		}
+		// A non-milestone level-2 heading closes the current block.
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ") {
+			flush()
+			continue
+		}
+		if current != nil {
+			current.RawLines = append(current.RawLines, line)
+			if tm := taskRe.FindStringSubmatch(line); len(tm) >= 3 {
+				current.TaskStates[tm[2]] = tm[1]
+			}
+		}
+	}
+	flush()
+	return snap
+}
+
+// scopeViolation is one finding from the post-phase guard.
+type scopeViolation struct {
+	Kind       string // "new_milestone" | "out_of_scope_flip"
+	Milestone  string // milestone ID involved
+	MilestoneName string
+	TaskID     string // for out_of_scope_flip
+	FromState  string // for out_of_scope_flip
+	ToState    string // for out_of_scope_flip
+}
+
+// runScopeGuard performs the post-phase check + revert + commit amend +
+// steering correction. Runs for every action except tech-plan (which is
+// allowed to restructure milestones). Silent no-op on nil snapshot.
+func runScopeGuard(cfg loopConfig, action loopAction, pre *progressSnapshot) {
+	if pre == nil {
+		return
+	}
+	// Tech-plan phase may legitimately create/edit milestone structure.
+	if action.Type == actionReplan {
+		return
+	}
+	postData, err := os.ReadFile(pre.Path)
+	if err != nil {
+		return
+	}
+	post := parseProgressSnapshot(pre.Path, string(postData))
+	if post == nil {
+		return
+	}
+	violations := diffScopeViolations(pre, post, action.MilestoneID)
+	if len(violations) == 0 {
+		return
+	}
+	rebuilt, err := rebuildAfterScopeGuard(pre, post, action.MilestoneID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ scope guard rebuild failed: %s\033[0m\n", err)
+		return
+	}
+	if rebuilt == post.Raw {
+		// Nothing to rewrite (violations were structural but revert produced
+		// identical bytes — should be impossible, but bail safely).
+		return
+	}
+	if err := os.WriteFile(pre.Path, []byte(rebuilt), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ scope guard write failed: %s\033[0m\n", err)
+		return
+	}
+	// Amend the agent's last commit to include our revert (best-effort).
+	// If there's no agent commit, this no-ops harmlessly.
+	amend := exec.Command("git", "commit", "-a", "--amend", "--no-edit")
+	amend.Dir = cfg.Root
+	_ = amend.Run()
+
+	// Stream log + steering correction.
+	logScopeGuardRevert(cfg.Feature, action.MilestoneID, violations)
+	injectScopeGuardSteering(cfg, action, violations)
+}
+
+// diffScopeViolations walks pre vs post and returns the list of violations.
+// When targetMS is empty the out-of-scope-flip rule is relaxed (allow any
+// milestone's checkboxes to change) but the no-new-milestone rule still
+// applies.
+func diffScopeViolations(pre, post *progressSnapshot, targetMS string) []scopeViolation {
+	var out []scopeViolation
+	// Rule A: new milestones in post that didn't exist in pre.
+	for _, pb := range post.Blocks {
+		if _, ok := pre.ByID[pb.ID]; !ok {
+			out = append(out, scopeViolation{
+				Kind:          "new_milestone",
+				Milestone:     pb.ID,
+				MilestoneName: pb.Name,
+			})
+		}
+	}
+	// Rule B: checkbox changes in milestones other than the target (and that
+	// existed pre — newly added ones are handled by rule A).
+	if targetMS != "" {
+		for _, pb := range post.Blocks {
+			if pb.ID == targetMS {
+				continue
+			}
+			preIdx, ok := pre.ByID[pb.ID]
+			if !ok {
+				continue
+			}
+			preBlock := pre.Blocks[preIdx]
+			for taskID, postState := range pb.TaskStates {
+				preState, existed := preBlock.TaskStates[taskID]
+				if !existed {
+					// New task added to a non-target milestone: treat as a flip
+					// violation with From=∅. This catches cases like FWLUPs
+					// being inserted under the wrong milestone.
+					out = append(out, scopeViolation{
+						Kind:          "out_of_scope_flip",
+						Milestone:     pb.ID,
+						MilestoneName: pb.Name,
+						TaskID:        taskID,
+						FromState:     "∅",
+						ToState:       postState,
+					})
+					continue
+				}
+				if preState != postState {
+					out = append(out, scopeViolation{
+						Kind:          "out_of_scope_flip",
+						Milestone:     pb.ID,
+						MilestoneName: pb.Name,
+						TaskID:        taskID,
+						FromState:     preState,
+						ToState:       postState,
+					})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// rebuildAfterScopeGuard produces the corrected PROGRESS.md content:
+//
+//   - For milestone blocks in post that existed in pre and are out of scope:
+//     replace their text with the pre version.
+//   - For milestone blocks newly added in post: remove them entirely.
+//   - For the target milestone (and non-milestone content): keep post.
+func rebuildAfterScopeGuard(pre, post *progressSnapshot, targetMS string) (string, error) {
+	// Strategy: walk post's raw lines, identifying milestone block boundaries
+	// on the fly. For each block, emit either the pre version or the post
+	// version (or skip entirely for new milestones). Non-milestone lines are
+	// emitted verbatim.
+	msHeaderRe := regexp.MustCompile(`^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):\s*(.+)$`)
+
+	var out strings.Builder
+	lines := strings.Split(post.Raw, "\n")
+	i := 0
+	for i < len(lines) {
+		line := lines[i]
+		if m := msHeaderRe.FindStringSubmatch(line); len(m) >= 3 {
+			msID := "M" + m[1]
+			// Find block boundary: next line matching block-start or level-2 header.
+			start := i
+			j := i + 1
+			for j < len(lines) {
+				nxt := lines[j]
+				if msHeaderRe.MatchString(nxt) {
+					break
+				}
+				trim := strings.TrimSpace(nxt)
+				if strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ") {
+					break
+				}
+				j++
+			}
+			// start:j is the post block (inclusive:exclusive).
+			preIdx, existedPre := pre.ByID[msID]
+			switch {
+			case !existedPre:
+				// Newly added milestone — skip entirely (emit nothing).
+			case msID == targetMS || targetMS == "":
+				// In scope (or unscoped action): keep post bytes as-is.
+				for k := start; k < j; k++ {
+					out.WriteString(lines[k])
+					if k < j-1 || j < len(lines) {
+						out.WriteString("\n")
+					}
+				}
+			default:
+				// Out of scope: replace with pre block verbatim.
+				preLines := pre.Blocks[preIdx].RawLines
+				for k, pl := range preLines {
+					out.WriteString(pl)
+					if k < len(preLines)-1 || j < len(lines) {
+						out.WriteString("\n")
+					}
+				}
+			}
+			i = j
+			continue
+		}
+		// Non-milestone line: emit verbatim.
+		out.WriteString(line)
+		if i < len(lines)-1 {
+			out.WriteString("\n")
+		}
+		i++
+	}
+	return out.String(), nil
+}
+
+// logScopeGuardRevert prints a one-line summary of each violation to stderr.
+func logScopeGuardRevert(feature, milestoneID string, violations []scopeViolation) {
+	prefix := ""
+	if feature != "" {
+		if milestoneID != "" {
+			prefix = fmt.Sprintf("\033[36m[%s][%s]\033[0m: ", feature, milestoneID)
+		} else {
+			prefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", feature)
+		}
+	}
+	summary := summarizeScopeViolations(violations)
+	fmt.Fprintf(os.Stderr, "%s\033[33m[SCOPE-GUARD]\033[0m reverted %d violation(s) — %s\n", prefix, len(violations), summary)
+}
+
+// summarizeScopeViolations produces a terse one-line summary suitable for
+// the stream (matches steering's preview style).
+func summarizeScopeViolations(violations []scopeViolation) string {
+	counts := map[string]int{}
+	var sample string
+	for _, v := range violations {
+		counts[v.Kind]++
+		if sample == "" {
+			switch v.Kind {
+			case "new_milestone":
+				sample = fmt.Sprintf("new milestone %s %q", v.Milestone, v.MilestoneName)
+			case "out_of_scope_flip":
+				sample = fmt.Sprintf("%s in %s (%s→%s)", v.TaskID, v.Milestone, v.FromState, v.ToState)
+			}
+		}
+	}
+	var parts []string
+	if n := counts["new_milestone"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d new milestone", n))
+	}
+	if n := counts["out_of_scope_flip"]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d out-of-scope flip", n))
+	}
+	return fmt.Sprintf("%s — first: %s", strings.Join(parts, ", "), sample)
+}
+
+// injectScopeGuardSteering writes a STEERING.md entry so the next phase's
+// agent prompt starts with an explicit correction. Reuses the steering
+// infrastructure; entries are tagged with the target milestone so they
+// only fire for the offending worktree.
+func injectScopeGuardSteering(cfg loopConfig, action loopAction, violations []scopeViolation) {
+	if cfg.Root == "" || cfg.Feature == "" {
+		return
+	}
+	path := filepath.Join(cfg.Root, ".belmont", "features", cfg.Feature, "STEERING.md")
+	var body strings.Builder
+	body.WriteString("belmont's scope guard reverted edits your previous phase made to PROGRESS.md because they violated the milestone-immutability rule. The milestone structure is preserved by the Go CLI after each phase — you cannot bypass this by committing with `--no-verify`, and future phases will apply the same check. To avoid re-triggering the guard:\n\n")
+	for _, v := range violations {
+		switch v.Kind {
+		case "new_milestone":
+			body.WriteString(fmt.Sprintf("- Do NOT create new milestones. The milestone %s %q was removed. Follow-ups belong inside the source milestone as new `[ ]` tasks. See `skills/belmont/_partials/milestone-immutability.md`.\n", v.Milestone, v.MilestoneName))
+		case "out_of_scope_flip":
+			body.WriteString(fmt.Sprintf("- Do NOT modify tasks outside your target milestone. Your edit to %s in %s (%s → %s) was reverted. Only touch tasks inside %s.\n", v.TaskID, v.Milestone, v.FromState, v.ToState, action.MilestoneID))
+		}
+	}
+	body.WriteString("\nIf you genuinely believe a cross-milestone edit is needed, STOP and report it as a blocker in your summary instead of editing PROGRESS.md.")
+	_ = appendSteeringEntry(path, time.Now().UTC().Format(time.RFC3339), action.MilestoneID, body.String())
+}
+
+// ============================================================================
+// Layer 2 — verify evidence check.
+//
+// Before we accept a [v] flip, require at least one git commit in this
+// worktree whose message names the task ID. Rationale: the `verify` skill
+// can (and has, in the wild) rubber-stamp tasks whose underlying code is
+// still scaffold. If no commit in the worktree names the task, we have no
+// evidence it was implemented — revert the flip.
+//
+// Fires only on actionVerify phases (Layer 1 already guards implement/next).
+// Runs after runScopeGuard so in-scope flips are the only candidates.
+// ============================================================================
+
+// runEvidenceCheck is the public entry point.
+func runEvidenceCheck(cfg loopConfig, action loopAction, pre *progressSnapshot) {
+	if pre == nil {
+		return
+	}
+	if action.Type != actionVerify {
+		return
+	}
+	postData, err := os.ReadFile(pre.Path)
+	if err != nil {
+		return
+	}
+	post := parseProgressSnapshot(pre.Path, string(postData))
+	if post == nil {
+		return
+	}
+	missing := findEvidenceMissingFlips(cfg.Root, pre, post, action.MilestoneID)
+	if len(missing) == 0 {
+		return
+	}
+	rebuilt := revertEvidenceMissing(post, pre, missing)
+	if rebuilt == post.Raw {
+		return
+	}
+	if err := os.WriteFile(pre.Path, []byte(rebuilt), 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ evidence check write failed: %s\033[0m\n", err)
+		return
+	}
+	amend := exec.Command("git", "commit", "-a", "--amend", "--no-edit")
+	amend.Dir = cfg.Root
+	_ = amend.Run()
+	logEvidenceRevert(cfg.Feature, action.MilestoneID, missing)
+	injectEvidenceSteering(cfg, action, missing)
+}
+
+// evidenceMissing records one [v] flip that lacks a commit referencing the task.
+type evidenceMissing struct {
+	Milestone string
+	TaskID    string
+	FromState string // prior state (pre)
+}
+
+// findEvidenceMissingFlips walks post, identifies tasks that flipped TO "v"
+// this phase (vs pre), and returns any without a matching git commit. When
+// targetMS is non-empty only tasks under that milestone are evaluated.
+func findEvidenceMissingFlips(root string, pre, post *progressSnapshot, targetMS string) []evidenceMissing {
+	mergeBase := findMergeBaseRef(root)
+	var missing []evidenceMissing
+	for _, pb := range post.Blocks {
+		if targetMS != "" && pb.ID != targetMS {
+			continue
+		}
+		preIdx, existedPre := pre.ByID[pb.ID]
+		for taskID, postState := range pb.TaskStates {
+			if postState != "v" {
+				continue
+			}
+			var preState string
+			if existedPre {
+				preState = pre.Blocks[preIdx].TaskStates[taskID]
+			}
+			if preState == "v" {
+				continue // already verified, not a fresh flip this phase
+			}
+			if taskHasCommit(root, taskID, mergeBase) {
+				continue
+			}
+			missing = append(missing, evidenceMissing{
+				Milestone: pb.ID,
+				TaskID:    taskID,
+				FromState: preState,
+			})
+		}
+	}
+	return missing
+}
+
+// findMergeBaseRef returns the best-guess fork point of the current branch.
+// Empty string means "no scoping" — fall back to the full log.
+func findMergeBaseRef(root string) string {
+	for _, candidate := range []string{"main", "master", "origin/main", "origin/master"} {
+		cmd := exec.Command("git", "merge-base", "HEAD", candidate)
+		cmd.Dir = root
+		if out, err := cmd.Output(); err == nil {
+			trimmed := strings.TrimSpace(string(out))
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return ""
+}
+
+// taskHasCommit reports whether any commit reachable from HEAD names the
+// given task ID. When sinceRef is non-empty the search is limited to
+// sinceRef..HEAD so older features' commits don't produce false positives.
+func taskHasCommit(root, taskID, sinceRef string) bool {
+	if taskID == "" {
+		return true // nothing to check
+	}
+	pattern := regexp.MustCompile(`(^|[^A-Za-z0-9-])` + regexp.QuoteMeta(taskID) + `([^A-Za-z0-9-]|$)`)
+	args := []string{"log", "--format=%B%x1e"}
+	if sinceRef != "" {
+		args = append(args, sinceRef+"..HEAD")
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		// If the git query fails (e.g., shallow clone, bad ref), treat as
+		// "evidence present" to avoid false negatives blocking real work.
+		return true
+	}
+	for _, msg := range strings.Split(string(out), "\x1e") {
+		if pattern.MatchString(msg) {
+			return true
+		}
+	}
+	return false
+}
+
+// revertEvidenceMissing rebuilds PROGRESS.md so that each entry in `missing`
+// reverts its task line from "[v]" back to the prior state captured in pre.
+// Uses a line-level replacement scoped to each task's milestone block.
+func revertEvidenceMissing(post, pre *progressSnapshot, missing []evidenceMissing) string {
+	// Build a map: milestone -> taskID -> fromState, for O(1) lookup.
+	byMS := map[string]map[string]string{}
+	for _, m := range missing {
+		if byMS[m.Milestone] == nil {
+			byMS[m.Milestone] = map[string]string{}
+		}
+		fromState := m.FromState
+		if fromState == "" {
+			fromState = " "
+		}
+		byMS[m.Milestone][m.TaskID] = fromState
+	}
+
+	msHeaderRe := regexp.MustCompile(`^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):\s*(.+)$`)
+	taskRe := regexp.MustCompile(`^(\s*-\s+\[)(.)\](\s+)(\S+?)(:.*)$`)
+
+	var out strings.Builder
+	var currentMS string
+	lines := strings.Split(post.Raw, "\n")
+	for i, line := range lines {
+		if m := msHeaderRe.FindStringSubmatch(line); len(m) >= 3 {
+			currentMS = "M" + m[1]
+		} else {
+			trim := strings.TrimSpace(line)
+			if strings.HasPrefix(trim, "## ") && !strings.HasPrefix(trim, "### ") {
+				currentMS = ""
+			}
+		}
+		if currentMS != "" {
+			if overrides, ok := byMS[currentMS]; ok {
+				if tm := taskRe.FindStringSubmatch(line); len(tm) >= 6 {
+					taskID := tm[4]
+					if from, hit := overrides[taskID]; hit && tm[2] == "v" {
+						line = tm[1] + from + "]" + tm[3] + tm[4] + tm[5]
+					}
+				}
+			}
+		}
+		out.WriteString(line)
+		if i < len(lines)-1 {
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
+}
+
+// logEvidenceRevert prints a one-line summary per verify-guard revert batch.
+func logEvidenceRevert(feature, milestoneID string, missing []evidenceMissing) {
+	prefix := ""
+	if feature != "" {
+		if milestoneID != "" {
+			prefix = fmt.Sprintf("\033[36m[%s][%s]\033[0m: ", feature, milestoneID)
+		} else {
+			prefix = fmt.Sprintf("\033[36m[%s]\033[0m: ", feature)
+		}
+	}
+	var ids []string
+	for _, m := range missing {
+		ids = append(ids, m.TaskID)
+	}
+	sort.Strings(ids)
+	preview := strings.Join(ids, ", ")
+	if len(preview) > 100 {
+		preview = preview[:99] + "…"
+	}
+	fmt.Fprintf(os.Stderr, "%s\033[33m[VERIFY-GUARD]\033[0m reverted %d [v] flip(s) lacking commit evidence — %s\n", prefix, len(missing), preview)
+}
+
+// injectEvidenceSteering tells the next phase explicitly which tasks lost
+// their [v] and why, so it doesn't try to re-flip them without doing work.
+func injectEvidenceSteering(cfg loopConfig, action loopAction, missing []evidenceMissing) {
+	if cfg.Root == "" || cfg.Feature == "" {
+		return
+	}
+	path := filepath.Join(cfg.Root, ".belmont", "features", cfg.Feature, "STEERING.md")
+	var body strings.Builder
+	body.WriteString("belmont's verify-evidence guard reverted [v] flips on the following task(s) because no commit in this worktree's history mentions their task IDs. A task cannot be marked verified without a commit that implements it and names the task ID in the commit message (the existing convention: `[P1-1]:` or `P1-1:`). The guard runs in the Go CLI after each phase and cannot be bypassed.\n\nReverted flips:\n")
+	for _, m := range missing {
+		body.WriteString(fmt.Sprintf("- %s (milestone %s) — had no commit referencing it; reverted [v] → [%s].\n", m.TaskID, m.Milestone, nonEmpty(m.FromState, " ")))
+	}
+	body.WriteString("\nTo verify these tasks: either (a) show the existing commit by its hash if the task was genuinely implemented (perhaps under a different task ID — then update PROGRESS.md's task ID to match), or (b) implement the task now, commit with the task ID in the message, then re-verify.")
+	_ = appendSteeringEntry(path, time.Now().UTC().Format(time.RFC3339), action.MilestoneID, body.String())
+}
+
+// nonEmpty returns fallback when s is empty.
+func nonEmpty(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
+}
+
+// ============================================================================
+// Layer 3 — merge overlap visibility.
+//
+// At merge time, when we're landing sibling milestones in sequence, warn if
+// the branch being merged touches files that a previously-merged sibling
+// also touched. Does not block the merge; the point is visibility so the
+// user sees the overlap at the moment intervention is cheap (before pushing
+// or before the combined state diverges too far).
+//
+// This is a diagnostic layer — Layer 0 prevents the most common cause, and
+// Layer 1 reverts the state-file manifestation. Layer 3 catches residual
+// source-file overlap that slips past both.
+// ============================================================================
+
+// branchTouchedFiles returns the list of files whose content differs on
+// `branch` compared to the merge base with HEAD. Empty slice on error.
+func branchTouchedFiles(root, branch string) []string {
+	base := "HEAD"
+	if mb := findMergeBaseOfBranch(root, branch); mb != "" {
+		base = mb
+	}
+	cmd := exec.Command("git", "diff", "--name-only", base+".."+branch)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		files = append(files, line)
+	}
+	return files
+}
+
+// findMergeBaseOfBranch returns the merge-base between HEAD and branch.
+// Empty string if git fails or no common ancestor.
+func findMergeBaseOfBranch(root, branch string) string {
+	cmd := exec.Command("git", "merge-base", "HEAD", branch)
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// reportMergeOverlap prints a one-block warning listing files that this
+// branch touches and that were also touched by siblings merged earlier.
+// mergedFiles is the cumulative map from prior iterations.
+func reportMergeOverlap(root, branch, msID string, mergedFiles map[string][]string) {
+	if len(mergedFiles) == 0 {
+		return
+	}
+	touched := branchTouchedFiles(root, branch)
+	if len(touched) == 0 {
+		return
+	}
+	type entry struct {
+		File    string
+		Sources []string
+	}
+	var overlaps []entry
+	for _, f := range touched {
+		if sources, ok := mergedFiles[f]; ok {
+			overlaps = append(overlaps, entry{File: f, Sources: sources})
+		}
+	}
+	if len(overlaps) == 0 {
+		return
+	}
+	sort.Slice(overlaps, func(i, j int) bool { return overlaps[i].File < overlaps[j].File })
+	fmt.Fprintf(os.Stderr, "\n  \033[33m⚠ Merge overlap for %s:\033[0m %d file(s) also modified by earlier sibling(s)\n", msID, len(overlaps))
+	maxShow := 8
+	for i, o := range overlaps {
+		if i == maxShow {
+			fmt.Fprintf(os.Stderr, "      \033[2m… and %d more\033[0m\n", len(overlaps)-maxShow)
+			break
+		}
+		fmt.Fprintf(os.Stderr, "      %s \033[2m(also in: %s)\033[0m\n", o.File, strings.Join(o.Sources, ", "))
+	}
+	fmt.Fprintf(os.Stderr, "  \033[2m  Proceeding with default merge strategy — review the resulting commit before pushing.\033[0m\n\n")
+}
 
