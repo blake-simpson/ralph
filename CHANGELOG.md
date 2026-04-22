@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.10.0
+
+**Released:** 2026-04-22
+
+### Changes since v0.9.9
+
+- Heavy refactoring + bugfixing for parallel auto mode
+- Add `belmont steer` command to instruct agents during auto mode
+- Dynamic model assignment based on feature
+
+
+
 ## v0.9.9
 
 **Released:** 2026-04-21
