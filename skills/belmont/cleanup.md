@@ -137,14 +137,14 @@ Wait for user response for each feature.
 ```
 
 2. Delete all other files in `.belmont/features/<slug>/`: PRD.md, TECH_PLAN.md, PROGRESS.md, NOTES.md, MILESTONE.md, all MILESTONE-*.done.md
-3. Update the master `.belmont/PRD.md` features table — change the Status column for this feature to `📦 Archived`
-4. Update the master `.belmont/PROGRESS.md` features table — change the Status column for this feature to `📦 Archived`
+3. Update the master `.belmont/PRD.md` features table — change the Status column for this feature to `Archived`
+4. Update the master `.belmont/PROGRESS.md` features table — change the Status column for this feature to `Archived`
 
 ### If user chooses Delete
 
 1. Remove the entire `.belmont/features/<slug>/` directory
-2. Update master PRD features table — remove the row or mark as `🗑 Removed`
-3. Update master PROGRESS features table — remove the row or mark as `🗑 Removed`
+2. Update master PRD features table — remove the row or mark as `Removed`
+3. Update master PROGRESS features table — remove the row or mark as `Removed`
 
 ### If user chooses Keep or Skip
 
