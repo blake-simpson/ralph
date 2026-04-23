@@ -11,6 +11,7 @@ belmont update --check                  # Check for updates without installing
 belmont status                          # View project progress
 belmont status --format json            # Machine-readable status
 belmont status --feature auth           # Feature-specific status
+belmont status --color always           # Force ANSI-coloured markers (auto|always|never; auto honors NO_COLOR + TTY)
 belmont auto --feature auth              # Run feature auto (auto-detect tool)
 belmont auto --feature auth --tool codex # Use specific tool
 belmont auto --feature auth --from M2 --to M4  # Milestone range
