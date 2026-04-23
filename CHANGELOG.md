@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.1
+
+**Released:** 2026-04-23
+
+### Changes since v0.10.0
+
+- Emit colored status markers when piped via --color=always
+
+
+
 ## v0.10.0
 
 **Released:** 2026-04-22
