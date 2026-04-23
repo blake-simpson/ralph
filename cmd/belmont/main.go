@@ -657,7 +657,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  belmont install [--source PATH] [--project PATH] [--tools all|none|claude,codex,...]")
 	fmt.Fprintln(w, "  belmont update [--check] [--force]")
-	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json]")
+	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json] [--color auto|always|never]")
 	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--root PATH]")
 	fmt.Fprintln(w, "    (alias: belmont loop)")
 	fmt.Fprintln(w, "  belmont reverify [--feature SLUG] [--from M1] [--to M5] [--root PATH] [--format text|json]")
@@ -682,10 +682,12 @@ func runStatus(args []string) error {
 	var format string
 	var maxName int
 	var feature string
+	var colorMode string
 	fsFlags.StringVar(&root, "root", ".", "project root")
 	fsFlags.StringVar(&format, "format", "text", "text or json")
 	fsFlags.IntVar(&maxName, "max-task-name", 55, "max task name length")
 	fsFlags.StringVar(&feature, "feature", "", "feature slug")
+	fsFlags.StringVar(&colorMode, "color", "auto", "auto, always, or never")
 	if err := fsFlags.Parse(args); err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
@@ -706,10 +708,40 @@ func runStatus(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(report)
 	case "text":
-		fmt.Print(renderStatus(report, isTerminal(os.Stdout)))
+		useColor, err := shouldColor(colorMode, os.Stdout)
+		if err != nil {
+			return fmt.Errorf("status: %w", err)
+		}
+		fmt.Print(renderStatus(report, useColor))
 		return nil
 	default:
 		return fmt.Errorf("status: unknown format %q", format)
+	}
+}
+
+// shouldColor resolves whether ANSI colors should be emitted.
+//
+//	mode "never"  → false
+//	mode "always" → true (regardless of stdout type or NO_COLOR)
+//	mode "auto"   → honor NO_COLOR, then fall back to isTerminal(f)
+//
+// Follows the NO_COLOR convention (https://no-color.org): any non-empty value
+// disables colors under "auto" mode only. "always" is the explicit opt-in for
+// piped contexts (e.g., when Claude Code runs the CLI as a sub-process but
+// renders ANSI in its Bash tool output block).
+func shouldColor(mode string, f *os.File) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		if os.Getenv("NO_COLOR") != "" {
+			return false, nil
+		}
+		return isTerminal(f), nil
+	case "always":
+		return true, nil
+	case "never":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid --color value %q (want auto, always, or never)", mode)
 	}
 }
 

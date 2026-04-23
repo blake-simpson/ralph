@@ -12,8 +12,10 @@ Read the current project state and produce a formatted status report.
 If available, use the global CLI first:
 
 ```bash
-belmont status
+belmont status --color=always
 ```
+
+(`--color=always` forces ANSI colors on the status markers even though stdout is piped by the calling AI tool — the markers render in colour in the tool's output block, making the list easier to scan.)
 
 If the command fails, fall back to the manual steps below.
 
