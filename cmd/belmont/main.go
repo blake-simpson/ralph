@@ -317,18 +317,19 @@ type featureSummary struct {
 }
 
 type statusReport struct {
-	Feature         string
-	TechPlanReady   bool
-	PRFAQReady      bool
-	OverallStatus   string
-	TaskCounts      map[string]int
-	Tasks           []task
-	Milestones      []milestone
-	NextMilestone   *milestone
-	NextTask        *task
-	LastCompleted   *task
-	RecentDecisions []string
-	Features        []featureSummary
+	Feature           string
+	TechPlanReady     bool
+	PRFAQReady        bool
+	OverallStatus     string
+	TaskCounts        map[string]int
+	Tasks             []task
+	Milestones        []milestone
+	NextMilestone     *milestone
+	NextTask          *task
+	LastCompleted     *task
+	RecentDecisions   []string
+	Features          []featureSummary
+	ArchivedFeatures  []featureSummary `json:",omitempty"`
 }
 
 type config struct {
@@ -683,11 +684,13 @@ func runStatus(args []string) error {
 	var maxName int
 	var feature string
 	var colorMode string
+	var showArchived bool
 	fsFlags.StringVar(&root, "root", ".", "project root")
 	fsFlags.StringVar(&format, "format", "text", "text or json")
 	fsFlags.IntVar(&maxName, "max-task-name", 55, "max task name length")
 	fsFlags.StringVar(&feature, "feature", "", "feature slug")
 	fsFlags.StringVar(&colorMode, "color", "auto", "auto, always, or never")
+	fsFlags.BoolVar(&showArchived, "show-archived", false, "include archived features in the listing (text mode)")
 	if err := fsFlags.Parse(args); err != nil {
 		return fmt.Errorf("status: %w", err)
 	}
@@ -712,7 +715,7 @@ func runStatus(args []string) error {
 		if err != nil {
 			return fmt.Errorf("status: %w", err)
 		}
-		fmt.Print(renderStatus(report, useColor))
+		fmt.Print(renderStatus(report, useColor, showArchived))
 		return nil
 	default:
 		return fmt.Errorf("status: unknown format %q", format)
@@ -844,7 +847,22 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 		features = []featureSummary{}
 	}
 	populateFeatureDeps(features, root)
-	report.Features = features
+
+	// Split archived features into their own slice so consumers (JSON + text
+	// renderer) can treat them separately without re-filtering. Overall status
+	// is still computed across the full set — archiving a finished feature
+	// shouldn't regress the project status.
+	active := make([]featureSummary, 0, len(features))
+	var archived []featureSummary
+	for _, f := range features {
+		if f.Status == "Archived" {
+			archived = append(archived, f)
+		} else {
+			active = append(active, f)
+		}
+	}
+	report.Features = active
+	report.ArchivedFeatures = archived
 	report.Feature = extractProductName(filepath.Join(root, ".belmont", "PRD.md"))
 	report.TechPlanReady = techPlanReady(filepath.Join(root, ".belmont", "TECH_PLAN.md"))
 
@@ -1010,11 +1028,18 @@ func listFeaturesWithOverrides(featuresDir string, maxName int, worktreeOverride
 			featurePath = override
 		}
 		prdPath := filepath.Join(featurePath, "PRD.md")
+		archivePath := filepath.Join(featurePath, "ARCHIVE.md")
 
 		name := slug
 		if prdContent, err := os.ReadFile(prdPath); err == nil {
 			extracted := extractFeatureName(string(prdContent))
 			if extracted != "Unknown" {
+				name = extracted
+			}
+		} else if archiveContent, err := os.ReadFile(archivePath); err == nil {
+			// Archived feature: PRD.md is gone; recover the name from the
+			// "# Archive: <name>" header written by /belmont:cleanup.
+			if extracted := extractArchiveName(string(archiveContent)); extracted != "" {
 				name = extracted
 			}
 		}
@@ -1056,6 +1081,14 @@ func listFeaturesWithOverrides(featuresDir string, maxName int, worktreeOverride
 		featureNextTask := nextTask(tasks)
 
 		status := computeOverallStatus(tasks)
+
+		// Features archived via /belmont:cleanup have their planning files
+		// replaced with a single ARCHIVE.md summary. Without this check the
+		// missing PROGRESS.md would make them look like "Not Started" and they
+		// would leak into `belmont auto --all`.
+		if fileExists(filepath.Join(featurePath, "ARCHIVE.md")) {
+			status = "Archived"
+		}
 
 		features = append(features, featureSummary{
 			Slug:            slug,
@@ -1357,10 +1390,13 @@ func computeFeatureListStatus(features []featureSummary) string {
 	allComplete := true
 	anyProgress := false
 	for _, f := range features {
-		if f.Status != "Verified" {
+		// Archived features count as terminal for both "Verified" and
+		// "Complete" aggregates — otherwise cleaning up a finished feature
+		// would regress the project status.
+		if f.Status != "Verified" && f.Status != "Archived" {
 			allVerified = false
 		}
-		if f.Status != "Complete" && f.Status != "Verified" {
+		if !isFeatureTerminal(f.Status) {
 			allComplete = false
 		}
 		if f.TasksDone > 0 || f.TasksInProgress > 0 {
@@ -1386,6 +1422,17 @@ func extractFeatureName(prd string) string {
 		return strings.TrimSpace(match[1])
 	}
 	return "Unknown"
+}
+
+// extractArchiveName pulls the display name out of an ARCHIVE.md's
+// "# Archive: <name>" header. Returns "" if no header is found.
+func extractArchiveName(archive string) string {
+	re := regexp.MustCompile(`(?m)^#\s*Archive:\s*(.+)$`)
+	match := re.FindStringSubmatch(archive)
+	if len(match) > 1 {
+		return strings.TrimSpace(match[1])
+	}
+	return ""
 }
 
 // flattenTasks extracts all tasks from parsed milestones, sorted by task ID.
@@ -1685,11 +1732,23 @@ func computeOverallStatus(tasks []task) string {
 	return "Not Started"
 }
 
+// isFeatureTerminal reports whether a feature is done — either all tasks
+// implemented ("Complete"), all tasks verified ("Verified"), or archived via
+// /belmont:cleanup ("Archived"). Terminal features are skipped by `auto --all`
+// and treated as dep-satisfying (but non-executing) in wave planning.
+func isFeatureTerminal(status string) bool {
+	switch status {
+	case "Complete", "Verified", "Archived":
+		return true
+	}
+	return false
+}
 
-func renderStatus(report statusReport, color bool) string {
+
+func renderStatus(report statusReport, color bool, showArchived bool) string {
 	// Feature listing mode (default when no --feature specified)
 	if report.Features != nil {
-		return renderFeatureListing(report, color)
+		return renderFeatureListing(report, color, showArchived)
 	}
 
 	techPlan := "Not written (run /belmont:tech-plan to create)"
@@ -1840,7 +1899,7 @@ func colorStatus(status string, color bool) string {
 		return ansiYellow + status + ansiReset
 	case "BLOCKED":
 		return ansiRed + status + ansiReset
-	case "Not Started":
+	case "Not Started", "Archived":
 		return ansiDim + status + ansiReset
 	default:
 		return status
@@ -1864,6 +1923,8 @@ func featureStatusIcon(status string, color bool) string {
 		bracket = "[x]"
 	case "In Progress":
 		bracket = "[>]"
+	case "Archived":
+		bracket = "[-]"
 	}
 	if !color {
 		return bracket
@@ -1880,7 +1941,7 @@ func featureStatusIcon(status string, color bool) string {
 	}
 }
 
-func renderFeatureListing(report statusReport, color bool) string {
+func renderFeatureListing(report statusReport, color bool, showArchived bool) string {
 	prfaq := "Not written (run /belmont:working-backwards)"
 	if report.PRFAQReady {
 		prfaq = "Written"
@@ -1905,11 +1966,19 @@ func renderFeatureListing(report statusReport, color bool) string {
 	sb.WriteString(fmt.Sprintf("Master Tech Plan: %s\n\n", techPlan))
 	sb.WriteString(fmt.Sprintf("Status: %s\n\n", colorStatus(report.OverallStatus, color)))
 
-	if len(report.Features) == 0 {
+	// report.Features is already archived-free (split in buildStatus).
+	// Archived features are rendered separately as a compact block below the
+	// active listing so their "0/0" noise doesn't clutter active work.
+	listing := report.Features
+
+	if len(listing) == 0 && len(report.ArchivedFeatures) == 0 {
 		sb.WriteString("Features:\n")
 		sb.WriteString("  (none — run /belmont:product-plan to create your first feature)\n")
+	} else if len(listing) == 0 {
+		sb.WriteString("Features:\n")
+		sb.WriteString("  (no active features — all archived)\n\n")
 	} else {
-		for _, f := range report.Features {
+		for _, f := range listing {
 			icon := featureStatusIcon(f.Status, color)
 			sb.WriteString(fmt.Sprintf("%s %s (%s)\n", icon, f.Name, f.Slug))
 			sb.WriteString(fmt.Sprintf("  Tasks: %d/%d done", f.TasksDone, f.TasksTotal))
@@ -1953,6 +2022,24 @@ func renderFeatureListing(report statusReport, color bool) string {
 
 			sb.WriteString("\n")
 		}
+	}
+
+	if showArchived && len(report.ArchivedFeatures) > 0 {
+		var block strings.Builder
+		block.WriteString(fmt.Sprintf("Archived (%d):\n", len(report.ArchivedFeatures)))
+		for _, f := range report.ArchivedFeatures {
+			if f.Name != "" && f.Name != f.Slug {
+				block.WriteString(fmt.Sprintf("  - %s — %s\n", f.Slug, f.Name))
+			} else {
+				block.WriteString(fmt.Sprintf("  - %s\n", f.Slug))
+			}
+		}
+		out := block.String()
+		if color {
+			out = ansiDim + out + ansiReset
+		}
+		sb.WriteString(out)
+		sb.WriteString("\n")
 	}
 
 	sb.WriteString("Use --feature <slug> for detailed task-level status.\n")
@@ -3563,14 +3650,15 @@ func resolveFeatureSlugs(root, featuresFlag string, allFlag bool) ([]string, err
 		syncMasterFeatureStatuses(root, features)
 		var slugs []string
 		for _, f := range features {
-			// Skip features that are complete (computed from feature-level PRD/PROGRESS files)
-			if f.Status == "Complete" {
+			// Skip features that are already done (Complete/Verified) or
+			// archived via /belmont:cleanup. Only active/pending work runs.
+			if isFeatureTerminal(f.Status) {
 				continue
 			}
 			slugs = append(slugs, f.Slug)
 		}
 		if len(slugs) == 0 {
-			return nil, fmt.Errorf("auto: all features are already complete")
+			return nil, fmt.Errorf("auto: no pending features — all are complete, verified, or archived")
 		}
 		return slugs, nil
 	}
@@ -3616,15 +3704,16 @@ func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
 		bySlug[f.Slug] = f
 	}
 
-	// Compute in-degree for each non-complete feature
+	// Compute in-degree for each non-terminal feature. Complete/Verified/
+	// Archived features don't execute but still satisfy downstream deps.
 	inDegree := make(map[string]int)
 	for _, f := range features {
-		if f.Status == "Complete" {
+		if isFeatureTerminal(f.Status) {
 			continue
 		}
 		count := 0
 		for _, dep := range f.Deps {
-			if df, ok := bySlug[dep]; ok && df.Status != "Complete" {
+			if df, ok := bySlug[dep]; ok && !isFeatureTerminal(df.Status) {
 				count++
 			}
 		}
