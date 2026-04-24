@@ -30,9 +30,12 @@ When no specific feature is requested:
 2. Read `.belmont/PRD.md` — the master PRD (feature catalog)
 3. Scan `.belmont/features/` for subdirectories
 4. For each feature directory, read its `PRD.md` for the feature name and `PROGRESS.md` for task counts
-5. Produce a **feature listing report** (see format below)
+5. **Archived features** — a feature directory that contains `ARCHIVE.md` (placed there by `/belmont:cleanup`) has no `PROGRESS.md`. Omit archived features entirely from the default listing. Only when the user explicitly asks for them, append a compact `Archived (N):` block (slug — name per line) below the active features.
+6. Produce a **feature listing report** (see format below)
 
 If no features exist yet, tell the user to run `/belmont:product-plan` to create their first feature.
+
+If the user ran the CLI fast path above, the `--show-archived` flag controls this same behaviour (default: hidden entirely; with flag: compact list).
 
 ### Single Feature Mode
 

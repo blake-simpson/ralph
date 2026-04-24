@@ -1,6 +1,6 @@
 {
   "name": "belmont",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Structured AI coding sessions with PRD-driven planning, implementation, and verification",
   "author": {
     "name": "Blake Simpson"

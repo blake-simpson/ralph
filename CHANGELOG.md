@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.10.2
+
+**Released:** 2026-04-24
+
+### Changes since v0.10.1
+
+- Improve status and auto commands in relation to archived features
+- Remove emojis from cleanup skills
+
+
+
 ## v0.10.1
 
 **Released:** 2026-04-23
