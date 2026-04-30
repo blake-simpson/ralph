@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.10.3
+
+**Released:** 2026-04-30
+
+### Changes since v0.10.2
+
+- Restructure Belmont files, simplify, and update to latest CLI APIs
+- Remove "migration" tech debt
+- Auto commit the Belmont changes on install + warn on auto mode if git unclean
+
+
+
 ## v0.10.2
 
 **Released:** 2026-04-24
