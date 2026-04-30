@@ -1,3 +1,7 @@
+// Belmont CLI.
+//
+//go:generate bash scripts/generate-skills.sh
+
 package main
 
 import (
@@ -2143,8 +2147,11 @@ func runInstall(args []string) error {
 		}
 		fmt.Println("")
 
+		skillsTarget := filepath.Join(projectRoot, ".agents", "skills", "belmont")
 		fmt.Println("Installing skills to .agents/skills/belmont/...")
-		if err := syncEmbeddedDir(embeddedSkills, "skills/belmont", filepath.Join(projectRoot, ".agents", "skills", "belmont")); err != nil {
+		// Phase 2: skills are folder layout (<name>/SKILL.md) only. The
+		// agentskills.io standard, auto-discovered by every supported CLI.
+		if err := syncEmbeddedSkillsFolderDir(embeddedSkills, "skills/belmont", skillsTarget); err != nil {
 			return err
 		}
 		fmt.Println("")
@@ -2157,8 +2164,19 @@ func runInstall(args []string) error {
 		agentsSource := filepath.Join(sourceRoot, "agents", "belmont")
 		skillsSource := filepath.Join(sourceRoot, "skills", "belmont")
 
-		if !dirExists(agentsSource) || !dirExists(skillsSource) {
-			return fmt.Errorf("install: source missing agents/ or skills/ in %s", sourceRoot)
+		if !dirExists(agentsSource) {
+			return fmt.Errorf("install: source missing agents/ at %s", sourceRoot)
+		}
+
+		// Source mode: ensure the generated skill folders exist before reading
+		// them. Auto-runs `scripts/generate-skills.sh` if any source file is
+		// newer than its generated counterpart (or no generated content
+		// exists yet).
+		if err := ensureSkillsGenerated(sourceRoot); err != nil {
+			return err
+		}
+		if !dirExists(skillsSource) {
+			return fmt.Errorf("install: source missing skills/ at %s", sourceRoot)
 		}
 
 		fmt.Println("Installing agents to .agents/belmont/...")
@@ -2167,23 +2185,20 @@ func runInstall(args []string) error {
 		}
 		fmt.Println("")
 
+		skillsTarget := filepath.Join(projectRoot, ".agents", "skills", "belmont")
 		fmt.Println("Installing skills to .agents/skills/belmont/...")
-		if err := syncMarkdownDir(skillsSource, filepath.Join(projectRoot, ".agents", "skills", "belmont")); err != nil {
+		if err := syncSkillsFolderDir(skillsSource, skillsTarget); err != nil {
 			return err
 		}
 		fmt.Println("")
 	}
 
-	if containsTool(selectedTools, "codex") {
-		fmt.Println("Updating AGENTS.md for Codex skill routing...")
-		if changed, err := ensureCodexAgentsGuidance(projectRoot); err != nil {
-			return err
-		} else if changed {
-			fmt.Println("  + AGENTS.md Belmont Codex skill routing section")
-		} else {
-			fmt.Println("  = AGENTS.md Belmont Codex skill routing section (unchanged)")
-		}
-		fmt.Println("")
+	// Phase 2: AGENTS.md / GEMINI.md routing sections are no longer written —
+	// every supported CLI auto-discovers `.agents/skills/<name>/SKILL.md` per
+	// agentskills.io. Legacy install dirs from earlier Belmont versions are
+	// removed in one consolidated pass.
+	if err := runLegacyCleanup(projectRoot); err != nil {
+		return err
 	}
 
 	for _, tool := range selectedTools {
@@ -2220,23 +2235,23 @@ func runInstall(args []string) error {
 			switch tool {
 			case "claude":
 				fmt.Println("  Claude Code  .claude/agents/belmont -> ../../.agents/belmont")
-				fmt.Println("              .claude/commands/belmont (copied from .agents/skills/belmont)")
+				fmt.Println("               .claude/skills/belmont -> ../../.agents/skills/belmont")
 				fmt.Println("    Use: /belmont:working-backwards, /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:debug, /belmont:debug-auto, /belmont:debug-manual, /belmont:status")
 			case "codex":
-				fmt.Println("  Codex        .codex/belmont (copied from .agents/skills/belmont)")
-				fmt.Println("    Use: AGENTS.md includes Belmont skill routing for belmont:<skill> prompts")
+				fmt.Println("  Codex        .agents/skills/belmont/<name>/SKILL.md (auto-discovered)")
+				fmt.Println("    Use: prompt belmont:<skill> — Codex resolves via /skills")
 			case "cursor":
-				fmt.Println("  Cursor       .cursor/rules/belmont/*.mdc -> .agents/skills/belmont/*.md")
-				fmt.Println("    Use: Reference belmont rules in Composer/Agent, or toggle in Settings > Rules")
+				fmt.Println("  Cursor       .agents/skills/belmont/<name>/SKILL.md (auto-discovered)")
+				fmt.Println("    Use: prompt belmont:<skill> — Cursor loads via Agent Skills")
 			case "windsurf":
-				fmt.Println("  Windsurf     .windsurf/rules/belmont -> .agents/skills/belmont")
-				fmt.Println("    Use: Reference belmont rules in Cascade")
+				fmt.Println("  Windsurf     .agents/skills/belmont/<name>/SKILL.md (auto-discovered)")
+				fmt.Println("    Use: reference belmont skills in Cascade — auto-loaded by SKILL.md description")
 			case "gemini":
-				fmt.Println("  Gemini       .gemini/rules/belmont -> .agents/skills/belmont")
-				fmt.Println("    Use: Reference belmont rules in Gemini")
+				fmt.Println("  Gemini       .agents/skills/belmont/<name>/SKILL.md (auto-discovered)")
+				fmt.Println("    Use: prompt belmont:<skill> — Gemini surfaces via /skills")
 			case "copilot":
-				fmt.Println("  Copilot      .copilot/belmont -> .agents/skills/belmont")
-				fmt.Println("    Use: Reference belmont files in Copilot Chat")
+				fmt.Println("  Copilot      .agents/skills/belmont/<name>/SKILL.md (auto-discovered)")
+				fmt.Println("    Use: prompt belmont:<skill> — Copilot loads from .agents/skills/")
 			}
 		}
 	}
@@ -2277,6 +2292,105 @@ func atoiDefault(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// ensureSkillsGenerated re-runs `scripts/generate-skills.sh` against the
+// given Belmont source root if its generated output is missing or stale
+// (any `_src/` or `_partials/` file newer than any `<skill>/SKILL.md`).
+// This makes source-mode `belmont install --source` self-healing — no
+// separate `make` step required, even though the generated layout isn't
+// committed to git.
+func ensureSkillsGenerated(sourceRoot string) error {
+	srcDir := filepath.Join(sourceRoot, "skills", "belmont", "_src")
+	partialsDir := filepath.Join(sourceRoot, "skills", "belmont", "_partials")
+	skillsDir := filepath.Join(sourceRoot, "skills", "belmont")
+	script := filepath.Join(sourceRoot, "scripts", "generate-skills.sh")
+
+	if !dirExists(srcDir) {
+		// Older Belmont source layouts didn't have _src/ — skip silently.
+		return nil
+	}
+	if !fileExists(script) {
+		return nil
+	}
+
+	stale := false
+	srcEntries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range srcEntries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".md")
+		srcInfo, err := os.Stat(filepath.Join(srcDir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		genPath := filepath.Join(skillsDir, name, "SKILL.md")
+		genInfo, err := os.Stat(genPath)
+		if err != nil {
+			stale = true
+			break
+		}
+		if srcInfo.ModTime().After(genInfo.ModTime()) {
+			stale = true
+			break
+		}
+	}
+
+	// Also check partials — any partial change invalidates everything that
+	// includes it, and including that into per-file dependency tracking is
+	// not worth the complexity.
+	if !stale && dirExists(partialsDir) {
+		partialEntries, _ := os.ReadDir(partialsDir)
+		var oldestGen time.Time
+		first := true
+		_ = filepath.WalkDir(skillsDir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Base(p) != "SKILL.md" {
+				return nil
+			}
+			info, err := os.Stat(p)
+			if err != nil {
+				return nil
+			}
+			if first || info.ModTime().Before(oldestGen) {
+				oldestGen = info.ModTime()
+				first = false
+			}
+			return nil
+		})
+		if !first {
+			for _, entry := range partialEntries {
+				if entry.IsDir() {
+					continue
+				}
+				info, err := os.Stat(filepath.Join(partialsDir, entry.Name()))
+				if err != nil {
+					continue
+				}
+				if info.ModTime().After(oldestGen) {
+					stale = true
+					break
+				}
+			}
+		}
+	}
+
+	if !stale {
+		return nil
+	}
+
+	fmt.Println("Regenerating skills from _src/ + _partials/ ...")
+	cmd := exec.Command("bash", script)
+	cmd.Dir = sourceRoot
+	cmd.Stdout = io.Discard // already verbose; suppress unless errored
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("install: failed to regenerate skills (run scripts/generate-skills.sh manually): %w", err)
+	}
+	return nil
 }
 
 func resolveSourceRoot(source string) (string, error) {
@@ -2451,27 +2565,63 @@ func resolveTools(projectRoot, toolsFlag string, noPrompt bool) ([]string, error
 	return nil, nil
 }
 
+// detectTools returns the AI tools Belmont should install for. A tool is
+// included when ANY of these signals fires:
+//   - its conventional project-level dir exists (`.claude/`, `.codex/`, etc.),
+//     signaling the user has used the tool in this repo before;
+//   - its CLI binary is present on PATH, signaling the user has the tool
+//     installed system-wide (so they'll likely want Belmont wired up here);
+//   - a Belmont skill-routing section exists in AGENTS.md (for Codex and
+//     Copilot) or GEMINI.md (for Gemini), signaling Belmont was previously
+//     installed for that tool here — needed because Phase 1+ installs no
+//     longer create `.codex/`, `.gemini/`, or `.copilot/` marker dirs.
 func detectTools(projectRoot string) []string {
+	tools := []string{"claude", "codex", "cursor", "windsurf", "gemini", "copilot"}
+	dirMarker := map[string]string{
+		"claude":   ".claude",
+		"codex":    ".codex",
+		"cursor":   ".cursor",
+		"windsurf": ".windsurf",
+		"gemini":   ".gemini",
+		"copilot":  ".copilot",
+	}
+	hasAgentsBelmontSection := fileContainsMarker(filepath.Join(projectRoot, "AGENTS.md"), belmontAgentsSectionStart)
+	hasGeminiBelmontSection := fileContainsMarker(filepath.Join(projectRoot, "GEMINI.md"), belmontGeminiSectionStart)
+
 	var detected []string
-	if dirExists(filepath.Join(projectRoot, ".claude")) {
-		detected = append(detected, "claude")
-	}
-	if dirExists(filepath.Join(projectRoot, ".codex")) {
-		detected = append(detected, "codex")
-	}
-	if dirExists(filepath.Join(projectRoot, ".cursor")) {
-		detected = append(detected, "cursor")
-	}
-	if dirExists(filepath.Join(projectRoot, ".windsurf")) {
-		detected = append(detected, "windsurf")
-	}
-	if dirExists(filepath.Join(projectRoot, ".gemini")) {
-		detected = append(detected, "gemini")
-	}
-	if dirExists(filepath.Join(projectRoot, ".copilot")) {
-		detected = append(detected, "copilot")
+	for _, tool := range tools {
+		if dirExists(filepath.Join(projectRoot, dirMarker[tool])) {
+			detected = append(detected, tool)
+			continue
+		}
+		if _, err := exec.LookPath(toolBinary(tool)); err == nil {
+			detected = append(detected, tool)
+			continue
+		}
+		// File-based fallback for AGENTS.md / GEMINI.md-routed tools.
+		switch tool {
+		case "codex", "copilot":
+			if hasAgentsBelmontSection {
+				detected = append(detected, tool)
+			}
+		case "gemini":
+			if hasGeminiBelmontSection {
+				detected = append(detected, tool)
+			}
+		}
 	}
 	return detected
+}
+
+// fileContainsMarker returns true if the file at path exists and contains the
+// given marker substring. Used by detectTools to spot Belmont's skill-routing
+// section as a "previously installed for this tool" signal.
+func fileContainsMarker(path, marker string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), marker)
 }
 
 func allToolNames() []string {
@@ -2573,6 +2723,205 @@ func syncMarkdownDir(sourceDir, targetDir string) error {
 	return nil
 }
 
+// syncSkillsFolderDir syncs the agentskills.io folder layout from source to
+// target. Walks `<sourceDir>/<name>/SKILL.md` entries and copies each skill
+// folder (SKILL.md plus its references/ subdir if present) into the target.
+// Skips directories whose name starts with `_` (partials/templates) and the
+// top-level `references/` dir (that's the flat-layout home, copied separately
+// by syncMarkdownDir).
+//
+// Stale skill folders (present in target but not in source) are removed.
+// Flat .md files at the target's top level are left alone — Phase 2's parallel
+// output keeps them around during transition; step 2.7 drops them.
+func syncSkillsFolderDir(sourceDir, targetDir string) error {
+	if err := ensureDir(targetDir); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		return err
+	}
+
+	sourceFolders := make(map[string]struct{})
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") || entry.Name() == "references" {
+			continue
+		}
+		skillSrc := filepath.Join(sourceDir, entry.Name(), "SKILL.md")
+		if !fileExists(skillSrc) {
+			continue
+		}
+		sourceFolders[entry.Name()] = struct{}{}
+
+		skillDest := filepath.Join(targetDir, entry.Name(), "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(skillDest), 0o755); err != nil {
+			return err
+		}
+		if fileExists(skillDest) {
+			same, err := filesEqual(skillSrc, skillDest)
+			if err != nil {
+				return err
+			}
+			if same {
+				fmt.Printf("  = %s/SKILL.md (unchanged)\n", entry.Name())
+			} else {
+				fmt.Printf("  ~ %s/SKILL.md (updated)\n", entry.Name())
+			}
+		} else {
+			fmt.Printf("  + %s/SKILL.md\n", entry.Name())
+		}
+		if err := copyFile(skillSrc, skillDest); err != nil {
+			return err
+		}
+
+		// Per-skill references/ subdir (if present).
+		refsSrc := filepath.Join(sourceDir, entry.Name(), "references")
+		refsDest := filepath.Join(targetDir, entry.Name(), "references")
+		if dirExists(refsSrc) {
+			if err := syncReferencesDir(refsSrc, refsDest); err != nil {
+				return err
+			}
+		} else if dirExists(refsDest) {
+			if err := os.RemoveAll(refsDest); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Remove stale skill folders (present in target but not in source).
+	targetEntries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range targetEntries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") || entry.Name() == "references" {
+			continue
+		}
+		// Only consider directories that look like skill folders (have a
+		// SKILL.md). Otherwise we might delete user-created subdirs we don't
+		// own.
+		skillCheck := filepath.Join(targetDir, entry.Name(), "SKILL.md")
+		if !fileExists(skillCheck) {
+			continue
+		}
+		if _, ok := sourceFolders[entry.Name()]; !ok {
+			fmt.Printf("  - %s/ (skill removed, no longer in source)\n", entry.Name())
+			if err := os.RemoveAll(filepath.Join(targetDir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// syncEmbeddedSkillsFolderDir is the embed.FS counterpart of syncSkillsFolderDir.
+func syncEmbeddedSkillsFolderDir(embedFS embed.FS, root string, targetDir string) error {
+	if err := ensureDir(targetDir); err != nil {
+		return err
+	}
+	entries, err := fs.ReadDir(embedFS, root)
+	if err != nil {
+		return err
+	}
+
+	sourceFolders := make(map[string]struct{})
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") || entry.Name() == "references" {
+			continue
+		}
+		skillPath := root + "/" + entry.Name() + "/SKILL.md"
+		data, err := fs.ReadFile(embedFS, skillPath)
+		if err != nil {
+			continue // not a skill folder — skip
+		}
+		sourceFolders[entry.Name()] = struct{}{}
+
+		skillDest := filepath.Join(targetDir, entry.Name(), "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(skillDest), 0o755); err != nil {
+			return err
+		}
+		if fileExists(skillDest) {
+			existing, err := os.ReadFile(skillDest)
+			if err != nil {
+				return err
+			}
+			if string(existing) == string(data) {
+				fmt.Printf("  = %s/SKILL.md (unchanged)\n", entry.Name())
+			} else {
+				fmt.Printf("  ~ %s/SKILL.md (updated)\n", entry.Name())
+			}
+		} else {
+			fmt.Printf("  + %s/SKILL.md\n", entry.Name())
+		}
+		if err := os.WriteFile(skillDest, data, 0o644); err != nil {
+			return err
+		}
+
+		// Per-skill references/ subdir.
+		refsRoot := root + "/" + entry.Name() + "/references"
+		refsEntries, refsErr := fs.ReadDir(embedFS, refsRoot)
+		refsDest := filepath.Join(targetDir, entry.Name(), "references")
+		if refsErr == nil {
+			if err := os.MkdirAll(refsDest, 0o755); err != nil {
+				return err
+			}
+			refSeen := make(map[string]struct{})
+			for _, ref := range refsEntries {
+				if ref.IsDir() || !strings.HasSuffix(ref.Name(), ".md") {
+					continue
+				}
+				refSeen[ref.Name()] = struct{}{}
+				refData, err := fs.ReadFile(embedFS, refsRoot+"/"+ref.Name())
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join(refsDest, ref.Name()), refData, 0o644); err != nil {
+					return err
+				}
+			}
+			// Remove stale references in target.
+			if existing, err := os.ReadDir(refsDest); err == nil {
+				for _, e := range existing {
+					if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+						continue
+					}
+					if _, ok := refSeen[e.Name()]; !ok {
+						os.Remove(filepath.Join(refsDest, e.Name()))
+					}
+				}
+			}
+		} else if dirExists(refsDest) {
+			if err := os.RemoveAll(refsDest); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Remove stale skill folders.
+	targetEntries, err := os.ReadDir(targetDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range targetEntries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), "_") || entry.Name() == "references" {
+			continue
+		}
+		skillCheck := filepath.Join(targetDir, entry.Name(), "SKILL.md")
+		if !fileExists(skillCheck) {
+			continue
+		}
+		if _, ok := sourceFolders[entry.Name()]; !ok {
+			fmt.Printf("  - %s/ (skill removed, no longer in source)\n", entry.Name())
+			if err := os.RemoveAll(filepath.Join(targetDir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // syncReferencesDir mirrors .md files in a references/ subdirectory.
 func syncReferencesDir(sourceDir, targetDir string) error {
 	if err := ensureDir(targetDir); err != nil {
@@ -2639,54 +2988,134 @@ func setupTool(projectRoot, tool string) error {
 		if err := ensureSymlink(linkAgents, agentsTarget, true); err != nil {
 			return err
 		}
-		claudeCommandsDir := filepath.Join(projectRoot, ".claude", "commands", "belmont")
-		if err := syncMarkdownDir(skillsTarget, claudeCommandsDir); err != nil {
+		// Phase 2: `.claude/skills/belmont` is the canonical agentskills.io
+		// location for Claude Code's Skills system. Symlinked to the canonical
+		// `.agents/skills/belmont/` so SKILL.md folders are auto-discovered.
+		// Both `/belmont:<skill>` slash commands AND skill activation work
+		// through this single path — the legacy `.claude/commands/belmont/`
+		// copy is no longer needed and is removed by the legacy cleanup pass.
+		linkSkills := filepath.Join(projectRoot, ".claude", "skills", "belmont")
+		if err := ensureSymlink(linkSkills, skillsTarget, true); err != nil {
 			return err
 		}
 	case "codex":
+		// Phase 2: auto-discovered via .agents/skills/.
 		fmt.Println("Linking Codex...")
-		skillsTarget := filepath.Join(projectRoot, ".agents", "skills", "belmont")
-		codexDir := filepath.Join(projectRoot, ".codex", "belmont")
-		if err := syncMarkdownDir(skillsTarget, codexDir); err != nil {
-			return err
-		}
+		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
 	case "windsurf":
 		fmt.Println("Linking Windsurf...")
-		target := filepath.Join(projectRoot, ".agents", "skills", "belmont")
-		link := filepath.Join(projectRoot, ".windsurf", "rules", "belmont")
-		if err := ensureSymlink(link, target, true); err != nil {
-			return err
-		}
+		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
 	case "gemini":
 		fmt.Println("Linking Gemini...")
-		target := filepath.Join(projectRoot, ".agents", "skills", "belmont")
-		link := filepath.Join(projectRoot, ".gemini", "rules", "belmont")
-		if err := ensureSymlink(link, target, true); err != nil {
-			return err
-		}
+		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
 	case "copilot":
 		fmt.Println("Linking GitHub Copilot...")
-		target := filepath.Join(projectRoot, ".agents", "skills", "belmont")
-		link := filepath.Join(projectRoot, ".copilot", "belmont")
-		if err := ensureSymlink(link, target, true); err != nil {
-			return err
-		}
+		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
 	case "cursor":
 		fmt.Println("Linking Cursor...")
-		skillsSource := filepath.Join(projectRoot, ".agents", "skills", "belmont")
-		cursorDir := filepath.Join(projectRoot, ".cursor", "rules", "belmont")
-		if err := linkPerFileDir(skillsSource, cursorDir, ".md", ".mdc"); err != nil {
-			return err
+		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
+	}
+	return nil
+}
+
+// runLegacyCleanup removes install artifacts left by older Belmont versions
+// that are no longer needed in Phase 2. Idempotent and safe to run on every
+// install — paths that don't exist are skipped silently. Strips the
+// AGENTS.md / GEMINI.md `belmont:skill-routing` sections (and the older
+// `belmont:codex-skill-routing` variant).
+func runLegacyCleanup(projectRoot string) error {
+	// Directories Belmont used to write into but no longer does. Removing
+	// these is safe because they were always Belmont-managed (mirroring or
+	// symlinked content from `.agents/skills/belmont/` or `.agents/belmont/`).
+	legacyDirs := []string{
+		".claude/commands/belmont", // pre-Phase-2 Claude slash-command path
+		".codex/belmont",
+		".cursor/rules/belmont",
+		".windsurf/rules/belmont",
+		".gemini/rules/belmont",
+		".copilot/belmont",
+	}
+	announced := false
+	announce := func() {
+		if !announced {
+			fmt.Println("Cleaning up legacy Belmont paths...")
+			announced = true
 		}
-		// Skills reference progressive-disclosure files via relative
-		// `references/*.md` paths, so link the references dir alongside.
-		refsSource := filepath.Join(skillsSource, "references")
-		refsLink := filepath.Join(cursorDir, "references")
-		if dirExists(refsSource) {
-			if err := ensureSymlink(refsLink, refsSource, true); err != nil {
-				return err
+	}
+	for _, rel := range legacyDirs {
+		path := filepath.Join(projectRoot, rel)
+		if _, err := os.Lstat(path); err == nil {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("cleanup %s: %w", rel, err)
+			}
+			announce()
+			fmt.Printf("  - %s (legacy, removed)\n", rel)
+		}
+	}
+
+	// Stale flat skill files at .agents/skills/belmont/*.md from pre-Phase-2
+	// installs. New folder layout coexists; flat files become orphans.
+	skillsDir := filepath.Join(projectRoot, ".agents", "skills", "belmont")
+	if entries, err := os.ReadDir(skillsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			if err := os.Remove(filepath.Join(skillsDir, entry.Name())); err == nil {
+				announce()
+				fmt.Printf("  - .agents/skills/belmont/%s (legacy flat skill, removed)\n", entry.Name())
 			}
 		}
+		// Stale top-level `references/` dir from pre-Phase-2 (per-skill
+		// references now live inside each skill folder).
+		topRefs := filepath.Join(skillsDir, "references")
+		if dirExists(topRefs) {
+			if err := os.RemoveAll(topRefs); err == nil {
+				announce()
+				fmt.Println("  - .agents/skills/belmont/references/ (legacy top-level refs, removed)")
+			}
+		}
+	}
+
+	// AGENTS.md / GEMINI.md routing sections.
+	for _, file := range []string{"AGENTS.md", "GEMINI.md"} {
+		path := filepath.Join(projectRoot, file)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		original := string(data)
+		updated := original
+		modified := false
+		if stripped, removed := removeMarkedSection(updated, belmontAgentsSectionStart, belmontAgentsSectionEnd); removed {
+			updated = stripped
+			modified = true
+		}
+		if stripped, removed := removeMarkedSection(updated, codexAgentsGuidanceStart, codexAgentsGuidanceEnd); removed {
+			updated = stripped
+			modified = true
+		}
+		if !modified {
+			continue
+		}
+		// If the file is now empty (or just whitespace), delete it — it was
+		// purely Belmont's content. Otherwise rewrite with the section gone.
+		if strings.TrimSpace(updated) == "" {
+			if err := os.Remove(path); err == nil {
+				announce()
+				fmt.Printf("  - %s (file held only Belmont section, removed)\n", file)
+			}
+		} else {
+			if err := os.WriteFile(path, []byte(strings.TrimRight(updated, "\n")+"\n"), 0o644); err != nil {
+				return fmt.Errorf("cleanup %s: %w", file, err)
+			}
+			announce()
+			fmt.Printf("  - %s Belmont skill-routing section (legacy, removed)\n", file)
+		}
+	}
+
+	if announced {
+		fmt.Println("")
 	}
 	return nil
 }
@@ -2739,48 +3168,6 @@ func ensureSymlink(linkPath, target string, isDir bool) error {
 	return nil
 }
 
-func linkPerFileDir(sourceDir, targetDir, sourceExt, targetExt string) error {
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return err
-	}
-	sourceEntries, err := os.ReadDir(sourceDir)
-	if err != nil {
-		return err
-	}
-	sourceNames := make(map[string]struct{})
-	for _, entry := range sourceEntries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), sourceExt) {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), sourceExt)
-		sourceNames[name] = struct{}{}
-		target := filepath.Join(sourceDir, entry.Name())
-		link := filepath.Join(targetDir, name+targetExt)
-		if err := ensureSymlink(link, target, false); err != nil {
-			return err
-		}
-	}
-
-	targetEntries, err := os.ReadDir(targetDir)
-	if err != nil {
-		return err
-	}
-	for _, entry := range targetEntries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), targetExt) {
-			continue
-		}
-		name := strings.TrimSuffix(entry.Name(), targetExt)
-		if _, ok := sourceNames[name]; !ok {
-			fmt.Printf("  - %s%s (removed, no longer in source)\n", name, targetExt)
-			if err := os.Remove(filepath.Join(targetDir, entry.Name())); err != nil {
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
 func ensureStateFiles(projectRoot string) error {
 	stateDir := filepath.Join(projectRoot, ".belmont")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
@@ -2826,45 +3213,38 @@ func ensureStateFiles(projectRoot string) error {
 	return nil
 }
 
+// Marker constants for Belmont's skill-routing section. Phase 2 no longer
+// writes these sections (every supported CLI auto-discovers
+// `.agents/skills/<name>/SKILL.md`), but the markers are still recognized for:
+//   - detectTools (so a Phase 1 project where Belmont is already wired
+//     continues to be detected during a Phase 2 re-install);
+//   - the legacy cleanup pass (so AGENTS.md / GEMINI.md sections written by
+//     Phase 1 get stripped on next install).
+const belmontAgentsSectionStart = "<!-- belmont:skill-routing:start -->"
+const belmontAgentsSectionEnd = "<!-- belmont:skill-routing:end -->"
+const belmontGeminiSectionStart = "<!-- belmont:skill-routing:start -->"
+const belmontGeminiSectionEnd = "<!-- belmont:skill-routing:end -->"
+
+// Even older marker pair from the pre-Phase-1 Codex-only routing section.
+// Cleanup pass strips this too.
 const codexAgentsGuidanceStart = "<!-- belmont:codex-skill-routing:start -->"
 const codexAgentsGuidanceEnd = "<!-- belmont:codex-skill-routing:end -->"
 
-func ensureCodexAgentsGuidance(projectRoot string) (bool, error) {
-	path := filepath.Join(projectRoot, "AGENTS.md")
-	current := ""
-	if fileExists(path) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return false, err
-		}
-		current = string(data)
+// removeMarkedSection strips a marker-delimited block from content, returning
+// the result and whether anything was removed. Used to migrate users off
+// older marker pairs to the current ones.
+func removeMarkedSection(content, startMarker, endMarker string) (string, bool) {
+	start := strings.Index(content, startMarker)
+	end := strings.Index(content, endMarker)
+	if start < 0 || end <= start {
+		return content, false
 	}
-
-	section := codexAgentsGuidanceSection()
-	updated, changed := upsertMarkedSection(current, codexAgentsGuidanceStart, codexAgentsGuidanceEnd, section)
-	if !changed {
-		return false, nil
+	end += len(endMarker)
+	// Eat one trailing newline if present, to avoid leaving a blank line gap.
+	if end < len(content) && content[end] == '\n' {
+		end++
 	}
-
-	if strings.TrimSpace(updated) == "" {
-		updated = "# AGENTS\n\n" + strings.TrimSpace(section) + "\n"
-	}
-	return true, os.WriteFile(path, []byte(updated), 0o644)
-}
-
-func codexAgentsGuidanceSection() string {
-	lines := []string{
-		codexAgentsGuidanceStart,
-		"## Belmont Skill Routing (Codex)",
-		"",
-		"- Belmont skills are local markdown files in `.agents/skills/belmont/` (and mirrored in `.codex/belmont/`).",
-		"- If the user says `belmont:<skill>` or \"Use the belmont:<skill> skill\", treat it as a skill reference, not a shell command.",
-		"- Load `.agents/skills/belmont/<skill>.md` first (fallback to `.codex/belmont/<skill>.md`) and follow that workflow.",
-		"- Known Belmont skills: `working-backwards`, `product-plan`, `tech-plan`, `implement`, `next`, `verify`, `debug`, `debug-auto`, `debug-manual`, `status`, `reset`, `note`, `review-plans`, `cleanup`.",
-		"- If a requested skill file is missing, list available files in those directories and continue with the closest matching Belmont skill.",
-		codexAgentsGuidanceEnd,
-	}
-	return strings.Join(lines, "\n")
+	return content[:start] + content[end:], true
 }
 
 func upsertMarkedSection(content, startMarker, endMarker, section string) (string, bool) {
@@ -3240,7 +3620,7 @@ func runUpdate(args []string) error {
 			fmt.Fprintf(os.Stderr, "Auto-install failed: %v\nRun 'belmont install' manually.\n", err)
 		} else if noCommit {
 			fmt.Println("\nSkipping auto-commit (--no-commit).")
-			fmt.Println("To commit manually: git add .agents .claude/commands/belmont .codex/belmont .cursor/rules/belmont .windsurf/rules/belmont .gemini/rules/belmont .copilot/belmont AGENTS.md && git commit -m \"Update Belmont to " + release.TagName + "\"")
+			fmt.Println("To commit manually: git add .agents .claude/commands/belmont .claude/agents/belmont .cursor/rules/belmont .windsurf/rules/belmont AGENTS.md GEMINI.md && git commit -m \"Update Belmont to " + release.TagName + "\"")
 		} else {
 			if err := commitBelmontUpdate(".", release.TagName); err != nil {
 				fmt.Fprintln(os.Stderr, err.Error())
@@ -3267,13 +3647,39 @@ func commitBelmontUpdate(root, version string) error {
 		return nil
 	}
 
-	// Filter to paths that exist on disk — `git add` errors on missing
-	// pathspecs, and only some tools (claude/codex/...) are installed per
-	// project.
+	// Build the pathspec list. A path qualifies if it (a) exists on disk
+	// (so changes/additions get staged) OR (b) is tracked by git but missing
+	// (so a deletion gets staged — e.g. when this update removed a legacy
+	// `.gemini/rules/belmont/` symlink that was previously committed).
+	// `git add` errors on pathspecs that match neither, so we filter ahead of
+	// time.
+	trackedSet := make(map[string]struct{})
+	{
+		lsArgs := append([]string{"-C", root, "ls-files", "--"}, belmontManagedPaths...)
+		lsOut, _ := exec.Command("git", lsArgs...).Output()
+		for _, line := range strings.Split(strings.TrimSpace(string(lsOut)), "\n") {
+			if line != "" {
+				trackedSet[line] = struct{}{}
+			}
+		}
+	}
+	pathHasTrackedFiles := func(p string) bool {
+		for tracked := range trackedSet {
+			if tracked == p || strings.HasPrefix(tracked, p+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
 	var existingPaths []string
 	for _, p := range belmontManagedPaths {
 		full := filepath.Join(root, p)
+		onDisk := false
 		if _, err := os.Lstat(full); err == nil {
+			onDisk = true
+		}
+		if onDisk || pathHasTrackedFiles(p) {
 			existingPaths = append(existingPaths, p)
 		}
 	}
@@ -3282,8 +3688,9 @@ func commitBelmontUpdate(root, version string) error {
 		return nil
 	}
 
-	// Stage only Belmont-managed paths.
-	addArgs := append([]string{"add", "--"}, existingPaths...)
+	// Stage only Belmont-managed paths. `-A` ensures deletions are picked up
+	// (covers the case where this update removed a legacy directory).
+	addArgs := append([]string{"add", "-A", "--"}, existingPaths...)
 	addCmd := exec.Command("git", addArgs...)
 	addCmd.Dir = root
 	addCmd.Stderr = os.Stderr
@@ -3637,6 +4044,10 @@ func resolveFeatureSlugs(root, featuresFlag string, allFlag bool) ([]string, err
 		if len(slugs) == 0 {
 			return nil, fmt.Errorf("auto: no pending features — all are complete, verified, or archived")
 		}
+		// `--all` has no caller-supplied order to preserve; use a stable
+		// alphabetical contract so scheduler output is deterministic.
+		// (`computeFeatureWaves` honours input order, so we sort here.)
+		sort.Strings(slugs)
 		return slugs, nil
 	}
 
@@ -3667,9 +4078,87 @@ type featureWave struct {
 	Features []featureSummary
 }
 
+// readinessWarning describes a requested feature whose declared dep is not
+// yet terminal at start-of-run. Caller emits these as yellow warning lines
+// so the operator can Ctrl-C before the scheduler launches dependents that
+// will likely cascade-skip if the dep pauses again.
+type readinessWarning struct {
+	Slug      string
+	DepSlug   string
+	DepStatus string
+	Blocked   int // count of [!] tasks in the dep's PROGRESS.md
+}
+
+// scanReadiness reports requested features whose declared deps are not yet
+// terminal (Complete/Verified/Archived). Uses the same `isFeatureTerminal`
+// predicate as the scheduler so messaging cannot drift. Pure: no I/O.
+func scanReadiness(features []featureSummary) []readinessWarning {
+	bySlug := make(map[string]featureSummary, len(features))
+	for _, f := range features {
+		bySlug[f.Slug] = f
+	}
+	var warnings []readinessWarning
+	for _, f := range features {
+		for _, dep := range f.Deps {
+			df, ok := bySlug[dep]
+			if !ok || isFeatureTerminal(df.Status) {
+				continue
+			}
+			warnings = append(warnings, readinessWarning{
+				Slug:      f.Slug,
+				DepSlug:   dep,
+				DepStatus: df.Status,
+				Blocked:   df.TasksBlocked,
+			})
+		}
+	}
+	return warnings
+}
+
+// skipResult records a feature skipped from a wave because one of its
+// declared dependencies is in a non-runnable state. `Reason` is "paused" or
+// "failed"; `DepSlug` is the first matching dep in declaration order.
+type skipResult struct {
+	Slug    string
+	DepSlug string
+	Reason  string // "paused" | "failed"
+}
+
+// filterWaveByBlocked partitions a wave into runnable features and skipped
+// features based on which dep sets are populated. A feature is skipped on
+// the first dep it has that appears in `failed` or `paused` (deps scanned in
+// declaration order; failed wins over paused so the skip message reflects
+// the harder failure when both apply). Pure: no I/O.
+func filterWaveByBlocked(wave []featureSummary, failed, paused map[string]bool) (runnable []featureSummary, skipped []skipResult) {
+	for _, f := range wave {
+		var blockedBy *skipResult
+		for _, dep := range f.Deps {
+			if failed[dep] {
+				blockedBy = &skipResult{Slug: f.Slug, DepSlug: dep, Reason: "failed"}
+				break
+			}
+			if paused[dep] && blockedBy == nil {
+				blockedBy = &skipResult{Slug: f.Slug, DepSlug: dep, Reason: "paused"}
+				// Don't break — keep scanning in case a later dep is failed,
+				// which should win for messaging purposes.
+			}
+		}
+		if blockedBy != nil {
+			skipped = append(skipped, *blockedBy)
+		} else {
+			runnable = append(runnable, f)
+		}
+	}
+	return runnable, skipped
+}
+
 // computeFeatureWaves groups features into waves using Kahn's algorithm for topological sort.
 // Features in the same wave have all deps satisfied by prior waves.
 // Already-complete features satisfy deps but don't execute.
+//
+// Ordering contract: caller-supplied input order wins. Sibling features in the
+// same wave appear in the order they appear in `features`. Callers that want
+// alphabetical ordering (e.g. `auto --all`) must sort `features` themselves.
 func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
 	if len(features) == 0 {
 		return nil, nil
@@ -3702,12 +4191,15 @@ func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
 	waveIdx := 0
 
 	for remaining > 0 {
-		// Find all features with zero in-degree
+		// Find all features with zero in-degree, scanning the input slice so
+		// caller-supplied order is preserved within the wave.
 		var ready []featureSummary
-		for slug, deg := range inDegree {
-			if deg == 0 {
-				ready = append(ready, bySlug[slug])
+		for _, f := range features {
+			deg, tracked := inDegree[f.Slug]
+			if !tracked || deg != 0 {
+				continue
 			}
+			ready = append(ready, bySlug[f.Slug])
 		}
 
 		if len(ready) == 0 {
@@ -3718,11 +4210,6 @@ func computeFeatureWaves(features []featureSummary) ([]featureWave, error) {
 			sort.Strings(cycleIDs)
 			return nil, fmt.Errorf("dependency cycle detected among features: %s", strings.Join(cycleIDs, ", "))
 		}
-
-		// Sort ready features by slug for deterministic ordering
-		sort.Slice(ready, func(i, j int) bool {
-			return ready[i].Slug < ready[j].Slug
-		})
 
 		waves = append(waves, featureWave{Index: waveIdx, Features: ready})
 		waveIdx++
@@ -3806,14 +4293,17 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	allFeatures := listFeatures(featuresDir, 50)
 	populateFeatureDeps(allFeatures, cfg.Root)
 
-	// Filter to requested slugs
-	slugSet := make(map[string]bool)
-	for _, s := range slugs {
-		slugSet[s] = true
+	// Filter to requested slugs, preserving caller-supplied (CLI) order.
+	// `allFeatures` is in directory-listing order (effectively alphabetical),
+	// so we look up by slug to keep `--features=A,B,C` order intact for the
+	// scheduler's sibling tie-break.
+	bySlug := make(map[string]featureSummary, len(allFeatures))
+	for _, f := range allFeatures {
+		bySlug[f.Slug] = f
 	}
 	var features []featureSummary
-	for _, f := range allFeatures {
-		if slugSet[f.Slug] {
+	for _, slug := range slugs {
+		if f, ok := bySlug[slug]; ok {
 			features = append(features, f)
 		}
 	}
@@ -3821,6 +4311,23 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	// Validate dependencies
 	if err := validateFeatureDeps(features, allFeatures); err != nil {
 		return fmt.Errorf("auto: %w", err)
+	}
+
+	// Pre-flight readiness scan: warn (don't abort) on any requested feature
+	// whose dep is not yet terminal. Operator can Ctrl-C before launch.
+	if warns := scanReadiness(features); len(warns) > 0 {
+		fmt.Fprintf(os.Stderr, "\033[33m⚠ Readiness check:\033[0m\n")
+		for _, w := range warns {
+			suffix := ""
+			if w.Blocked > 0 {
+				if w.Blocked == 1 {
+					suffix = ", 1 blocked task"
+				} else {
+					suffix = fmt.Sprintf(", %d blocked tasks", w.Blocked)
+				}
+			}
+			fmt.Fprintf(os.Stderr, "  • %s depends on %s (status: %s%s)\n", w.Slug, w.DepSlug, w.DepStatus, suffix)
+		}
 	}
 
 	// Check if any features have deps — if not, use flat parallel (original behavior)
@@ -3892,32 +4399,26 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 
 	var allFailures []featureResult
 	failedSlugs := make(map[string]bool)
+	pausedSlugs := make(map[string]bool)
 	totalMerged := 0
 
 	// Execute wave by wave
 	for _, w := range waves {
-		// Filter out features whose deps include a failed slug
-		var waveFeatures []featureSummary
-		var skippedFeatures []string
-		for _, f := range w.Features {
-			skip := false
-			for _, dep := range f.Deps {
-				if failedSlugs[dep] {
-					skip = true
-					break
-				}
-			}
-			if skip {
-				skippedFeatures = append(skippedFeatures, f.Slug)
-				failedSlugs[f.Slug] = true
+		// Partition the wave into runnable vs skipped using the failed/paused
+		// dep sets. A skipped feature inherits its blocker's reason and is
+		// added to the matching set so its own dependents cascade-skip in
+		// later waves.
+		waveFeatures, skipped := filterWaveByBlocked(w.Features, failedSlugs, pausedSlugs)
+		for _, s := range skipped {
+			if s.Reason == "failed" {
+				fmt.Fprintf(os.Stderr, "\033[31m⊘ %s skipped\033[0m — dependency %s failed\n", s.Slug, s.DepSlug)
+				failedSlugs[s.Slug] = true
+				allFailures = append(allFailures, featureResult{Slug: s.Slug, Err: fmt.Errorf("dependency %s failed", s.DepSlug)})
 			} else {
-				waveFeatures = append(waveFeatures, f)
+				fmt.Fprintf(os.Stderr, "\033[33m⊘ %s skipped\033[0m — dependency %s paused\n", s.Slug, s.DepSlug)
+				pausedSlugs[s.Slug] = true
+				allFailures = append(allFailures, featureResult{Slug: s.Slug, Err: fmt.Errorf("dependency %s paused", s.DepSlug)})
 			}
-		}
-
-		for _, slug := range skippedFeatures {
-			fmt.Fprintf(os.Stderr, "\033[33m⊘ %s skipped\033[0m — dependency failed\n", slug)
-			allFailures = append(allFailures, featureResult{Slug: slug, Err: fmt.Errorf("dependency failed")})
 		}
 
 		if len(waveFeatures) == 0 {
@@ -3980,8 +4481,12 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 			if r.Err != nil {
 				if errors.Is(r.Err, errFeaturePaused) {
 					fmt.Fprintf(os.Stderr, "\033[33m⏸ %s paused\033[0m — has unresolved blockers\n", r.Slug)
-					// Don't add to failedSlugs (downstream deps may still be satisfiable)
-					// Don't add to waveSuccesses (nothing to merge)
+					// Track in pausedSlugs so dependents in later waves skip
+					// with reason=paused (vs reason=failed). The feature is
+					// not added to failedSlugs or waveSuccesses — its
+					// worktree is preserved for the user to fix and resume.
+					pausedSlugs[r.Slug] = true
+					allFailures = append(allFailures, r)
 				} else {
 					fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", r.Slug, r.Err)
 					allFailures = append(allFailures, r)
@@ -4028,7 +4533,38 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 	}
 
 	// Report
-	if len(allFailures) > 0 {
+	if totalMerged == 0 && len(pausedSlugs) > 0 {
+		// Halt summary: nothing merged and at least one feature paused.
+		// Group paused features and dependents-skipped-due-to-paused so the
+		// user sees the root cause instead of a flat "N failed" list.
+		var paused, skipped []featureResult
+		for _, f := range allFailures {
+			if pausedSlugs[f.Slug] {
+				// Distinguish "actually paused" (originated the pause) from
+				// "skipped because dep paused" using the error message
+				// shape — skip-due-to-pause uses "dependency X paused".
+				if f.Err != nil && strings.HasPrefix(f.Err.Error(), "dependency ") {
+					skipped = append(skipped, f)
+				} else {
+					paused = append(paused, f)
+				}
+			}
+		}
+		fmt.Fprintf(os.Stderr, "\n\033[33m⏸ %d feature(s) paused (no merges made):\033[0m\n", len(paused))
+		for _, f := range paused {
+			fmt.Fprintf(os.Stderr, "  %s\n", f.Slug)
+			if f.WorktreePath != "" {
+				fmt.Fprintf(os.Stderr, "    Worktree: %s\n", f.WorktreePath)
+			}
+		}
+		if len(skipped) > 0 {
+			fmt.Fprintf(os.Stderr, "\033[33m⊘ %d feature(s) skipped:\033[0m\n", len(skipped))
+			for _, f := range skipped {
+				fmt.Fprintf(os.Stderr, "  %s — %s\n", f.Slug, f.Err)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Fix the blocker(s) and rerun.\n")
+	} else if len(allFailures) > 0 {
 		fmt.Fprintf(os.Stderr, "\n\033[33m⚠ %d feature(s) failed:\033[0m\n", len(allFailures))
 		for _, f := range allFailures {
 			fmt.Fprintf(os.Stderr, "  %s: %s\n", f.Slug, f.Err)
@@ -4269,7 +4805,7 @@ func mergeFeatureBranch(cfg loopConfig, slug, branch, wtPath string, tracker *wo
 
 func detectTool() string {
 	for _, tool := range []string{"claude", "codex", "gemini", "copilot", "cursor"} {
-		if _, err := exec.LookPath(tool); err == nil {
+		if _, err := exec.LookPath(toolBinary(tool)); err == nil {
 			return tool
 		}
 	}
@@ -4843,37 +5379,11 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 
 	modelFlags := resolveModelFlags(cfg.Tool, tierForAction(action.Type, cfg.ModelTiers))
 
-	var cmd *exec.Cmd
-	switch cfg.Tool {
-	case "claude":
-		args := []string{"-p", prompt,
-			"--permission-mode", "bypassPermissions",
-			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
-			"--output-format", "stream-json", "--verbose"}
-		args = append(args, modelFlags...)
-		cmd = exec.Command("claude", args...)
-	case "codex":
-		args := []string{"exec", prompt,
-			"--dangerously-bypass-approvals-and-sandbox",
-			"--json", "-C", cfg.Root}
-		args = append(args, modelFlags...)
-		cmd = exec.Command("codex", args...)
-	case "gemini":
-		args := []string{prompt, "--yolo", "--output-format", "json"}
-		args = append(args, modelFlags...)
-		cmd = exec.Command("gemini", args...)
-	case "copilot":
-		args := []string{"-p", prompt, "--yolo"}
-		args = append(args, modelFlags...)
-		cmd = exec.Command("copilot", args...)
-	case "cursor":
-		args := []string{"agent", "-p", prompt, "--force", "--output-format", "json"}
-		args = append(args, modelFlags...)
-		cmd = exec.Command("cursor", args...)
-	default:
+	args := toolHeadlessArgs(cfg.Tool, prompt, cfg.Root, modelFlags, true)
+	if args == nil {
 		return executionResult{Success: false, Error: fmt.Sprintf("unsupported tool: %s", cfg.Tool)}
 	}
-
+	cmd := exec.Command(toolBinary(cfg.Tool), args...)
 	cmd.Dir = cfg.Root
 
 	// Worktree isolation: inject env vars and set process group
@@ -5836,39 +6346,66 @@ Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"...
 	}, nil
 }
 
-// buildToolCommand creates an exec.Cmd for the given tool with a prompt.
-// Used by both AI decision calls and action execution.
-func buildToolCommand(tool, prompt, root string, extraFlags ...string) *exec.Cmd {
-	var cmd *exec.Cmd
+// toolBinary returns the executable name on PATH for a given tool. For most
+// tools the binary matches the tool's logical name, but Cursor's CLI is
+// installed as `cursor-agent` (the `cursor` IDE binary is separate).
+func toolBinary(tool string) string {
+	if tool == "cursor" {
+		return "cursor-agent"
+	}
+	return tool
+}
+
+// toolHeadlessArgs returns the argv (excluding binary name) for a one-shot
+// headless invocation of the given AI tool. streaming controls Claude's
+// output format: stream-json+verbose for live event streaming (auto loop +
+// reverify), plain json otherwise (AI decision / triage / reconciliation).
+// Other tools' output format is identical regardless of streaming. Returns
+// nil for unknown tools — callers should validate `tool` before calling.
+func toolHeadlessArgs(tool, prompt, root string, modelFlags []string, streaming bool) []string {
 	switch tool {
 	case "claude":
 		args := []string{"-p", prompt,
 			"--permission-mode", "bypassPermissions",
-			"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
-			"--output-format", "json"}
-		args = append(args, extraFlags...)
-		cmd = exec.Command("claude", args...)
+			"--allowedTools", "Bash,Read,Write,Edit,Glob,Grep,Agent,Skill,WebFetch,WebSearch,mcp__*",
+			"--output-format"}
+		if streaming {
+			args = append(args, "stream-json", "--verbose")
+		} else {
+			args = append(args, "json")
+		}
+		return append(args, modelFlags...)
 	case "codex":
 		args := []string{"exec", prompt,
 			"--dangerously-bypass-approvals-and-sandbox",
 			"--json", "-C", root}
-		args = append(args, extraFlags...)
-		cmd = exec.Command("codex", args...)
+		return append(args, modelFlags...)
 	case "gemini":
-		args := []string{prompt, "--yolo", "--output-format", "json"}
-		args = append(args, extraFlags...)
-		cmd = exec.Command("gemini", args...)
+		args := []string{"-p", prompt, "--approval-mode", "yolo", "--output-format", "json"}
+		return append(args, modelFlags...)
 	case "copilot":
+		// `--yolo` is the documented alias of `--allow-all`. Both work; we use
+		// `--yolo` for stability across the alias's lifetime.
 		args := []string{"-p", prompt, "--yolo"}
-		args = append(args, extraFlags...)
-		cmd = exec.Command("copilot", args...)
+		return append(args, modelFlags...)
 	case "cursor":
-		args := []string{"agent", "-p", prompt, "--force", "--output-format", "json"}
-		args = append(args, extraFlags...)
-		cmd = exec.Command("cursor", args...)
-	default:
-		cmd = exec.Command("echo", "unsupported tool")
+		// Cursor's prompt is a trailing positional; flags must come first.
+		args := []string{"-p", "--force", "--output-format", "json"}
+		args = append(args, modelFlags...)
+		return append(args, prompt)
 	}
+	return nil
+}
+
+// buildToolCommand creates a non-streaming exec.Cmd for the given tool with a
+// prompt. Used by AI decision / triage / reconciliation calls that want a
+// single JSON response.
+func buildToolCommand(tool, prompt, root string, extraFlags ...string) *exec.Cmd {
+	args := toolHeadlessArgs(tool, prompt, root, extraFlags, false)
+	if args == nil {
+		return exec.Command("echo", "unsupported tool")
+	}
+	cmd := exec.Command(toolBinary(tool), args...)
 	cmd.Dir = root
 	return cmd
 }
@@ -7355,13 +7892,21 @@ func getCurrentBranch(root string) string {
 }
 
 // belmontManagedPaths is the allow-list of subtrees Belmont's installer writes
-// into. Used by the dirty-tree preflight (to give a Belmont-aware error) and by
-// the update auto-commit (to scope `git add` so unrelated user work isn't swept
-// up).
+// into (or has previously written into and now manages cleanup of). Used by
+// the dirty-tree preflight (to give a Belmont-aware error) and by the update
+// auto-commit (to scope `git add` so unrelated user work isn't swept up).
+//
+// Phase 2 actively writes only: `.agents/belmont/`, `.agents/skills/belmont/`,
+// and `.claude/{agents,skills}/belmont`. Every other entry below is a legacy
+// path kept in the list so deletions of stale dirs/files also get staged for
+// the auto-commit when an older project upgrades through `belmont update` →
+// `belmont install` → runLegacyCleanup.
 var belmontManagedPaths = []string{
 	".agents/belmont",
 	".agents/skills/belmont",
 	".claude/agents/belmont",
+	".claude/skills/belmont",
+	// Legacy (may be staged for deletion):
 	".claude/commands/belmont",
 	".codex/belmont",
 	".cursor/rules/belmont",
@@ -7369,6 +7914,7 @@ var belmontManagedPaths = []string{
 	".gemini/rules/belmont",
 	".copilot/belmont",
 	"AGENTS.md",
+	"GEMINI.md",
 }
 
 func pathIsBelmontManaged(p string) bool {
@@ -8483,36 +9029,11 @@ func runReverifyCmd(args []string) error {
 		prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks marked [x] (done) in milestone %s. Do NOT verify tasks from other milestones. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nOn success: mark verified tasks as [v] in PROGRESS.md.\nOn failure: add new [ ] follow-up tasks to milestone %s and leave originals as [x].\n\nCRITICAL: Do NOT modify tasks in any other milestone.", m.ID, m.ID, m.ID)
 
 		// Build and run the tool command
-		var cmd *exec.Cmd
-		switch tool {
-		case "claude":
-			args := []string{"-p", prompt,
-				"--permission-mode", "bypassPermissions",
-				"--allowedTools", "Bash Read Write Edit Glob Grep Agent Skill WebFetch WebSearch mcp__*",
-				"--output-format", "stream-json", "--verbose"}
-			args = append(args, verifyModelFlags...)
-			cmd = exec.Command("claude", args...)
-		case "codex":
-			args := []string{"exec", prompt,
-				"--dangerously-bypass-approvals-and-sandbox",
-				"--json", "-C", root}
-			args = append(args, verifyModelFlags...)
-			cmd = exec.Command("codex", args...)
-		case "gemini":
-			args := []string{prompt, "--yolo", "--output-format", "json"}
-			args = append(args, verifyModelFlags...)
-			cmd = exec.Command("gemini", args...)
-		case "copilot":
-			args := []string{"-p", prompt, "--yolo"}
-			args = append(args, verifyModelFlags...)
-			cmd = exec.Command("copilot", args...)
-		case "cursor":
-			args := []string{"agent", "-p", prompt, "--force", "--output-format", "json"}
-			args = append(args, verifyModelFlags...)
-			cmd = exec.Command("cursor", args...)
-		default:
+		args := toolHeadlessArgs(tool, prompt, root, verifyModelFlags, true)
+		if args == nil {
 			return fmt.Errorf("reverify: unsupported tool: %s", tool)
 		}
+		cmd := exec.Command(toolBinary(tool), args...)
 		cmd.Dir = root
 
 		prefix := fmt.Sprintf("\033[36m[%s][%s]\033[0m: ", feature, m.ID)

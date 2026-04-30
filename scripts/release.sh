@@ -23,20 +23,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT"
 
-# Regenerate skills from partials and check for uncommitted changes
+# Regenerate skills from partials. Phase 2: generated output is gitignored;
+# this just primes the source tree so build.sh's embed FS picks up fresh
+# content. No drift check needed (sources are the only thing committed under
+# skills/belmont/).
 echo "Regenerating skills from partials..."
 "$SCRIPT_DIR/generate-skills.sh"
-
-if ! git diff --quiet; then
-    echo ""
-    echo "WARNING: Generated skill files are out of date with their templates."
-    echo "The following files have uncommitted changes after regeneration:"
-    echo ""
-    git diff --name-only
-    echo ""
-    echo "Please review, commit these changes, then re-run the release script."
-    exit 1
-fi
 
 # Check for uncommitted changes (excluding plugin/ which we'll regenerate)
 if ! git diff --quiet || ! git diff --cached --quiet; then

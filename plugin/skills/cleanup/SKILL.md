@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: Reduce input token bloat by archiving completed features, removing stale milestone files, trimming notes, and auditing convention files (CLAUDE.md, AGENTS.md).
+description: "Reduce input token bloat by archiving completed features, removing stale milestone files, trimming notes, and auditing convention files (CLAUDE.md, AGENTS.md)."
 alwaysApply: false
 ---
 

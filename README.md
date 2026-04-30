@@ -323,15 +323,17 @@ See [Skills Reference](docs/skills-reference.md) for detailed descriptions of ea
 
 ## Supported Tools
 
-| Tool               | How Skills Are Wired                             | How to Use                                          |
-|--------------------|--------------------------------------------------|-----------------------------------------------------|
-| **Claude Code**    | Symlinked agents + copied commands               | `/belmont:product-plan`, `/belmont:implement`, etc. |
-| **Codex**          | Copied to `.codex/belmont` + `AGENTS.md` routing | `belmont:implement` in prompt                       |
-| **Cursor**         | Per-file `.mdc` symlinks in `.cursor/rules/`     | Toggle in Settings > Rules                          |
-| **Windsurf**       | Directory symlink in `.windsurf/rules/`          | Reference in Cascade                                |
-| **Gemini**         | Directory symlink in `.gemini/rules/`            | Reference in Gemini                                 |
-| **GitHub Copilot** | Directory symlink in `.copilot/`                 | Reference in Copilot Chat                           |
-| **Any other tool** | Plain markdown in `.agents/skills/belmont/`      | Point your tool at the files                        |
+| Tool               | How Skills Are Wired                                                  | How to Use                                          |
+|--------------------|-----------------------------------------------------------------------|-----------------------------------------------------|
+| **Claude Code**    | `.claude/agents/belmont` and `.claude/skills/belmont` symlinks        | `/belmont:product-plan`, `/belmont:implement`, etc. |
+| **Codex**          | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
+| **Cursor**         | None — `.agents/skills/` auto-discovered (Cursor Skills)              | `belmont:implement` in prompt                       |
+| **Windsurf**       | None — `.agents/skills/` auto-discovered (Cascade Skills)             | `belmont:implement` in prompt                       |
+| **Gemini**         | None — `.agents/skills/` is the documented `.gemini/skills/` alias    | `belmont:implement` in prompt                       |
+| **GitHub Copilot** | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
+| **Any other tool** | None — point your tool at `.agents/skills/belmont/<skill>/SKILL.md`   |                                                     |
+
+Skills are installed as agentskills.io-format folders (`<skill>/SKILL.md`), the open standard supported by Codex, Cursor, Gemini, Windsurf, GitHub Copilot, Claude Code, and a growing number of other AI tools.
 
 See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instructions.
 

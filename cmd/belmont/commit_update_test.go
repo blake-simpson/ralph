@@ -188,3 +188,97 @@ func mustWrite(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestCommitBelmontUpdate_StagesDeletionOfLegacyPath(t *testing.T) {
+	dir := setupRepo(t)
+
+	// Add a legacy `.gemini/rules/belmont/` dir to the initial commit so it's
+	// tracked, then delete it (mimicking what runLegacyCleanup would do during
+	// a Phase 1 → Phase 2 upgrade).
+	mustWrite(t, filepath.Join(dir, ".gemini/rules/belmont/foo.md"), "legacy\n")
+	runGit(t, dir, "add", ".gemini/rules/belmont/foo.md")
+	runGit(t, dir, "commit", "-q", "-m", "add legacy")
+	if err := os.RemoveAll(filepath.Join(dir, ".gemini/rules/belmont")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitBelmontUpdate(dir, "v0.99.0"); err != nil {
+		t.Fatalf("commitBelmontUpdate: %v", err)
+	}
+
+	// The deletion of the legacy file should be in the new commit.
+	files := runGit(t, dir, "diff", "--name-only", "--diff-filter=D", "HEAD~1", "HEAD")
+	if !strings.Contains(files, ".gemini/rules/belmont/foo.md") {
+		t.Errorf("expected legacy file deletion in commit, got:\n%s", files)
+	}
+}
+
+func TestRunLegacyCleanup_RemovesLegacyDirsAndAgentsSection(t *testing.T) {
+	dir := setupRepo(t)
+
+	// Plant several legacy artifacts that older Belmont versions would have
+	// created.
+	mustWrite(t, filepath.Join(dir, ".codex/belmont/old.md"), "legacy\n")
+	mustWrite(t, filepath.Join(dir, ".cursor/rules/belmont/old.mdc"), "legacy\n")
+	mustWrite(t, filepath.Join(dir, ".windsurf/rules/belmont/old.md"), "legacy\n")
+	mustWrite(t, filepath.Join(dir, ".gemini/rules/belmont/old.md"), "legacy\n")
+	mustWrite(t, filepath.Join(dir, ".copilot/belmont/old.md"), "legacy\n")
+	mustWrite(t, filepath.Join(dir, ".agents/skills/belmont/implement.md"), "stale flat skill\n")
+	mustWrite(t, filepath.Join(dir, ".agents/skills/belmont/references/old-ref.md"), "stale ref\n")
+
+	agentsContent := "# AGENTS\n\nUser stuff here.\n\n" +
+		belmontAgentsSectionStart + "\n## Belmont section\nlegacy\n" + belmontAgentsSectionEnd + "\n\nMore user stuff.\n"
+	mustWrite(t, filepath.Join(dir, "AGENTS.md"), agentsContent)
+	mustWrite(t, filepath.Join(dir, "GEMINI.md"),
+		belmontGeminiSectionStart+"\n@.agents/skills/belmont/implement.md\n"+belmontGeminiSectionEnd+"\n")
+
+	if err := runLegacyCleanup(dir); err != nil {
+		t.Fatalf("runLegacyCleanup: %v", err)
+	}
+
+	for _, removed := range []string{
+		".codex/belmont", ".cursor/rules/belmont", ".windsurf/rules/belmont",
+		".gemini/rules/belmont", ".copilot/belmont",
+	} {
+		if _, err := os.Stat(filepath.Join(dir, removed)); err == nil {
+			t.Errorf("expected %s to be removed", removed)
+		}
+	}
+	// Stale flat skill file under .agents/skills/belmont/ should be gone.
+	if _, err := os.Stat(filepath.Join(dir, ".agents/skills/belmont/implement.md")); err == nil {
+		t.Errorf("expected stale flat skill to be removed")
+	}
+	// Top-level references/ dir should be gone.
+	if _, err := os.Stat(filepath.Join(dir, ".agents/skills/belmont/references")); err == nil {
+		t.Errorf("expected stale top-level references/ to be removed")
+	}
+
+	// AGENTS.md preserves user content but loses the Belmont section.
+	updated, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(updated), belmontAgentsSectionStart) {
+		t.Errorf("AGENTS.md still contains Belmont marker: %s", updated)
+	}
+	if !strings.Contains(string(updated), "User stuff here.") || !strings.Contains(string(updated), "More user stuff.") {
+		t.Errorf("AGENTS.md user content lost: %s", updated)
+	}
+
+	// GEMINI.md held only Belmont content, so the file should be deleted.
+	if _, err := os.Stat(filepath.Join(dir, "GEMINI.md")); err == nil {
+		t.Errorf("expected GEMINI.md (Belmont-only) to be deleted")
+	}
+}
+
+func TestRunLegacyCleanup_Idempotent(t *testing.T) {
+	dir := setupRepo(t)
+
+	// First run on a fresh repo with nothing legacy to clean — should be a no-op.
+	if err := runLegacyCleanup(dir); err != nil {
+		t.Fatalf("runLegacyCleanup #1: %v", err)
+	}
+	if err := runLegacyCleanup(dir); err != nil {
+		t.Fatalf("runLegacyCleanup #2: %v", err)
+	}
+}

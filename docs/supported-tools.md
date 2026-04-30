@@ -1,72 +1,76 @@
 # Supported Tools
 
-Agents and skills are always installed to `.agents/` -- the single source of truth shared across all tools.
+Belmont skills install as agentskills.io-format folders at `.agents/skills/belmont/<skill>/SKILL.md`. Five of six supported AI CLIs auto-discover this path natively — the install does **zero per-tool wiring** for them. Only Claude Code needs an explicit symlink (because it expects skills under `.claude/skills/`, not `.agents/skills/`).
 
-Each AI tool is wired to `.agents/skills/belmont/` in the way it expects. Some tools use symlinks, while others get a copied/synced directory:
+| Tool               | Wiring                                                               | How to use                                              |
+|--------------------|----------------------------------------------------------------------|---------------------------------------------------------|
+| **Claude Code**    | `.claude/agents/belmont` and `.claude/skills/belmont` symlinks       | `/belmont:product-plan`, `/belmont:implement`, etc.     |
+| **Codex**          | none — `.agents/skills/` auto-discovered (Codex 0.126+)              | Prompt `belmont:<skill>` — surfaces via `/skills`       |
+| **Cursor**         | none — `.agents/skills/` auto-discovered (Cursor Skills system)      | Prompt `belmont:<skill>` — auto-loaded by description   |
+| **Windsurf**       | none — `.agents/skills/` auto-discovered (Cascade v1.13.6+)          | Prompt `belmont:<skill>` — auto-loaded by description   |
+| **Gemini**         | none — `.agents/skills/` is the documented alias for `.gemini/skills/` | Prompt `belmont:<skill>` — surfaces via `/skills`       |
+| **GitHub Copilot** | none — `.agents/skills/` auto-discovered                              | Prompt `belmont:<skill>` — surfaces via Copilot CLI     |
+| **Any other tool** | none                                                                  | Point your tool at `.agents/skills/belmont/<skill>/SKILL.md` |
 
-| Tool               | Symlink                                                 | Target                                                                                    | How to Use                                                            |
-|--------------------|---------------------------------------------------------|-------------------------------------------------------------------------------------------|-----------------------------------------------------------------------|
-| **Claude Code**    | `.claude/agents/belmont`<br/>`.claude/commands/belmont` | `agents -> .agents/belmont` (symlink)<br/>`commands` copied from `.agents/skills/belmont` | Slash commands: `/belmont:product-plan`, `/belmont:implement`, etc.   |
-| **Codex**          | `.codex/belmont`                                        | Copied from `.agents/skills/belmont`                                                      | `AGENTS.md` includes Belmont routing for `belmont:<skill>` prompts    |
-| **Cursor**         | `.cursor/rules/belmont/*.mdc`                           | `→ .agents/skills/belmont/*.md`                                                           | Toggle rules in Settings > Rules, or reference in Composer/Agent mode |
-| **Windsurf**       | `.windsurf/rules/belmont`                               | Symlink to `.agents/skills/belmont`                                                       | Reference rules in Cascade                                            |
-| **Gemini**         | `.gemini/rules/belmont`                                 | Symlink to `.agents/skills/belmont`                                                       | Reference rules in Gemini                                             |
-| **GitHub Copilot** | `.copilot/belmont`                                      | Symlink to `.agents/skills/belmont`                                                       | Reference files in Copilot Chat                                       |
-| **Any other tool** | *(none)*                                                | `.agents/skills/belmont/`                                                                 | Point your tool at the skill files directly                           |
+Each `<skill>/SKILL.md` carries `name:` + `description:` YAML frontmatter (required by agentskills.io) plus a `references/` subdir with the progressive-disclosure files that skill body references.
 
-Cursor uses per-file symlinks. Windsurf/Gemini/Copilot use a directory symlink. Claude Code and Codex use copied skill files.
+Belmont detects which tools to install for via three signals:
+- conventional project dirs (`.claude/`, `.codex/`, `.cursor/`, …) already present;
+- tool binaries on PATH (`claude`, `codex`, `cursor-agent`, `gemini`, `copilot`);
+- a Belmont skill-routing section in `AGENTS.md` / `GEMINI.md` (signals a previous install).
 
-## Claude Code Usage
+## Headless invocation
+
+Belmont's `auto` loop shells out to each tool's CLI in headless mode. The flag combinations are kept current with each tool's docs:
+
+| Tool          | Binary           | Invocation                                                                                                              |
+|---------------|------------------|-------------------------------------------------------------------------------------------------------------------------|
+| Claude Code   | `claude`         | `claude -p "<prompt>" --permission-mode bypassPermissions --allowedTools "Bash,Read,Write,Edit,..." --output-format stream-json --verbose` |
+| Codex         | `codex`          | `codex exec "<prompt>" --dangerously-bypass-approvals-and-sandbox --json -C <root>`                                     |
+| Cursor        | `cursor-agent`   | `cursor-agent -p --force --output-format json "<prompt>"` (prompt is the trailing positional)                           |
+| Gemini        | `gemini`         | `gemini -p "<prompt>" --approval-mode yolo --output-format json` (`--yolo` is deprecated)                               |
+| GitHub Copilot| `copilot`        | `copilot -p "<prompt>" --yolo`                                                                                          |
+
+Cursor's CLI is installed as both `cursor-agent` (legacy) and `agent` (current canonical name) — Belmont targets `cursor-agent` for stability, since the unambiguous name is less likely to collide with other tools that might expose a generic `agent` binary.
+
+## Per-tool usage
+
+### Claude Code
 
 Skills become native slash commands:
 
 ```
 /belmont:working-backwards  Define product vision (PR/FAQ)
-/belmont:product-plan   Interactive PRD creation
-/belmont:tech-plan      Technical implementation plan
-/belmont:implement      Implement next milestone (full pipeline)
-/belmont:next           Implement next single task (lightweight)
-/belmont:verify         Run verification and code review
-/belmont:debug          Debug router (choose auto or manual)
-/belmont:debug-auto    Auto debug loop (agent-verified)
-/belmont:debug-manual  Manual debug loop (user-verified, faster)
-/belmont:status         View progress
-/belmont:review-plans   Review document alignment and detect drift
-/belmont:cleanup        Archive completed features, reduce token bloat
-/belmont:reset          Reset state and start fresh
+/belmont:product-plan       Interactive PRD creation
+/belmont:tech-plan          Technical implementation plan
+/belmont:implement          Implement next milestone (full pipeline)
+/belmont:next               Implement next single task (lightweight)
+/belmont:verify             Run verification and code review
+/belmont:debug              Debug router (choose auto or manual)
+/belmont:debug-auto         Auto debug loop (agent-verified)
+/belmont:debug-manual       Manual debug loop (user-verified, faster)
+/belmont:status             View progress
+/belmont:review-plans       Review document alignment and detect drift
+/belmont:cleanup            Archive completed features, reduce token bloat
+/belmont:reset              Reset state and start fresh
 ```
 
-## Codex Usage
+### Codex / Cursor / Windsurf / Gemini / GitHub Copilot
 
-Skills are copied into `.codex/belmont/`, and Belmont adds/updates a small section in `AGENTS.md` so Codex can resolve local Belmont skills. To use them:
+All five auto-discover `.agents/skills/belmont/<skill>/SKILL.md`. Open the tool in your project directory and prompt with a skill reference like `belmont:implement` — the CLI's Skills system surfaces and activates the skill via its `description:` frontmatter.
 
-1. Open Codex in your project directory
-2. Prompt with a skill reference like `belmont:implement` or "Use the belmont:implement skill"
-3. Codex should resolve `.agents/skills/belmont/implement.md` (fallback `.codex/belmont/implement.md`)
-4. You can still point Codex at the skill file directly when starting a session
+For Codex specifically, the `/skills` slash command lists discovered skills. For Gemini, the same. For Cursor, you can also browse them via the Skills panel in the IDE.
 
-## Cursor Usage
+### Generic / Other Tools
 
-Skills are installed as rules (`.mdc` files). To use them:
+If your tool isn't auto-detected, the skill files are still plain markdown. Point your tool at:
 
-1. Open **Settings > Cursor Settings > Rules**
-2. You'll see the belmont rules listed (product-plan, tech-plan, implement, next, verify, status, cleanup, reset)
-3. Enable the one you want to activate
-4. Start a Composer or Agent session -- the rule will be loaded as context
-5. Or reference them directly: *"Follow the belmont implement workflow"*
-
-In the **Cursor Agent CLI**, you can reference the skill files directly:
-
-```bash
-cursor agent --rules .cursor/rules/belmont/implement.mdc
-```
-
-## Generic / Other Tools
-
-If your tool isn't auto-detected, the agent and skill files are still plain markdown. Point your tool at:
-
-- **Skills**: Read from `.agents/skills/belmont/` (or wherever you've placed them)
+- **Skills**: `.agents/skills/belmont/<skill>/SKILL.md` plus the `<skill>/references/` subdir
 - **Agents**: `.agents/belmont/codebase-agent.md`, `implementation-agent.md`, etc.
-- **State**: `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/PROGRESS.md` (master feature summary), `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, `.belmont/features/`
+- **State**: `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/features/`
 
 You can paste the skill content directly into a chat or configure your tool to load it as system context.
+
+## Migration from older Belmont versions
+
+If you've upgraded from a Belmont version that wrote into `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`, `.gemini/rules/belmont/`, `.copilot/belmont/`, `.claude/commands/belmont/`, or maintained a `belmont:skill-routing` section in `AGENTS.md` / `GEMINI.md`, the next `belmont install` (or `belmont update`) automatically removes those legacy paths. The cleanup is idempotent — safe to re-run.

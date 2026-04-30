@@ -69,9 +69,10 @@ Resolve via `git stash -u`, `git commit -am "..."`, or, as a last resort, bypass
 `belmont update` follows a successful self-update + skill reinstall by staging and committing only Belmont-managed paths:
 
 - `.agents/belmont/`, `.agents/skills/belmont/`
-- `.claude/agents/belmont/`, `.claude/commands/belmont/`
-- `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`, `.gemini/rules/belmont/`, `.copilot/belmont/`
-- `AGENTS.md` (Codex routing section)
+- `.claude/agents/belmont/`, `.claude/commands/belmont/`, `.claude/skills/belmont/`
+- `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`
+- Legacy: `.gemini/rules/belmont/`, `.copilot/belmont/` (no longer created, but staged for deletion if leftover from older Belmont versions)
+- `AGENTS.md` (Codex + Copilot routing section), `GEMINI.md` (Gemini `@import` section)
 
 Unrelated user changes (staged or unstaged) are not swept up — the `git commit` carries an explicit pathspec. Repo pre-commit hooks run normally; if a hook fails, Belmont leaves the files staged and prints the manual `git commit` to retry.
 

@@ -523,3 +523,197 @@ func TestScopeGuard_EA672675ReplayScenario(t *testing.T) {
 		t.Errorf("M5's own [v] flip should survive:\n%s", rebuilt)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Multi-feature scheduling — wave ordering + dep-paused gating
+// ----------------------------------------------------------------------------
+
+func TestComputeFeatureWaves_PreservesInputOrder(t *testing.T) {
+	features := []featureSummary{
+		{Slug: "c", Status: "Not Started"},
+		{Slug: "a", Status: "Not Started"},
+		{Slug: "b", Status: "Not Started"},
+	}
+	waves, err := computeFeatureWaves(features)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(waves) != 1 {
+		t.Fatalf("want 1 wave, got %d", len(waves))
+	}
+	got := []string{}
+	for _, f := range waves[0].Features {
+		got = append(got, f.Slug)
+	}
+	want := []string{"c", "a", "b"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("wave 1 order = %v, want %v (input-order contract)", got, want)
+	}
+}
+
+func TestComputeFeatureWaves_DependencyBeatsInputOrder(t *testing.T) {
+	features := []featureSummary{
+		{Slug: "b", Status: "Not Started", Deps: []string{"a"}},
+		{Slug: "a", Status: "Not Started"},
+	}
+	waves, err := computeFeatureWaves(features)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(waves) != 2 {
+		t.Fatalf("want 2 waves, got %d: %+v", len(waves), waves)
+	}
+	if waves[0].Features[0].Slug != "a" {
+		t.Errorf("wave 1 = %q, want %q", waves[0].Features[0].Slug, "a")
+	}
+	if waves[1].Features[0].Slug != "b" {
+		t.Errorf("wave 2 = %q, want %q", waves[1].Features[0].Slug, "b")
+	}
+}
+
+func TestResolveFeatureSlugs_AllFlagAlphabetical(t *testing.T) {
+	dir := t.TempDir()
+	featuresDir := filepath.Join(dir, ".belmont", "features")
+	for _, slug := range []string{"charlie", "alpha", "bravo"} {
+		fdir := filepath.Join(featuresDir, slug)
+		if err := os.MkdirAll(fdir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		// Minimal PRD + PROGRESS so listFeatures picks them up.
+		if err := os.WriteFile(filepath.Join(fdir, "PRD.md"), []byte("# PRD: "+slug+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(fdir, "PROGRESS.md"), []byte("### M1: stub\n- [ ] T1: t\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Master PROGRESS.md so syncMasterFeatureStatuses doesn't fail noisily.
+	if err := os.WriteFile(filepath.Join(dir, ".belmont", "PROGRESS.md"), []byte("# Project Progress\n\n## Features\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	slugs, err := resolveFeatureSlugs(dir, "", true)
+	if err != nil {
+		t.Fatalf("resolveFeatureSlugs: %v", err)
+	}
+	want := []string{"alpha", "bravo", "charlie"}
+	if strings.Join(slugs, ",") != strings.Join(want, ",") {
+		t.Errorf("--all slugs = %v, want %v (alphabetical contract)", slugs, want)
+	}
+}
+
+func TestFilterWaveByBlocked_PausedDepCascades(t *testing.T) {
+	wave := []featureSummary{
+		{Slug: "B", Deps: []string{"A"}},
+	}
+	paused := map[string]bool{"A": true}
+	failed := map[string]bool{}
+	runnable, skipped := filterWaveByBlocked(wave, failed, paused)
+	if len(runnable) != 0 {
+		t.Errorf("want B skipped, got runnable=%+v", runnable)
+	}
+	if len(skipped) != 1 || skipped[0].Slug != "B" || skipped[0].Reason != "paused" || skipped[0].DepSlug != "A" {
+		t.Errorf("want skipResult{B, paused, A}, got %+v", skipped)
+	}
+}
+
+func TestFilterWaveByBlocked_FailedAndPausedDistinct(t *testing.T) {
+	wave := []featureSummary{
+		{Slug: "B", Deps: []string{"A"}},
+		{Slug: "D", Deps: []string{"C"}},
+	}
+	paused := map[string]bool{"A": true}
+	failed := map[string]bool{"C": true}
+	_, skipped := filterWaveByBlocked(wave, failed, paused)
+	if len(skipped) != 2 {
+		t.Fatalf("want 2 skipped, got %d: %+v", len(skipped), skipped)
+	}
+	bySlug := map[string]skipResult{}
+	for _, s := range skipped {
+		bySlug[s.Slug] = s
+	}
+	if bySlug["B"].Reason != "paused" {
+		t.Errorf("B reason = %q, want paused", bySlug["B"].Reason)
+	}
+	if bySlug["D"].Reason != "failed" {
+		t.Errorf("D reason = %q, want failed", bySlug["D"].Reason)
+	}
+}
+
+func TestFilterWaveByBlocked_TransitiveSkip(t *testing.T) {
+	// Simulate three waves processed sequentially: A pauses (wave 1), then
+	// wave 2 contains B (depends:A) — gets skipped; pausedSlugs gains B.
+	// Wave 3 contains C (depends:B) — also skipped.
+	paused := map[string]bool{"A": true}
+	failed := map[string]bool{}
+
+	wave2 := []featureSummary{{Slug: "B", Deps: []string{"A"}}}
+	_, skipped2 := filterWaveByBlocked(wave2, failed, paused)
+	if len(skipped2) != 1 || skipped2[0].Reason != "paused" {
+		t.Fatalf("wave 2 skipped = %+v", skipped2)
+	}
+	// Caller propagates: skipped-due-to-paused → pausedSlugs.
+	for _, s := range skipped2 {
+		paused[s.Slug] = true
+	}
+
+	wave3 := []featureSummary{{Slug: "C", Deps: []string{"B"}}}
+	_, skipped3 := filterWaveByBlocked(wave3, failed, paused)
+	if len(skipped3) != 1 || skipped3[0].Slug != "C" || skipped3[0].Reason != "paused" || skipped3[0].DepSlug != "B" {
+		t.Fatalf("wave 3 transitive skip failed: %+v", skipped3)
+	}
+	// Caller propagates wave 3's skip too — confirms the cascade chain.
+	for _, s := range skipped3 {
+		paused[s.Slug] = true
+	}
+	if !paused["B"] || !paused["C"] {
+		t.Errorf("paused after cascade: B=%v C=%v (caller propagation)", paused["B"], paused["C"])
+	}
+}
+
+func TestFilterWaveByBlocked_FailedWinsOverPaused(t *testing.T) {
+	// When both deps block, the harder reason (failed) should be reported.
+	wave := []featureSummary{
+		{Slug: "X", Deps: []string{"paused-dep", "failed-dep"}},
+	}
+	failed := map[string]bool{"failed-dep": true}
+	paused := map[string]bool{"paused-dep": true}
+	_, skipped := filterWaveByBlocked(wave, failed, paused)
+	if len(skipped) != 1 || skipped[0].Reason != "failed" || skipped[0].DepSlug != "failed-dep" {
+		t.Errorf("want failed/failed-dep, got %+v", skipped)
+	}
+}
+
+func TestScanReadiness_FlagsNonTerminalDeps(t *testing.T) {
+	features := []featureSummary{
+		{Slug: "foundation", Status: "In Progress", TasksBlocked: 1},
+		{Slug: "student", Status: "Not Started", Deps: []string{"foundation"}},
+		{Slug: "parent", Status: "Not Started", Deps: []string{"foundation"}},
+	}
+	warns := scanReadiness(features)
+	if len(warns) != 2 {
+		t.Fatalf("want 2 warnings, got %d: %+v", len(warns), warns)
+	}
+	for _, w := range warns {
+		if w.DepSlug != "foundation" {
+			t.Errorf("warning %s has wrong dep %q", w.Slug, w.DepSlug)
+		}
+		if w.DepStatus != "In Progress" {
+			t.Errorf("warning %s has wrong dep status %q", w.Slug, w.DepStatus)
+		}
+		if w.Blocked != 1 {
+			t.Errorf("warning %s lost blocked-task count: %d", w.Slug, w.Blocked)
+		}
+	}
+}
+
+func TestScanReadiness_TerminalDepsSilent(t *testing.T) {
+	for _, status := range []string{"Complete", "Verified", "Archived"} {
+		features := []featureSummary{
+			{Slug: "foundation", Status: status},
+			{Slug: "student", Status: "Not Started", Deps: []string{"foundation"}},
+		}
+		if warns := scanReadiness(features); len(warns) != 0 {
+			t.Errorf("%s dep should be silent, got %+v", status, warns)
+		}
+	}
+}

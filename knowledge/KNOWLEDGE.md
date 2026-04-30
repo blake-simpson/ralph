@@ -20,6 +20,7 @@ Curated operational knowledge for working on Belmont itself. Scan the table belo
 | [auto-mode/parallel-wave-orchestration.md](auto-mode/parallel-wave-orchestration.md) | change `runWaveParallel`, `runMilestoneInWorktree`, `copyBelmontStateToWorktree`, `gracefulShutdown`, merge sequencing, or the live-status overlay |
 | [auto-mode/verify-evidence.md](auto-mode/verify-evidence.md) | change `runEvidenceCheck`, `taskHasCommit`, how verify marks `[v]`, or design a new evidence contract |
 | [auto-mode/clean-tree-preflight.md](auto-mode/clean-tree-preflight.md) | touch `requireCleanWorkingTree`, `commitBelmontUpdate`, `belmontManagedPaths`, the `--allow-dirty` / `--no-commit` flags, or weaken auto's startup contract that the working tree must be clean |
+| [auto-mode/multi-feature-scheduling.md](auto-mode/multi-feature-scheduling.md) | change `computeFeatureWaves`, `filterWaveByBlocked`, `runAutoMultiFeature`'s wave/skip plumbing, the pause→dependents cascade, `scanReadiness`, or `resolveFeatureSlugs` ordering |
 
 ### Cross-cutting (multiple domains)
 
@@ -28,6 +29,7 @@ Curated operational knowledge for working on Belmont itself. Scan the table belo
 | [cross-cutting/milestone-immutability.md](cross-cutting/milestone-immutability.md) | skills, state, auto-mode | edit any skill that writes PROGRESS.md, add a new milestone, or design how follow-ups / polish / fixes are routed |
 | [cross-cutting/port-isolation.md](cross-cutting/port-isolation.md) | cli, skills, agents | touch `buildWorktreeEnv`, `worktree-awareness.md`, or any agent logic that starts a server or probes a URL |
 | [cross-cutting/steering.md](cross-cutting/steering.md) | cli, skills, auto-mode | change `belmont steer`, `consumePendingSteering`, STEERING.md lifecycle, or have another guard inject its own correction |
+| [cross-cutting/skill-format.md](cross-cutting/skill-format.md) | cli, skills, agents | touch `generate-skills.sh`, the SKILL.md frontmatter shape, per-tool install wiring, `syncSkillsFolderDir`, `runLegacyCleanup`, or add support for a new AI CLI |
 
 ### Meta
 

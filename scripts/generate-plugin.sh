@@ -52,73 +52,26 @@ cat > "$PLUGIN_DIR/.claude-plugin/plugin.json" <<EOF
 }
 EOF
 
-REFS_SRC="$SKILLS_SRC/references"
+# Phase 2: skills/belmont/ already produces folder layout with SKILL.md +
+# per-skill references/. The plugin generator just copies each skill folder
+# into plugin/skills/. Run generate-skills.sh first to ensure the source is
+# fresh.
+"$SCRIPT_DIR/generate-skills.sh" >/dev/null
 
-# Transform and copy skills
-# Each skill file becomes skills/<name>/SKILL.md with adjusted frontmatter
-for skill_file in "$SKILLS_SRC"/*.md; do
-    [ -f "$skill_file" ] || continue
-    filename="$(basename "$skill_file" .md)"
+for skill_dir in "$SKILLS_SRC"/*/; do
+    [ -d "$skill_dir" ] || continue
+    name="$(basename "$skill_dir")"
+    case "$name" in _*) continue ;; esac
+    [ -f "$skill_dir/SKILL.md" ] || continue
 
-    skill_dir="$PLUGIN_DIR/skills/$filename"
-    mkdir -p "$skill_dir"
-
-    # Extract frontmatter values and body using awk
-    # Frontmatter is between the first and second --- lines
-    awk '
-    BEGIN { in_fm=0; fm_done=0; first_line=1 }
-    {
-        if (first_line && $0 == "---") {
-            in_fm=1
-            first_line=0
-            next
-        }
-        if (in_fm && $0 == "---") {
-            in_fm=0
-            fm_done=1
-            next
-        }
-        if (in_fm) {
-            # Collect frontmatter key-value pairs
-            if ($0 ~ /^description:/) {
-                desc = $0
-                sub(/^description: */, "", desc)
-                # Remove surrounding quotes if present
-                gsub(/^["'"'"']|["'"'"']$/, "", desc)
-            }
-            if ($0 ~ /^alwaysApply:/) {
-                always = $0
-                sub(/^alwaysApply: */, "", always)
-            }
-            next
-        }
-        if (fm_done) {
-            body = body $0 "\n"
-        }
-    }
-    END {
-        # Write new frontmatter
-        print "---"
-        print "name: " FILENAME_BASE
-        if (desc != "") print "description: " desc
-        if (always != "") print "alwaysApply: " always
-        print "---"
-        # Write body (preserving leading blank line if present)
-        printf "%s", body
-    }
-    ' FILENAME_BASE="$filename" "$skill_file" > "$skill_dir/SKILL.md"
-
-    # Copy references prefixed by this skill's name (e.g. implement-*.md → skills/implement/references/)
-    # so relative "references/<name>.md" paths in SKILL.md resolve correctly.
-    if [ -d "$REFS_SRC" ]; then
-        for ref_file in "$REFS_SRC"/"$filename"-*.md; do
-            [ -f "$ref_file" ] || continue
-            mkdir -p "$skill_dir/references"
-            cp "$ref_file" "$skill_dir/references/$(basename "$ref_file")"
-        done
+    dest="$PLUGIN_DIR/skills/$name"
+    mkdir -p "$dest"
+    cp "$skill_dir/SKILL.md" "$dest/SKILL.md"
+    if [ -d "$skill_dir/references" ]; then
+        mkdir -p "$dest/references"
+        cp "$skill_dir/references"/*.md "$dest/references/" 2>/dev/null || true
     fi
-
-    echo "  skill: $filename"
+    echo "  skill: $name"
 done
 
 # Copy agents with name and description added to frontmatter

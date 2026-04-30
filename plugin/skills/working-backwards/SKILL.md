@@ -1,6 +1,6 @@
 ---
 name: working-backwards
-description: Write an Amazon-style Working Backwards document (PR/FAQ). Use when the user mentions 'Working Backwards', 'PR/FAQ', 'PRFAQ', 'press release and FAQ', or wants to define a product vision before detailed planning.
+description: "Write an Amazon-style Working Backwards document (PR/FAQ). Use when the user mentions 'Working Backwards', 'PR/FAQ', 'PRFAQ', 'press release and FAQ', or wants to define a product vision before detailed planning."
 alwaysApply: false
 ---
 

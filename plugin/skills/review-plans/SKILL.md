@@ -1,6 +1,6 @@
 ---
 name: review-plans
-description: Review alignment between planning documents (PR/FAQ, PRDs, Tech Plans) and the codebase. Use when you want to detect drift, resolve conflicts, or ensure plans match reality.
+description: "Review alignment between planning documents (PR/FAQ, PRDs, Tech Plans) and the codebase. Use when you want to detect drift, resolve conflicts, or ensure plans match reality."
 alwaysApply: false
 ---
 

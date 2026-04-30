@@ -66,21 +66,22 @@ There is no linter configured. A small focused test file exists at `cmd/belmont/
 
 ## Skills Generation
 
-Skills in `skills/belmont/` are generated from templates. **Do not edit generated files directly** — edit the source:
+Skills in `skills/belmont/` are generated from templates. **Generated output is gitignored** — only `_src/` and `_partials/` are committed. The generation step transforms flat sources into the agentskills.io folder layout (`<skill>/SKILL.md` with `name:` injected into frontmatter, plus a `<skill>/references/` subdir holding only the references that skill body actually uses).
 
 - **Shared content**: `skills/belmont/_partials/*.md` — reusable blocks with `{{variable}}` placeholders, inlined at build time via `<!-- @include ... -->`
-- **Templates**: `skills/belmont/_src/*.md` — skill templates that include partials
-- **Progressive-disclosure references**: `skills/belmont/_src/references/<skill>-<topic>.md` — detail loaded on demand by skills (NOT inlined). Named with the owning skill as a prefix. Skill bodies point at them via relative paths like `references/implement-milestone-template.md` so the same path resolves in every install target.
-- **Generated output**: `skills/belmont/*.md` and `skills/belmont/references/*.md` — the files that get installed into projects
+- **Templates**: `skills/belmont/_src/*.md` — flat-with-frontmatter skill source files. Edit these.
+- **Progressive-disclosure references**: `skills/belmont/_src/references/<skill>-<topic>.md` — detail loaded on demand by skills. Skill bodies point at them via relative paths like `references/implement-milestone-template.md`; generation copies only the references each skill body mentions into `<skill>/references/`.
+- **Generated output (gitignored)**: `skills/belmont/<skill>/SKILL.md` and `skills/belmont/<skill>/references/*.md`. `build.sh` copies this into `cmd/belmont/skills/` for `//go:embed` and cleans up after.
 
-After editing partials or templates:
+Regenerate after editing sources:
 
 ```bash
-./scripts/generate-skills.sh          # Regenerate
-./scripts/generate-skills.sh --check  # Verify generated files are up to date
+go generate ./...                     # invokes scripts/generate-skills.sh
+./scripts/generate-skills.sh          # direct invocation
+./scripts/generate-skills.sh --check  # verify each _src/<name>.md has a corresponding generated SKILL.md
 ```
 
-Files without a `_src/` counterpart (`status.md`, `reset.md`) are edited directly.
+Source-mode `belmont install --source <path>` also auto-runs `generate-skills.sh` if any `_src/` or `_partials/` file is newer than the matching generated SKILL.md (`ensureSkillsGenerated`).
 
 The sub-agent dispatch strategy is shared via `skills/belmont/_partials/dispatch-strategy.md` and inlined at build time into orchestrator skills (implement, verify).
 
@@ -176,8 +177,8 @@ Belmont is an agent-agnostic AI coding toolkit. It installs markdown-based **ski
 
 1. **Embedded mode** (release binary, no `--source`): extracts from `embed.FS`
 2. **Source mode** (`--source` flag or `BELMONT_SOURCE` env): reads from filesystem
-3. Wires each detected AI tool to those canonical locations (symlinks for Cursor/Windsurf/Gemini/Copilot, copies for Claude Code/Codex)
-4. For Codex installs, adds/updates a marked section in `AGENTS.md` that routes `belmont:<skill>` requests to local files
+3. Phase 2: skills install as agentskills.io folder layout (`.agents/skills/belmont/<skill>/SKILL.md` with required `name:` + `description:` frontmatter). Five of six supported CLIs (Codex, Cursor, Windsurf, Gemini, GitHub Copilot) auto-discover `.agents/skills/` natively — no per-tool wiring. Claude Code gets two symlinks (`.claude/agents/belmont`, `.claude/skills/belmont`).
+4. `runLegacyCleanup` runs before per-tool setup, idempotently removing any pre-Phase-2 install artifacts (`.codex/belmont`, `.cursor/rules/belmont`, `.windsurf/rules/belmont`, `.gemini/rules/belmont`, `.copilot/belmont`, `.claude/commands/belmont`, `belmont:skill-routing` sections in `AGENTS.md`/`GEMINI.md`, stale flat skill files at `.agents/skills/belmont/*.md`). Detection signals for tool selection: conventional dir presence, tool binary on PATH, or pre-existing Belmont section in `AGENTS.md` / `GEMINI.md` — see `detectTools`.
 5. Removes legacy Belmont-managed root `SKILLS.md` (if present from older installs)
 6. Creates `.belmont/` state directory with PRD.md and PROGRESS.md templates
 7. Cleans stale files — if a skill was renamed/removed in source, the old file is deleted from the target
