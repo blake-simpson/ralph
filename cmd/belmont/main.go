@@ -1482,8 +1482,8 @@ func lastCompletedTask(tasks []task) *task {
 }
 
 func parseMilestones(progress string) []milestone {
-	// Match milestone headers: ### M1: Name or ### ✅ M1: Name (legacy) or ### ⬜ M1: Name (legacy)
-	msRe := regexp.MustCompile(`(?m)^###\s+(?:[✅⬜🔄🚫]\s*)?M(\d+):\s*(.+)$`)
+	// Match milestone headers: ### M1: Name
+	msRe := regexp.MustCompile(`(?m)^###\s+M(\d+):\s*(.+)$`)
 	depsRe := regexp.MustCompile(`\(depends:\s*(M[\d]+(?:\s*,\s*M[\d]+)*)\)\s*$`)
 	// Match task checkboxes: - [ ] P0-1: Task Name, - [x] ..., - [>] ..., - [v] ..., - [!] ...
 	taskRe := regexp.MustCompile(`(?m)^\s*-\s+\[(.)\]\s+(.+)$`)
@@ -2183,11 +2183,6 @@ func runInstall(args []string) error {
 		} else {
 			fmt.Println("  = AGENTS.md Belmont Codex skill routing section (unchanged)")
 		}
-		if removed, err := removeLegacyCodexSkillsIndex(projectRoot); err != nil {
-			return err
-		} else if removed {
-			fmt.Println("  - SKILLS.md (removed legacy Belmont Codex index)")
-		}
 		fmt.Println("")
 	}
 
@@ -2634,82 +2629,6 @@ func syncReferencesDir(sourceDir, targetDir string) error {
 	return nil
 }
 
-// removeLegacySyncHook removes the belmont sync PostToolUse hook from Claude Code settings
-// if it was installed by a previous version of belmont. The sync hook is no longer needed —
-// with copy-based worktree isolation, belmont status reads live state from active worktrees
-// via auto.json.
-func removeLegacySyncHook(projectRoot string) {
-	settingsPath := filepath.Join(projectRoot, ".claude", "settings.json")
-
-	data, err := os.ReadFile(settingsPath)
-	if err != nil {
-		return
-	}
-	var settings map[string]interface{}
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return
-	}
-
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	PostToolUse, ok := hooks["PostToolUse"].([]interface{})
-	if !ok {
-		return
-	}
-
-	// Filter out any entry containing "belmont sync"
-	var filtered []interface{}
-	removed := false
-	for _, entry := range PostToolUse {
-		keep := true
-		if m, ok := entry.(map[string]interface{}); ok {
-			if hooksArr, ok := m["hooks"].([]interface{}); ok {
-				for _, h := range hooksArr {
-					if hm, ok := h.(map[string]interface{}); ok {
-						if cmd, _ := hm["command"].(string); strings.Contains(cmd, "belmont sync") {
-							keep = false
-							removed = true
-						}
-					}
-				}
-			}
-			if cmd, _ := m["command"].(string); strings.Contains(cmd, "belmont sync") {
-				keep = false
-				removed = true
-			}
-		}
-		if keep {
-			filtered = append(filtered, entry)
-		}
-	}
-
-	if !removed {
-		return
-	}
-
-	if len(filtered) == 0 {
-		delete(hooks, "PostToolUse")
-		if len(hooks) == 0 {
-			delete(settings, "hooks")
-		}
-	} else {
-		hooks["PostToolUse"] = filtered
-	}
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(settings); err != nil {
-		return
-	}
-	os.WriteFile(settingsPath, buf.Bytes(), 0644)
-	fmt.Println("  - .claude/settings.json (removed legacy belmont sync hook)")
-}
-
 func setupTool(projectRoot, tool string) error {
 	switch tool {
 	case "claude":
@@ -2724,15 +2643,6 @@ func setupTool(projectRoot, tool string) error {
 		if err := syncMarkdownDir(skillsTarget, claudeCommandsDir); err != nil {
 			return err
 		}
-		claudeSkillsDir := filepath.Join(projectRoot, ".claude", "skills", "belmont")
-		if dirExists(claudeSkillsDir) {
-			fmt.Println("  - .claude/skills/belmont (deprecated, removing)")
-			if err := os.RemoveAll(claudeSkillsDir); err != nil {
-				return err
-			}
-		}
-		// Remove legacy belmont sync hook if present (no longer needed)
-		removeLegacySyncHook(projectRoot)
 	case "codex":
 		fmt.Println("Linking Codex...")
 		skillsTarget := filepath.Join(projectRoot, ".agents", "skills", "belmont")
@@ -2982,26 +2892,6 @@ func upsertMarkedSection(content, startMarker, endMarker, section string) (strin
 	trimmed := strings.TrimRight(content, "\n")
 	return trimmed + "\n\n" + newSection + "\n", true
 }
-
-func removeLegacyCodexSkillsIndex(projectRoot string) (bool, error) {
-	path := filepath.Join(projectRoot, "SKILLS.md")
-	if !fileExists(path) {
-		return false, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	content := string(data)
-	if !strings.Contains(content, "name: belmont-skills-index") {
-		return false, nil
-	}
-	if err := os.Remove(path); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 
 func filesEqual(a, b string) (bool, error) {
 	ab, err := os.ReadFile(a)
@@ -3338,11 +3228,6 @@ func runUpdate(args []string) error {
 	if release.Body != "" {
 		fmt.Println("\nRelease notes:")
 		fmt.Println(release.Body)
-	}
-
-	// Migrate old state tracking format if needed
-	if dirExists(filepath.Join(".", ".belmont")) {
-		migrateToUnifiedTracking(".")
 	}
 
 	// Auto-install if .belmont/ exists in cwd
@@ -8783,296 +8668,6 @@ func runSyncCmd(args []string) error {
 }
 
 // runRecover handles the "belmont recover" command.
-// migrateToUnifiedTracking detects and converts old dual-file state tracking to the new
-// unified PROGRESS.md format. Old format: PRD.md had emoji on task headers, PROGRESS.md had
-// emoji on milestone headers and ## Blockers/## Status sections. New format: PROGRESS.md
-// has task checkboxes with [ ]/[>]/[x]/[v]/[!] states, no milestone emojis, no Blockers/Status sections.
-func migrateToUnifiedTracking(root string) {
-	featuresDir := filepath.Join(root, ".belmont", "features")
-	entries, err := os.ReadDir(featuresDir)
-	if err != nil {
-		return
-	}
-
-	// Detect if migration is needed by checking first feature
-	needsMigration := false
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		progressPath := filepath.Join(featuresDir, e.Name(), "PROGRESS.md")
-		data, err := os.ReadFile(progressPath)
-		if err != nil {
-			continue
-		}
-		content := string(data)
-		// Old format indicators: emoji on milestone headers or ## Blockers section
-		if regexp.MustCompile(`(?m)^###\s+[✅⬜🔄🚫]\s*M\d+:`).MatchString(content) ||
-			strings.Contains(content, "## Blockers") ||
-			strings.Contains(content, "## Status:") {
-			needsMigration = true
-		}
-		break
-	}
-
-	if !needsMigration {
-		return
-	}
-
-	fmt.Println("\nMigrating to unified state tracking...")
-
-	migratedCount := 0
-	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		slug := e.Name()
-		featurePath := filepath.Join(featuresDir, slug)
-
-		// Step 1: Parse task statuses from old PRD.md
-		prdPath := filepath.Join(featurePath, "PRD.md")
-		prdTaskStatuses := make(map[string]string) // task ID → new checkbox marker
-		if prdData, err := os.ReadFile(prdPath); err == nil {
-			prdRe := regexp.MustCompile(`(?m)^###\s+(P\d+-[\w][\w-]*):\s*(.+)$`)
-			for _, match := range prdRe.FindAllStringSubmatch(string(prdData), -1) {
-				id := strings.TrimSpace(match[1])
-				text := match[2]
-				marker := " " // default: todo
-				if strings.Contains(text, "✅") || regexp.MustCompile(`(?i)\[done\]`).MatchString(text) {
-					marker = "x" // done (not verified — conservative)
-				} else if strings.Contains(text, "🚫") || regexp.MustCompile(`(?i)blocked`).MatchString(text) {
-					marker = "!"
-				}
-				prdTaskStatuses[id] = marker
-			}
-
-			// Step 2: Strip emoji from PRD.md task headers
-			updated := string(prdData)
-			for _, emoji := range []string{"✅", "🚫", "🔄", "⬜", "🔵"} {
-				updated = strings.ReplaceAll(updated, emoji, "")
-			}
-			// Clean up extra spaces from removed emojis
-			updated = regexp.MustCompile(`(?m)^(###\s+P\d+-[\w][\w-]*:\s*)\s+`).ReplaceAllString(updated, "$1")
-			updated = regexp.MustCompile(`\s+$`).ReplaceAllString(updated, "")
-			os.WriteFile(prdPath, []byte(strings.TrimRight(updated, "\n")+"\n"), 0644)
-		}
-
-		// Step 3: Update PROGRESS.md
-		progressPath := filepath.Join(featurePath, "PROGRESS.md")
-		progressData, err := os.ReadFile(progressPath)
-		if err != nil {
-			continue
-		}
-
-		lines := strings.Split(string(progressData), "\n")
-		var newLines []string
-		skipBlockers := false
-		skipStatus := false
-
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-
-			// Remove ## Status: line
-			if strings.HasPrefix(trimmed, "## Status:") {
-				skipStatus = true
-				continue
-			}
-			if skipStatus {
-				if trimmed == "" {
-					skipStatus = false
-					continue
-				}
-				skipStatus = false
-			}
-
-			// Remove ## Blockers section
-			if strings.HasPrefix(trimmed, "## Blockers") {
-				skipBlockers = true
-				continue
-			}
-			if skipBlockers {
-				if strings.HasPrefix(trimmed, "## ") {
-					skipBlockers = false
-					// Fall through to process this line
-				} else {
-					continue
-				}
-			}
-
-			// Remove emoji from milestone headers: ### ✅ M1: → ### M1:
-			msRe := regexp.MustCompile(`^(###\s+)[✅⬜🔄🚫]\s*(M\d+:.*)$`)
-			if m := msRe.FindStringSubmatch(line); m != nil {
-				line = m[1] + m[2]
-			}
-
-			// Upgrade task checkboxes using PRD.md statuses
-			taskRe := regexp.MustCompile(`^(\s*-\s+)\[[ xX]\](\s+)(P\d+-[\w][\w-]*)(.*)$`)
-			if m := taskRe.FindStringSubmatch(line); m != nil {
-				taskID := m[3]
-				if marker, ok := prdTaskStatuses[taskID]; ok {
-					line = m[1] + "[" + marker + "]" + m[2] + m[3] + m[4]
-				}
-			}
-
-			newLines = append(newLines, line)
-		}
-
-		os.WriteFile(progressPath, []byte(strings.Join(newLines, "\n")), 0644)
-		migratedCount++
-		fmt.Printf("  Migrated feature '%s'\n", slug)
-	}
-
-	// Step 4: Migrate master PRD.md — remove features table
-	masterPrdPath := filepath.Join(root, ".belmont", "PRD.md")
-	if prdData, err := os.ReadFile(masterPrdPath); err == nil {
-		content := string(prdData)
-		// Remove the features table section
-		featuresTableRe := regexp.MustCompile(`(?ms)^## Features\s*\n.*?(?:\n## |\z)`)
-		if featuresTableRe.MatchString(content) {
-			// Extract priority/deps from old table before removing
-			oldDeps, oldPriorities := parseMasterPRDTableLegacy(content)
-
-			// Remove the features table from PRD
-			updated := featuresTableRe.ReplaceAllString(content, "")
-			// Add global doc sections if not present
-			if !strings.Contains(updated, "## Cross-Cutting Decisions") {
-				updated = strings.TrimRight(updated, "\n") + "\n\n## Cross-Cutting Decisions\n\n(Add cross-cutting product decisions here)\n"
-			}
-			if !strings.Contains(updated, "## Constraints") {
-				updated = strings.TrimRight(updated, "\n") + "\n\n## Constraints\n\n(Add project-wide constraints here)\n"
-			}
-			os.WriteFile(masterPrdPath, []byte(updated), 0644)
-
-			// Step 5: Add Priority + Dependencies columns to master PROGRESS.md
-			masterProgressPath := filepath.Join(root, ".belmont", "PROGRESS.md")
-			if progressData, err := os.ReadFile(masterProgressPath); err == nil {
-				migratedProgress := migrateMasterProgressTable(string(progressData), oldDeps, oldPriorities)
-				os.WriteFile(masterProgressPath, []byte(migratedProgress), 0644)
-			}
-		}
-	}
-
-	if migratedCount > 0 {
-		fmt.Printf("\n  Migrated %d feature(s). Done tasks mapped to [x] (not yet verified).\n", migratedCount)
-		fmt.Println("  Run 'belmont reverify' to verify completed work.")
-	}
-}
-
-// parseMasterPRDTableLegacy extracts deps and priorities from the old-format master PRD features table.
-func parseMasterPRDTableLegacy(content string) (deps map[string][]string, priorities map[string]string) {
-	deps = make(map[string][]string)
-	priorities = make(map[string]string)
-	lines := strings.Split(content, "\n")
-	inTable := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## Features") {
-			inTable = true
-			continue
-		}
-		if inTable && strings.HasPrefix(trimmed, "## ") {
-			break
-		}
-		if !inTable || !strings.HasPrefix(trimmed, "|") {
-			continue
-		}
-		cells := splitTableCells(trimmed)
-		if len(cells) < 4 {
-			continue
-		}
-		slug := strings.TrimSpace(cells[1])
-		if slug == "Slug" || strings.HasPrefix(slug, "-") || strings.HasPrefix(slug, ":") {
-			continue
-		}
-		priorities[slug] = strings.TrimSpace(cells[2])
-		depStr := strings.TrimSpace(cells[3])
-		if depStr != "" && !strings.EqualFold(depStr, "None") && depStr != "-" {
-			for _, d := range strings.Split(depStr, ",") {
-				d = strings.TrimSpace(d)
-				if d != "" {
-					deps[slug] = append(deps[slug], d)
-				}
-			}
-		}
-	}
-	return
-}
-
-// migrateMasterProgressTable adds Priority and Dependencies columns to the master PROGRESS.md features table.
-func migrateMasterProgressTable(content string, deps map[string][]string, priorities map[string]string) string {
-	lines := strings.Split(content, "\n")
-	var result []string
-	inTable := false
-	headerDone := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		if strings.HasPrefix(trimmed, "## Features") {
-			inTable = true
-			result = append(result, line)
-			continue
-		}
-		if inTable && strings.HasPrefix(trimmed, "## ") {
-			inTable = false
-		}
-
-		if inTable && strings.HasPrefix(trimmed, "|") {
-			cells := splitTableCells(trimmed)
-			if !headerDone {
-				// Check if it's a header row
-				if len(cells) >= 2 && cells[0] == "Feature" {
-					// Replace header: add Priority and Dependencies after Slug
-					result = append(result, "| Feature | Slug | Priority | Dependencies | Status | Milestones | Tasks |")
-					result = append(result, "|---------|------|----------|-------------|--------|------------|-------|")
-					headerDone = true
-					continue
-				}
-				// Separator row
-				if strings.Contains(trimmed, "---") {
-					continue // already added separator above
-				}
-			} else {
-				// Data row — add priority and deps columns
-				if len(cells) >= 2 && !strings.HasPrefix(cells[0], "-") {
-					slug := strings.TrimSpace(cells[1])
-					if strings.HasPrefix(slug, "-") || slug == "Slug" {
-						result = append(result, line)
-						continue
-					}
-					priority := "P1"
-					if p, ok := priorities[slug]; ok {
-						priority = p
-					}
-					depStr := "None"
-					if d, ok := deps[slug]; ok && len(d) > 0 {
-						depStr = strings.Join(d, ", ")
-					}
-					status := ""
-					ms := ""
-					tasks := ""
-					if len(cells) >= 3 {
-						status = cells[2]
-					}
-					if len(cells) >= 4 {
-						ms = cells[3]
-					}
-					if len(cells) >= 5 {
-						tasks = cells[4]
-					}
-					result = append(result, fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |",
-						cells[0], slug, priority, depStr, status, ms, tasks))
-					continue
-				}
-			}
-		}
-
-		result = append(result, line)
-	}
-
-	return strings.Join(result, "\n")
-}
-
 func runRecover(args []string) error {
 	fs := flag.NewFlagSet("recover", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
