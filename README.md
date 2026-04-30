@@ -365,6 +365,9 @@ belmont auto --feature my-feature --policy milestone
 # Cap concurrent features or milestones
 belmont auto --all --max-parallel 2
 
+# Bypass the clean-working-tree preflight (not recommended — risks merge failures)
+belmont auto --feature my-feature --allow-dirty
+
 # Re-verify completed milestones (e.g. after upgrading agents)
 belmont reverify --feature my-feature
 belmont reverify --feature my-feature --from M3 --to M10

@@ -68,3 +68,24 @@ Fix the underlying issue, change the task's checkbox from `[!]` back to `[ ]` in
 ## Want to start fresh
 
 Run the reset skill (`/belmont:reset` in Claude Code) to reset all state files. Alternatively, delete `.belmont/PRD.md`, `.belmont/PROGRESS.md`, `.belmont/TECH_PLAN.md`, `.belmont/MILESTONE.md`, and any `.belmont/MILESTONE-*.done.md` files manually, then re-run `belmont install` (or `belmont install --source /path/to/belmont`) to recreate templates.
+
+## `belmont auto` refuses to start: "working tree is not clean"
+
+`auto` requires a clean working tree because worktree merges back into the starting branch will fail if uncommitted changes overlap the merged paths. The error lists the offending paths.
+
+Most common cause: a recent `belmont update` rewrote files under `.agents/belmont/` or `.agents/skills/belmont/` and the user never committed them. Recent versions auto-commit these files; older versions did not. To resolve:
+
+```bash
+git stash -u                       # stash everything (incl. untracked)
+git commit -am "Update Belmont"    # or commit your changes
+belmont auto --feature ...         # then retry
+
+# Last resort:
+belmont auto --feature ... --allow-dirty
+```
+
+`--dry-run` also bypasses the check (no merges happen).
+
+## `belmont update` auto-commit failed (pre-commit hook)
+
+`belmont update` runs `git commit` with hooks enabled. If a hook fails, the Belmont-managed files are left staged. Fix whatever the hook complained about (e.g. lint, formatting) and re-run the printed `git commit -m "Update Belmont to vX.Y.Z"` manually. To skip auto-commit on the next update, run `belmont update --no-commit` and commit the files yourself.

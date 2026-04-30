@@ -19,6 +19,7 @@ Curated operational knowledge for working on Belmont itself. Scan the table belo
 | [auto-mode/scope-guard-runtime.md](auto-mode/scope-guard-runtime.md) | change `runScopeGuard` / `diffScopeViolations` / `rebuildAfterScopeGuard`, propose a new runtime enforcement for parallel mode, or weaken any post-phase check |
 | [auto-mode/parallel-wave-orchestration.md](auto-mode/parallel-wave-orchestration.md) | change `runWaveParallel`, `runMilestoneInWorktree`, `copyBelmontStateToWorktree`, `gracefulShutdown`, merge sequencing, or the live-status overlay |
 | [auto-mode/verify-evidence.md](auto-mode/verify-evidence.md) | change `runEvidenceCheck`, `taskHasCommit`, how verify marks `[v]`, or design a new evidence contract |
+| [auto-mode/clean-tree-preflight.md](auto-mode/clean-tree-preflight.md) | touch `requireCleanWorkingTree`, `commitBelmontUpdate`, `belmontManagedPaths`, the `--allow-dirty` / `--no-commit` flags, or weaken auto's startup contract that the working tree must be clean |
 
 ### Cross-cutting (multiple domains)
 

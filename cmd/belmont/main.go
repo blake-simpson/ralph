@@ -657,9 +657,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  belmont install [--source PATH] [--project PATH] [--tools all|none|claude,codex,...]")
-	fmt.Fprintln(w, "  belmont update [--check] [--force]")
+	fmt.Fprintln(w, "  belmont update [--check] [--force] [--no-commit]")
 	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json] [--color auto|always|never]")
-	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--root PATH]")
+	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--allow-dirty] [--root PATH]")
 	fmt.Fprintln(w, "    (alias: belmont loop)")
 	fmt.Fprintln(w, "  belmont reverify [--feature SLUG] [--from M1] [--to M5] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont sync [--root PATH]")
@@ -3248,8 +3248,10 @@ func runUpdate(args []string) error {
 	fsFlags.SetOutput(io.Discard)
 	var check bool
 	var force bool
+	var noCommit bool
 	fsFlags.BoolVar(&check, "check", false, "check for updates without installing")
 	fsFlags.BoolVar(&force, "force", false, "force update even if same version")
+	fsFlags.BoolVar(&noCommit, "no-commit", false, "do not auto-commit Belmont-managed files after install")
 	if err := fsFlags.Parse(args); err != nil {
 		return fmt.Errorf("update: %w", err)
 	}
@@ -3351,11 +3353,90 @@ func runUpdate(args []string) error {
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			fmt.Fprintf(os.Stderr, "Auto-install failed: %v\nRun 'belmont install' manually.\n", err)
+		} else if noCommit {
+			fmt.Println("\nSkipping auto-commit (--no-commit).")
+			fmt.Println("To commit manually: git add .agents .claude/commands/belmont .codex/belmont .cursor/rules/belmont .windsurf/rules/belmont .gemini/rules/belmont .copilot/belmont AGENTS.md && git commit -m \"Update Belmont to " + release.TagName + "\"")
+		} else {
+			if err := commitBelmontUpdate(".", release.TagName); err != nil {
+				fmt.Fprintln(os.Stderr, err.Error())
+			}
 		}
 	} else {
 		fmt.Println("\nTo update skills in a project: cd ~/your-project && belmont install")
 	}
 
+	return nil
+}
+
+// commitBelmontUpdate stages and commits only Belmont-managed files after a
+// successful self-update + auto-install. Unrelated user changes are left
+// untouched. No-ops gracefully when the directory isn't a git repo or when
+// nothing under the allow-list changed.
+func commitBelmontUpdate(root, version string) error {
+	// Skip silently if not in a git working tree.
+	checkCmd := exec.Command("git", "rev-parse", "--is-inside-work-tree")
+	checkCmd.Dir = root
+	out, err := checkCmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		fmt.Println("\nSkipping auto-commit (not a git repository).")
+		return nil
+	}
+
+	// Filter to paths that exist on disk — `git add` errors on missing
+	// pathspecs, and only some tools (claude/codex/...) are installed per
+	// project.
+	var existingPaths []string
+	for _, p := range belmontManagedPaths {
+		full := filepath.Join(root, p)
+		if _, err := os.Lstat(full); err == nil {
+			existingPaths = append(existingPaths, p)
+		}
+	}
+	if len(existingPaths) == 0 {
+		fmt.Println("\nNo Belmont-managed paths to commit.")
+		return nil
+	}
+
+	// Stage only Belmont-managed paths.
+	addArgs := append([]string{"add", "--"}, existingPaths...)
+	addCmd := exec.Command("git", addArgs...)
+	addCmd.Dir = root
+	addCmd.Stderr = os.Stderr
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("auto-commit: git add failed: %w", err)
+	}
+
+	// Detect no-op: if nothing under the allow-list is staged, skip commit.
+	diffArgs := append([]string{"diff", "--cached", "--quiet", "--"}, existingPaths...)
+	diffCmd := exec.Command("git", diffArgs...)
+	diffCmd.Dir = root
+	if err := diffCmd.Run(); err == nil {
+		fmt.Println("\nBelmont files already committed (no changes to commit).")
+		return nil
+	}
+
+	// Commit with hooks enabled (no --no-verify). If a pre-commit hook fails,
+	// leave the staged files in place — the user's hook may have auto-fixed
+	// content that they'll want to keep before re-committing.
+	//
+	// Pathspec on `git commit` is critical: without it, `git commit` would
+	// also sweep in any unrelated changes the user had previously staged.
+	msg := fmt.Sprintf("Update Belmont to %s", version)
+	commitArgs := append([]string{"commit", "-m", msg, "--"}, existingPaths...)
+	commitCmd := exec.Command("git", commitArgs...)
+	commitCmd.Dir = root
+	commitCmd.Stdout = os.Stdout
+	commitCmd.Stderr = os.Stderr
+	if err := commitCmd.Run(); err != nil {
+		var sb strings.Builder
+		sb.WriteString("\n" + ansiYellow + "Auto-commit failed (likely a pre-commit hook)." + ansiReset + "\n")
+		sb.WriteString("Belmont files are staged. Fix the issue and run:\n")
+		sb.WriteString(fmt.Sprintf("  git commit -m %q\n", msg))
+		sb.WriteString("Or skip auto-commit next time with: belmont update --no-commit")
+		return errors.New(sb.String())
+	}
+
+	fmt.Printf("\n%s✓%s Committed Belmont update (%s)\n", ansiGreen, ansiReset, msg)
 	return nil
 }
 
@@ -3472,6 +3553,7 @@ func runAutoCmd(args []string) error {
 	var policyStr string
 	var featuresFlag string
 	var allFlag bool
+	var allowDirty bool
 	fs.StringVar(&cfg.Feature, "feature", "", "feature slug (required)")
 	fs.StringVar(&featuresFlag, "features", "", "comma-separated feature slugs for parallel execution")
 	fs.BoolVar(&allFlag, "all", false, "run all pending features in parallel")
@@ -3483,6 +3565,7 @@ func runAutoCmd(args []string) error {
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
 	fs.IntVar(&cfg.MaxParallel, "max-parallel", 5, "max concurrent goroutines for parallel execution")
 	fs.BoolVar(&cfg.DryRun, "dry-run", false, "show execution plan without running")
+	fs.BoolVar(&allowDirty, "allow-dirty", false, "skip the clean-working-tree check (not recommended — risks merge failures)")
 	fs.StringVar(&cfg.Root, "root", ".", "project root")
 
 	if err := fs.Parse(args); err != nil {
@@ -3531,6 +3614,15 @@ func runAutoCmd(args []string) error {
 			// ok
 		default:
 			return fmt.Errorf("auto: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", cfg.Tool)
+		}
+	}
+
+	// Refuse to start against a dirty working tree — uncommitted changes risk
+	// blocking later worktree merges. Skipped on --dry-run (no merges happen)
+	// and --allow-dirty (explicit opt-out).
+	if !allowDirty && !cfg.DryRun {
+		if err := requireCleanWorkingTree(absRoot); err != nil {
+			return err
 		}
 	}
 
@@ -7375,6 +7467,105 @@ func getCurrentBranch(root string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// belmontManagedPaths is the allow-list of subtrees Belmont's installer writes
+// into. Used by the dirty-tree preflight (to give a Belmont-aware error) and by
+// the update auto-commit (to scope `git add` so unrelated user work isn't swept
+// up).
+var belmontManagedPaths = []string{
+	".agents/belmont",
+	".agents/skills/belmont",
+	".claude/agents/belmont",
+	".claude/commands/belmont",
+	".codex/belmont",
+	".cursor/rules/belmont",
+	".windsurf/rules/belmont",
+	".gemini/rules/belmont",
+	".copilot/belmont",
+	"AGENTS.md",
+}
+
+func pathIsBelmontManaged(p string) bool {
+	for _, prefix := range belmontManagedPaths {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// porcelainPath extracts the path from a `git status --porcelain` line
+// ("XY path" or "XY old -> new" for renames).
+func porcelainPath(line string) string {
+	if len(line) < 4 {
+		return ""
+	}
+	p := strings.TrimSpace(line[3:])
+	if idx := strings.Index(p, " -> "); idx >= 0 {
+		p = p[idx+4:]
+	}
+	return p
+}
+
+// requireCleanWorkingTree returns an error if `git status --porcelain` reports
+// any uncommitted, unstaged, or untracked changes in root. The error message
+// is shaped for direct printing — coloured headers, a truncated path list,
+// and resolution hints. If root isn't a git repo, returns nil (no block).
+func requireCleanWorkingTree(root string) error {
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=normal")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	// Trim only trailing newline — porcelain lines start with a status code in
+	// columns 0-1 that may include a leading space (e.g. " M path"), so a full
+	// TrimSpace would corrupt the first line's path offset.
+	output := strings.TrimRight(string(out), "\n")
+	if output == "" {
+		return nil
+	}
+
+	lines := strings.Split(output, "\n")
+	belmontHits := 0
+	for _, ln := range lines {
+		if pathIsBelmontManaged(porcelainPath(ln)) {
+			belmontHits++
+		}
+	}
+
+	const maxList = 20
+	listed := lines
+	truncated := 0
+	if len(listed) > maxList {
+		truncated = len(listed) - maxList
+		listed = listed[:maxList]
+	}
+
+	var sb strings.Builder
+	sb.WriteString(ansiRed + "working tree is not clean — refusing to start auto" + ansiReset + "\n\n")
+	sb.WriteString("The following files have uncommitted, unstaged, or untracked changes:\n")
+	for _, ln := range listed {
+		sb.WriteString("  ")
+		sb.WriteString(ln)
+		sb.WriteString("\n")
+	}
+	if truncated > 0 {
+		sb.WriteString(fmt.Sprintf("  ... and %d more\n", truncated))
+	}
+	sb.WriteString("\n")
+	if belmontHits > 0 {
+		sb.WriteString(ansiYellow + "Looks like a recent `belmont update` left files uncommitted." + ansiReset + "\n")
+		sb.WriteString("If a worktree merges back into this branch later, those uncommitted files will block the merge.\n\n")
+	} else {
+		sb.WriteString(ansiYellow + "If a worktree merges back into this branch later, uncommitted files may block the merge." + ansiReset + "\n\n")
+	}
+	sb.WriteString("Resolve with one of:\n")
+	sb.WriteString("  git stash -u                  # stash changes (incl. untracked) and start clean\n")
+	sb.WriteString("  git commit -am \"...\"          # commit your changes\n")
+	sb.WriteString("  belmont auto --allow-dirty    # skip this check (not recommended)")
+	return errors.New(sb.String())
 }
 
 // ensureCleanMergeState aborts any in-progress merge and cleans up unmerged files.
