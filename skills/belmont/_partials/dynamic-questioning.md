@@ -22,7 +22,7 @@ Use this to decide which domains are in scope and where to spend interview effor
 
 ### Walk the domains
 
-See the **Domains to Cover** section of this skill for the domain checklist. For each *relevant* domain, run one or more `AskUserQuestion` rounds until the domain is actually resolved — not just touched once. Tightly related sub-questions can be grouped into a single call (per the `user-questions.md` rules), but a single call rarely resolves a domain with real depth.
+See the **Domains to Cover** section of this skill for the domain checklist. For each *relevant* domain, run one or more `AskUserQuestion` (Claude) or `ask_user` (Gemini) rounds until the domain is actually resolved — not just touched once. Tightly related sub-questions can be grouped into a single call (per the `user-questions.md` rules), but a single call rarely resolves a domain with real depth.
 
 A domain may be skipped only if it is *genuinely irrelevant* to the work. When skipping, record it in `## Clarifications` as `- [domain]: skipped — not applicable because [reason]`. Do not skip a domain merely because it feels tedious.
 

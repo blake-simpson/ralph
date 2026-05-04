@@ -131,7 +131,7 @@ If Figma URLs exist for this task, note them in the Design Specifications sectio
 >
 > The MILESTONE file is at `{base}/MILESTONE.md`. Read it, then follow your instructions. This is a single-task run — implement only the one task listed, then stop.
 >
-> **Note**: The Codebase Analysis and Design Specifications sections are not populated (lightweight mode). Explore the codebase as needed while implementing. Follow existing patterns and conventions. Check `CLAUDE.md` (if it exists) for project rules.
+> **Note**: The Codebase Analysis and Design Specifications sections are not populated (lightweight mode). Explore the codebase as needed while implementing. Follow existing patterns and conventions. Check `CLAUDE.md`, `GEMINI.md`, or `AGENTS.md` (if they exist) for project rules.
 
 **Wait for**: Sub-agent to complete.
 

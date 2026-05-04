@@ -137,7 +137,7 @@ Rules for updating PRD/PROGRESS from the tech-plan session:
 
 When you need to ask the user a question:
 
-1. **Use your structured question tool** (e.g. `AskUserQuestion`, or equivalent). This is NON-NEGOTIABLE when such a tool is available.
+1. **Use your structured question tool** (e.g. `AskUserQuestion` (Claude) or `ask_user` (Gemini), or equivalent). This is NON-NEGOTIABLE when such a tool is available.
 2. **Ask ONE set of related questions at a time** — group related questions into a single tool call, then wait for answers before asking the next set.
 3. **NEVER print the question as inline text AND use the tool.** The tool call IS the question — do not duplicate it in your response body.
 4. **NEVER ask questions as plain inline text** when a structured question tool exists. No "Question 1: ..." followed by more text. Use the tool.
@@ -167,7 +167,7 @@ Use this to decide which domains are in scope and where to spend interview effor
 
 ### Walk the domains
 
-See the **Domains to Cover** section of this skill for the domain checklist. For each *relevant* domain, run one or more `AskUserQuestion` rounds until the domain is actually resolved — not just touched once. Tightly related sub-questions can be grouped into a single call (per the `user-questions.md` rules), but a single call rarely resolves a domain with real depth.
+See the **Domains to Cover** section of this skill for the domain checklist. For each *relevant* domain, run one or more `AskUserQuestion` (Claude) or `ask_user` (Gemini) rounds until the domain is actually resolved — not just touched once. Tightly related sub-questions can be grouped into a single call (per the `user-questions.md` rules), but a single call rarely resolves a domain with real depth.
 
 A domain may be skipped only if it is *genuinely irrelevant* to the work. When skipping, record it in `## Clarifications` as `- [domain]: skipped — not applicable because [reason]`. Do not skip a domain merely because it feels tedious.
 
@@ -388,7 +388,7 @@ Before starting, verify:
 ### Phase 3 - Planning (interactive interview style questions)
 - With any upfront context in mind, **calibrate silently** (see *Dynamic Questioning Depth* above) — decide which domains are in scope and where the open questions are. Do not announce a tier to the user; just start asking.
 - Walk the **Domains to Cover** checklist. For each relevant domain, run as many rounds as it takes to resolve it. Dig on ambiguity; skip what the master tech plan, the PRD, or prior answers already settle. Mark already-resolved domains in `## Clarifications` ("Resolved from master tech plan: ..."). No round cap.
-- When research sub-agents return findings, loop them back through the user via `AskUserQuestion` with options (per *Proactive Research*). Research feeds more questions, not fewer.
+- When research sub-agents return findings, loop them back through the user via `AskUserQuestion` (Claude) or `ask_user` (Gemini) with options (per *Proactive Research*). Research feeds more questions, not fewer.
 - Exit only when the **exit criteria** from the Dynamic Questioning framework are met — every relevant domain resolved, every follow-up thread closed, user explicitly confirms nothing more to add, all answers captured in `## Clarifications` / the Decision Log.
 
 #### Question Scope (CRITICAL)
@@ -485,9 +485,9 @@ Decide per-agent model tiers for this feature so downstream work uses the right-
 
 2. **Pick a starting recommendation for each agent** — `codebase`, `design`, `implementation`, `verification`, `code-review`, `reconciliation`. Base the pick on what that agent will concretely do for THIS feature, not a pattern-match to the profile label. The reference file `references/models-yaml-format.md` lists a few loose starting-point examples (frontend-heavy features *typically* warrant design=high + verification=high, etc.), but these are illustrative, not definitive — exercise judgment.
 
-3. **Confirm with the user via `AskUserQuestion`**. Present the recommendation as a compact table in the question body and offer three options:
+3. **Confirm with the user via `AskUserQuestion` (Claude) or `ask_user` (Gemini)**. Present the recommendation as a compact table in the question body and offer three options:
    - (a) Accept recommendation as-is.
-   - (b) Adjust specific agents — follow up with per-agent `AskUserQuestion` prompts for the ones the user wants to change (each with low/medium/high options).
+   - (b) Adjust specific agents — follow up with per-agent `AskUserQuestion` (Claude) or `ask_user` (Gemini) prompts for the ones the user wants to change (each with low/medium/high options).
    - (c) Accept Belmont defaults — skip writing `models.yaml` so agent frontmatter (Sonnet for most, Opus for reconciliation) applies.
 
 4. **Write `.belmont/features/<slug>/models.yaml`** if the user picked (a) or (b). Format:

@@ -30,7 +30,7 @@ This session requires ultrathink-level reasoning — deeply consider customer ne
 
 When you need to ask the user a question:
 
-1. **Use your structured question tool** (e.g. `AskUserQuestion`, or equivalent). This is NON-NEGOTIABLE when such a tool is available.
+1. **Use your structured question tool** (e.g. `AskUserQuestion` (Claude) or `ask_user` (Gemini), or equivalent). This is NON-NEGOTIABLE when such a tool is available.
 2. **Ask ONE set of related questions at a time** — group related questions into a single tool call, then wait for answers before asking the next set.
 3. **NEVER print the question as inline text AND use the tool.** The tool call IS the question — do not duplicate it in your response body.
 4. **NEVER ask questions as plain inline text** when a structured question tool exists. No "Question 1: ..." followed by more text. Use the tool.
@@ -60,7 +60,7 @@ Use this to decide which domains are in scope and where to spend interview effor
 
 ### Walk the domains
 
-See the **Domains to Cover** section of this skill for the domain checklist. For each *relevant* domain, run one or more `AskUserQuestion` rounds until the domain is actually resolved — not just touched once. Tightly related sub-questions can be grouped into a single call (per the `user-questions.md` rules), but a single call rarely resolves a domain with real depth.
+See the **Domains to Cover** section of this skill for the domain checklist. For each *relevant* domain, run one or more `AskUserQuestion` (Claude) or `ask_user` (Gemini) rounds until the domain is actually resolved — not just touched once. Tightly related sub-questions can be grouped into a single call (per the `user-questions.md` rules), but a single call rarely resolves a domain with real depth.
 
 A domain may be skipped only if it is *genuinely irrelevant* to the work. When skipping, record it in `## Clarifications` as `- [domain]: skipped — not applicable because [reason]`. Do not skip a domain merely because it feels tedious.
 
