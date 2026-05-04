@@ -31,7 +31,7 @@ Over time, Belmont projects accumulate completed feature directories (PRD, PROGR
 ## Allowed Actions
 
 - **DO** read all `.belmont/` state files, convention files (CLAUDE.md, GEMINI.md, AGENTS.md), tool directory structures
-- **DO** present cleanup options interactively via `AskUserQuestion`
+- **DO** present cleanup options interactively via `AskUserQuestion` (Claude) or `ask_user` (Gemini)
 - **DO** archive completed feature directories (compress verbose files into slim summaries)
 - **DO** remove MILESTONE-*.done.md files based on user choice
 - **DO** edit NOTES.md, convention files (CLAUDE.md, GEMINI.md, AGENTS.md) based on user decisions

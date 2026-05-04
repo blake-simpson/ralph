@@ -144,7 +144,7 @@ Before starting, verify:
 ### Phase 3 - Planning (interactive interview style questions)
 - With any upfront context in mind, **calibrate silently** (see *Dynamic Questioning Depth* above) — decide which domains are in scope and where the open questions are. Do not announce a tier to the user; just start asking.
 - Walk the **Domains to Cover** checklist. For each relevant domain, run as many rounds as it takes to resolve it. Dig on ambiguity; skip what the master tech plan, the PRD, or prior answers already settle. Mark already-resolved domains in `## Clarifications` ("Resolved from master tech plan: ..."). No round cap.
-- When research sub-agents return findings, loop them back through the user via `AskUserQuestion` with options (per *Proactive Research*). Research feeds more questions, not fewer.
+- When research sub-agents return findings, loop them back through the user via `AskUserQuestion` (Claude) or `ask_user` (Gemini) with options (per *Proactive Research*). Research feeds more questions, not fewer.
 - Exit only when the **exit criteria** from the Dynamic Questioning framework are met — every relevant domain resolved, every follow-up thread closed, user explicitly confirms nothing more to add, all answers captured in `## Clarifications` / the Decision Log.
 
 #### Question Scope (CRITICAL)
@@ -241,9 +241,9 @@ Decide per-agent model tiers for this feature so downstream work uses the right-
 
 2. **Pick a starting recommendation for each agent** — `codebase`, `design`, `implementation`, `verification`, `code-review`, `reconciliation`. Base the pick on what that agent will concretely do for THIS feature, not a pattern-match to the profile label. The reference file `references/models-yaml-format.md` lists a few loose starting-point examples (frontend-heavy features *typically* warrant design=high + verification=high, etc.), but these are illustrative, not definitive — exercise judgment.
 
-3. **Confirm with the user via `AskUserQuestion`**. Present the recommendation as a compact table in the question body and offer three options:
+3. **Confirm with the user via `AskUserQuestion` (Claude) or `ask_user` (Gemini)**. Present the recommendation as a compact table in the question body and offer three options:
    - (a) Accept recommendation as-is.
-   - (b) Adjust specific agents — follow up with per-agent `AskUserQuestion` prompts for the ones the user wants to change (each with low/medium/high options).
+   - (b) Adjust specific agents — follow up with per-agent `AskUserQuestion` (Claude) or `ask_user` (Gemini) prompts for the ones the user wants to change (each with low/medium/high options).
    - (c) Accept Belmont defaults — skip writing `models.yaml` so agent frontmatter (Sonnet for most, Opus for reconciliation) applies.
 
 4. **Write `.belmont/features/<slug>/models.yaml`** if the user picked (a) or (b). Format:

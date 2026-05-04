@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: "Reduce input token bloat by archiving completed features, removing stale milestone files, trimming notes, and auditing convention files (CLAUDE.md, AGENTS.md)."
+description: "Reduce input token bloat by archiving completed features, removing stale milestone files, trimming notes, and auditing convention files (CLAUDE.md, GEMINI.md, AGENTS.md)."
 alwaysApply: false
 ---
 
@@ -31,11 +31,11 @@ Over time, Belmont projects accumulate completed feature directories (PRD, PROGR
 
 ## Allowed Actions
 
-- **DO** read all `.belmont/` state files, CLAUDE.md, AGENTS.md, tool directory structures
-- **DO** present cleanup options interactively via `AskUserQuestion`
+- **DO** read all `.belmont/` state files, convention files (CLAUDE.md, GEMINI.md, AGENTS.md), tool directory structures
+- **DO** present cleanup options interactively via `AskUserQuestion` (Claude) or `ask_user` (Gemini)
 - **DO** archive completed feature directories (compress verbose files into slim summaries)
 - **DO** remove MILESTONE-*.done.md files based on user choice
-- **DO** edit NOTES.md, CLAUDE.md, AGENTS.md based on user decisions
+- **DO** edit NOTES.md, convention files (CLAUDE.md, GEMINI.md, AGENTS.md) based on user decisions
 - **DO** commit `.belmont/` changes after cleanup
 
 ## Step 1: Scan & Inventory
@@ -87,7 +87,7 @@ Categories:
   [a] Archive completed features
   [m] Remove archived milestone files
   [n] Trim NOTES.md
-  [d] Audit convention files (CLAUDE.md, AGENTS.md)
+  [d] Audit convention files (CLAUDE.md, GEMINI.md, AGENTS.md)
   [t] Check tool directory state
   [c] Cancel
 
@@ -370,9 +370,9 @@ After completing all updates, commit modified files:
    ```bash
    git add .belmont/
    ```
-   If CLAUDE.md, AGENTS.md, `.cursorrules`, or `.windsurfrules` were modified, stage those too:
+   If convention files (CLAUDE.md, GEMINI.md, AGENTS.md), `.cursorrules`, or `.windsurfrules` were modified, stage those too:
    ```bash
-   git add CLAUDE.md AGENTS.md .cursorrules .windsurfrules 2>/dev/null
+   git add CLAUDE.md GEMINI.md AGENTS.md .cursorrules .windsurfrules 2>/dev/null
    ```
    Then commit:
    ```bash

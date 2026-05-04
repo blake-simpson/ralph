@@ -32,7 +32,7 @@ Belmont's planning workflow creates a layered document hierarchy (PR/FAQ → Mas
 
 - **DO** read all `.belmont/` planning documents
 - **DO** read the codebase structure (tree, glob, key files referenced in tech plans)
-- **DO** present findings interactively via `AskUserQuestion`
+- **DO** present findings interactively via `AskUserQuestion` (Claude) or `ask_user` (Gemini)
 - **DO** edit PRDs, Tech Plans, PROGRESS, and NOTES files based on user decisions
 - **DO** create follow-up tasks in feature PRDs and PROGRESS files
 
@@ -171,7 +171,7 @@ For each finding, present interactively. If no findings: report "Layer 4: Codeba
 
 ## Interactive Resolution
 
-For each finding, present it using `AskUserQuestion` with context and resolution options.
+For each finding, present it using `AskUserQuestion` (Claude) or `ask_user` (Gemini) with context and resolution options.
 
 ### Finding Format
 

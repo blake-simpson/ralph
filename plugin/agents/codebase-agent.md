@@ -88,13 +88,20 @@ Document:
 - Error handling patterns
 - Logging patterns
 
-### 5. CLAUDE.md Integration
+### 5. Convention File Integration
 
-If `CLAUDE.md` exists:
-- Read and extract all project-specific rules
-- Document required patterns and conventions
-- Note any prohibited patterns or anti-patterns
-- Extract testing requirements
+Identify and read the project's convention files. These files take absolute precedence over general defaults.
+
+Check for (in order of priority):
+1.  **Framework-specific**: `GEMINI.md` (if running as Gemini CLI), `CLAUDE.md` (if running as Claude Code).
+2.  **Shared**: `AGENTS.md`, `CONVENTIONS.md`.
+3.  **Tool-specific**: `.cursorrules`, `.windsurfrules`.
+
+For each found file:
+- Read and extract all project-specific rules.
+- Document required patterns and conventions.
+- Note any prohibited patterns or anti-patterns.
+- Extract testing requirements.
 
 ## Output: Write to MILESTONE File
 
@@ -121,8 +128,8 @@ Write using this format:
 [Relevant directory tree]
 ```
 
-### CLAUDE.md Rules
-[Extracted rules from CLAUDE.md, or "No CLAUDE.md found"]
+### Convention Rules (CLAUDE.md / GEMINI.md / AGENTS.md)
+[Extracted rules from convention files, or "No convention files found"]
 
 ### Related Files Found
 
@@ -207,7 +214,7 @@ Write using this format:
 - **DO NOT** modify any section of the MILESTONE file other than `## Codebase Analysis`
 - **DO NOT** create, edit, or write to any file other than the MILESTONE file
 - **DO NOT** implement anything — you are a research agent, not an implementation agent
-- **DO** read CLAUDE.md or AGENTS.md if it exists - it's critical context
+- **DO** read `GEMINI.md`, `CLAUDE.md`, or `AGENTS.md` if they exist - they are critical context
 - **DO** include actual code snippets showing patterns
 - **DO** flag if target files don't exist yet (new file creation needed)
 - **DO** note any inconsistencies in the codebase patterns
