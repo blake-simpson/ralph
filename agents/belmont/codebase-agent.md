@@ -57,6 +57,8 @@ Identify and report:
 
   **This is critical** — downstream agents (implementation-agent, code-review-agent) use the detected package manager for all commands. Report it accurately.
 
+- **Monorepo workspaces**: If `BELMONT_MONOREPO=1` is set in the environment, the project is a monorepo. Read `BELMONT_MONOREPO_TYPE` (e.g. `turborepo`, `pnpm`, `cargo`), `BELMONT_PRIMARY_WORKSPACE` (the workspace ID for the primary dev server), and `BELMONT_WORKSPACES` (a JSON array of `{id, path}` entries — every workspace, primary and otherwise). Report all of these in `## Codebase Analysis` so downstream agents know to scope their commands. Example line: `Workspaces (turborepo): web (packages/web, primary), api (apps/api), types (packages/types)`. When `BELMONT_MONOREPO` is unset, this is a single-package project and you can omit the workspace block.
+
 ### 2. Project Structure Scan
 
 Identify key directories:
@@ -66,6 +68,8 @@ Identify key directories:
 - API/server directory
 - Tests directory
 - Config files location
+
+In monorepo mode, scope this scan to `$BELMONT_PRIMARY_WORKSPACE_PATH` (the primary workspace) for the main analysis, and reference other workspaces by path only — don't deep-scan them unless the active tasks touch them.
 
 ### 3. Related Code Discovery
 

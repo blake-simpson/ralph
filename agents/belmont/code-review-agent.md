@@ -44,6 +44,16 @@ Run comprehensive checks using the detected package manager (`<pkg>`):
 
 ```
 
+**Monorepo mode (`BELMONT_MONOREPO=1`).** Scope build/test to the workspace named in `BELMONT_PRIMARY_WORKSPACE` (or the workspaces touched by the milestone — read `BELMONT_WORKSPACES` JSON):
+
+```bash
+pnpm --filter <id> run build && pnpm --filter <id> run test
+# or yarn workspace <id> build / npm -w <id> run build / bun --filter <id> run build
+# or cargo build -p <id> && cargo test -p <id>
+```
+
+Run the workspace tool's filtered command rather than the root script so you don't trigger every workspace's pipeline.
+
 Record all output - warnings matter too, not just errors.
 
 ### Phase 2: Code Review

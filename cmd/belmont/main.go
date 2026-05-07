@@ -321,19 +321,33 @@ type featureSummary struct {
 }
 
 type statusReport struct {
-	Feature           string
-	TechPlanReady     bool
-	PRFAQReady        bool
-	OverallStatus     string
-	TaskCounts        map[string]int
-	Tasks             []task
-	Milestones        []milestone
-	NextMilestone     *milestone
-	NextTask          *task
-	LastCompleted     *task
-	RecentDecisions   []string
-	Features          []featureSummary
-	ArchivedFeatures  []featureSummary `json:",omitempty"`
+	Feature          string
+	TechPlanReady    bool
+	PRFAQReady       bool
+	OverallStatus    string
+	TaskCounts       map[string]int
+	Tasks            []task
+	Milestones       []milestone
+	NextMilestone    *milestone
+	NextTask         *task
+	LastCompleted    *task
+	RecentDecisions  []string
+	Features         []featureSummary
+	ArchivedFeatures []featureSummary `json:",omitempty"`
+	Monorepo         *monorepoReport  `json:",omitempty"`
+}
+
+// monorepoReport summarizes detected monorepo workspaces for status output.
+// Nil when the project is single-package.
+type monorepoReport struct {
+	Type       string              `json:"type"`
+	Primary    string              `json:"primary,omitempty"`
+	Workspaces []monorepoWorkspace `json:"workspaces"`
+}
+
+type monorepoWorkspace struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
 }
 
 type config struct {
@@ -424,28 +438,48 @@ const (
 )
 
 type loopConfig struct {
-	Feature       string
-	Root          string
-	Tool          string
-	From          string
-	To            string
-	Policy        checkpointPolicy
-	MaxIterations int
-	MaxFailures   int
-	MaxParallel   int
-	DryRun        bool
-	Port          int                // assigned port for worktree isolation (0 = not in worktree)
-	WorktreeEnv   map[string]string  // extra env vars from worktree.json
-	Tracker       *worktreeTracker   // process group tracker for cleanup on interrupt
-	TrackerID     string             // worktree ID for tracker operations
-	ModelTiers    modelTierConfig    // per-feature model tiers (from .belmont/features/<slug>/models.yaml)
+	Feature          string
+	Root             string
+	Tool             string
+	From             string
+	To               string
+	Policy           checkpointPolicy
+	MaxIterations    int
+	MaxFailures      int
+	MaxParallel      int
+	DryRun           bool
+	Port             int               // assigned port for worktree isolation (0 = not in worktree)
+	WorktreeEnv      map[string]string // extra env vars from worktree.json
+	Tracker          *worktreeTracker  // process group tracker for cleanup on interrupt
+	TrackerID        string            // worktree ID for tracker operations
+	ModelTiers       modelTierConfig   // per-feature model tiers (from .belmont/features/<slug>/models.yaml)
+	Workspaces       []workspaceInfo   // monorepo workspaces (nil for single-package projects)
+	PrimaryWorkspace string            // primary workspace ID (empty for single-package)
+	MonorepoType     monorepoType      // detected/declared monorepo type (empty for single-package)
 }
 
 // worktreeHooks defines lifecycle hooks for worktree isolation.
+//
+// PrimaryWorkspace and Workspaces are optional monorepo overrides. When
+// Workspaces is non-empty it replaces auto-detection; when PrimaryWorkspace
+// is empty the first workspace with a `dev` script (or first detected) wins.
+// All four new fields are optional — existing single-package worktree.json
+// files parse and behave identically.
 type worktreeHooks struct {
-	Setup    []string          `json:"setup"`
-	Teardown []string          `json:"teardown"`
-	Env      map[string]string `json:"env"`
+	Setup            []string                     `json:"setup"`
+	Teardown         []string                     `json:"teardown"`
+	Env              map[string]string            `json:"env"`
+	PrimaryWorkspace string                       `json:"primary_workspace,omitempty"`
+	Workspaces       map[string]workspaceOverride `json:"workspaces,omitempty"`
+}
+
+// workspaceOverride is a user-supplied workspace declaration in worktree.json.
+// Path is relative to the project root. EnvFiles lists additional env file
+// paths (also relative to project root) to seed into the workspace dir on
+// top of the root .env propagation.
+type workspaceOverride struct {
+	Path     string   `json:"path"`
+	EnvFiles []string `json:"env_files,omitempty"`
 }
 
 // loadWorktreeHooks reads .belmont/worktree.json from the project root.
@@ -492,9 +526,10 @@ func allocatePort() (int, error) {
 }
 
 // buildWorktreeEnv creates an environment slice with worktree-specific variables.
-// It starts from the current process env and appends PORT, BELMONT_PORT, BELMONT_WORKTREE,
-// and any user-defined env vars from worktree.json.
-func buildWorktreeEnv(port int, extraEnv map[string]string) []string {
+// It starts from the current process env and appends PORT, BELMONT_PORT,
+// BELMONT_WORKTREE, BELMONT_MONOREPO* (when applicable), and any user-defined
+// env vars from worktree.json.
+func buildWorktreeEnv(port int, extraEnv map[string]string, workspaces []workspaceInfo, primary string, mType monorepoType) []string {
 	env := os.Environ()
 	if port != 0 {
 		baseURL := fmt.Sprintf("http://localhost:%d", port)
@@ -516,6 +551,7 @@ func buildWorktreeEnv(port int, extraEnv map[string]string) []string {
 			fmt.Sprintf("VITE_PORT=%d", port),
 		)
 	}
+	env = append(env, monorepoEnvVars(workspaces, primary, mType)...)
 	for k, v := range extraEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
@@ -523,8 +559,8 @@ func buildWorktreeEnv(port int, extraEnv map[string]string) []string {
 }
 
 // runWorktreeHookCommands executes a list of shell commands in the worktree directory.
-func runWorktreeHookCommands(commands []string, wtPath string, port int, extraEnv map[string]string) error {
-	env := buildWorktreeEnv(port, extraEnv)
+func runWorktreeHookCommands(commands []string, wtPath string, port int, extraEnv map[string]string, workspaces []workspaceInfo, primary string, mType monorepoType) error {
+	env := buildWorktreeEnv(port, extraEnv, workspaces, primary, mType)
 	for _, cmdStr := range commands {
 		cmd := exec.Command("sh", "-c", cmdStr)
 		cmd.Dir = wtPath
@@ -567,26 +603,972 @@ func detectAutoInstallCommands(root string) []string {
 // copyEnvFiles copies .env* files from the project root into the worktree.
 // These are gitignored so they don't exist in fresh worktrees, but are needed
 // by postinstall scripts (e.g., prisma generate) and dev servers.
-func copyEnvFiles(projectRoot, wtPath string) {
+//
+// In monorepo mode, env files are also seeded into qualifying workspace dirs
+// (the ones whose manifest signals env consumption — Prisma deps, postinstall
+// scripts, etc.) plus any workspace whose worktree.json override lists
+// explicit env_files. See seedWorkspaceEnv.
+func copyEnvFiles(projectRoot, wtPath string, workspaces []workspaceInfo, overrides map[string]workspaceOverride) {
+	rootEnvFiles := []string{}
 	entries, err := os.ReadDir(projectRoot)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if name == ".env" || strings.HasPrefix(name, ".env.") {
-			src := filepath.Join(projectRoot, name)
-			dst := filepath.Join(wtPath, name)
-			data, err := os.ReadFile(src)
-			if err != nil {
+	if err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
 				continue
 			}
-			os.WriteFile(dst, data, 0644)
+			name := e.Name()
+			if name == ".env" || strings.HasPrefix(name, ".env.") {
+				rootEnvFiles = append(rootEnvFiles, name)
+				src := filepath.Join(projectRoot, name)
+				dst := filepath.Join(wtPath, name)
+				data, err := os.ReadFile(src)
+				if err != nil {
+					continue
+				}
+				os.WriteFile(dst, data, 0644)
+			}
 		}
 	}
+	for _, ws := range workspaces {
+		seedWorkspaceEnv(projectRoot, wtPath, ws, overrides[ws.ID], rootEnvFiles)
+	}
+}
+
+// seedWorkspaceEnv copies root .env* into a workspace directory if the
+// workspace either declares explicit env_files or its manifest signals env
+// consumption. Quiet on the no-op path. Warns (does not error) when the
+// destination would not be gitignored.
+func seedWorkspaceEnv(projectRoot, wtPath string, ws workspaceInfo, override workspaceOverride, rootEnvFiles []string) {
+	wantSeed := len(override.EnvFiles) > 0 || ws.Signals.consumesEnv()
+	if !wantSeed {
+		return
+	}
+	wsDir := filepath.Join(wtPath, ws.Path)
+	if err := os.MkdirAll(wsDir, 0755); err != nil {
+		return
+	}
+	// Copy root .env* into workspace dir (preserving filenames).
+	for _, name := range rootEnvFiles {
+		src := filepath.Join(projectRoot, name)
+		dst := filepath.Join(wsDir, name)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			continue
+		}
+		warnIfNotGitignored(wtPath, filepath.Join(ws.Path, name))
+	}
+	// Copy explicit env_files (paths relative to project root).
+	for _, rel := range override.EnvFiles {
+		clean := filepath.Clean(rel)
+		src := filepath.Join(projectRoot, clean)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		// Drop the file by its base name into the workspace dir. This matches
+		// what users typically want (e.g. "packages/web/.env.local" lands as
+		// .env.local inside the workspace), but if the file is outside the
+		// workspace we still seed it so Prisma-style consumers find it.
+		dst := filepath.Join(wsDir, filepath.Base(clean))
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			continue
+		}
+		warnIfNotGitignored(wtPath, filepath.Join(ws.Path, filepath.Base(clean)))
+	}
+}
+
+// warnIfNotGitignored prints a one-line warning if the seeded path is not
+// matched by the worktree's .gitignore rules. Best-effort; failures are
+// silent (the warning is a friendly diagnostic, not a blocker).
+func warnIfNotGitignored(wtPath, relPath string) {
+	cmd := exec.Command("git", "check-ignore", "-q", relPath)
+	cmd.Dir = wtPath
+	if err := cmd.Run(); err != nil {
+		// Exit code 1 == not ignored. Other errors (no git, no .gitignore) are
+		// treated the same way for the purpose of warning.
+		fmt.Fprintf(os.Stderr, "  \033[33m⚠ Seeded %s but it is not gitignored — make sure your .gitignore covers nested .env files.\033[0m\n", relPath)
+	}
+}
+
+// monorepoType identifies the dominant monorepo system in use.
+type monorepoType string
+
+const (
+	monorepoNone      monorepoType = ""
+	monorepoTurborepo monorepoType = "turborepo"
+	monorepoNx        monorepoType = "nx"
+	monorepoPnpm      monorepoType = "pnpm"
+	monorepoNpm       monorepoType = "npm"
+	monorepoYarn      monorepoType = "yarn"
+	monorepoBun       monorepoType = "bun"
+	monorepoLerna     monorepoType = "lerna"
+	monorepoRush      monorepoType = "rush"
+	monorepoCargo     monorepoType = "cargo"
+	monorepoGo        monorepoType = "go"
+	monorepoUv        monorepoType = "uv"
+	monorepoPoetry    monorepoType = "poetry"
+)
+
+// envSignals indicates whether a workspace consumes env at install/build time.
+type envSignals struct {
+	Postinstall   bool // package.json has scripts.postinstall (any postinstall:* variant)
+	PrismaDep     bool // deps include prisma / @prisma/client
+	DotenvDep     bool // deps include dotenv / dotenv-cli / drizzle-kit / tsx / vite-node
+	BuildRs       bool // Rust workspace has build.rs
+	PythonScripts bool // pyproject has [project.scripts] or [tool.poetry.scripts]
+}
+
+func (s envSignals) consumesEnv() bool {
+	return s.Postinstall || s.PrismaDep || s.DotenvDep || s.BuildRs || s.PythonScripts
+}
+
+// workspaceInfo describes a discovered workspace.
+type workspaceInfo struct {
+	ID       string      // package name (or directory base if not parseable)
+	Path     string      // relative path from project root
+	Manifest string      // absolute path to manifest file (may be empty for synthetic entries)
+	Signals  envSignals
+	HasDev   bool // package.json has scripts.dev / Cargo bin target / etc. (used for primary selection)
+}
+
+// detectWorkspaces probes root for monorepo signal files and returns the
+// discovered workspaces along with the dominant type. Returns (nil, "") for
+// non-monorepos (single-package early-return preserved). Tolerant to parse
+// failures: any malformed signal file is treated as "no signal here".
+func detectWorkspaces(root string) ([]workspaceInfo, monorepoType) {
+	if root == "" {
+		return nil, monorepoNone
+	}
+
+	// Probe each signal in order of dominance. JS-flavored systems share
+	// workspace lists (turbo + pnpm + npm-workspaces all coexist), so
+	// detection collects from any present source.
+	var ws []workspaceInfo
+	var mType monorepoType
+	jsCollected := false
+
+	collectJS := func() {
+		if jsCollected {
+			return
+		}
+		jsCollected = true
+		if pnpmWs, ok := parsePnpmWorkspaces(root); ok {
+			ws = append(ws, pnpmWs...)
+			return
+		}
+		if pkgWs, ok := parsePackageJSONWorkspaces(root); ok {
+			ws = append(ws, pkgWs...)
+			return
+		}
+	}
+
+	if fileExists(filepath.Join(root, "turbo.json")) {
+		mType = monorepoTurborepo
+		collectJS()
+	}
+	if fileExists(filepath.Join(root, "nx.json")) {
+		if mType == monorepoNone {
+			mType = monorepoNx
+		}
+		collectJS()
+	}
+	if fileExists(filepath.Join(root, "pnpm-workspace.yaml")) {
+		if mType == monorepoNone {
+			mType = monorepoPnpm
+		}
+		collectJS()
+	}
+	if mType == monorepoNone {
+		// No turbo/nx/pnpm signal — check raw package.json workspaces.
+		if pkgWs, ok := parsePackageJSONWorkspaces(root); ok && len(pkgWs) > 0 {
+			ws = append(ws, pkgWs...)
+			// Distinguish between npm/yarn/bun by lockfile presence.
+			switch {
+			case fileExists(filepath.Join(root, "yarn.lock")):
+				mType = monorepoYarn
+			case fileExists(filepath.Join(root, "bun.lockb")), fileExists(filepath.Join(root, "bun.lock")):
+				mType = monorepoBun
+			default:
+				mType = monorepoNpm
+			}
+			jsCollected = true
+		}
+	}
+	if fileExists(filepath.Join(root, "lerna.json")) {
+		if mType == monorepoNone {
+			mType = monorepoLerna
+		}
+		if !jsCollected {
+			if lWs, ok := parseLernaWorkspaces(root); ok {
+				ws = append(ws, lWs...)
+				jsCollected = true
+			}
+		}
+	}
+	if fileExists(filepath.Join(root, "rush.json")) {
+		if mType == monorepoNone {
+			mType = monorepoRush
+		}
+		if rWs, ok := parseRushWorkspaces(root); ok {
+			ws = append(ws, rWs...)
+		}
+	}
+	// Cargo workspace — additive (a repo can contain both JS and Rust workspaces).
+	if cWs, ok := parseCargoWorkspaces(root); ok && len(cWs) > 0 {
+		if mType == monorepoNone {
+			mType = monorepoCargo
+		}
+		ws = append(ws, cWs...)
+	}
+	// Go workspace.
+	if fileExists(filepath.Join(root, "go.work")) {
+		if gWs, ok := parseGoWorkspaces(root); ok && len(gWs) > 0 {
+			if mType == monorepoNone {
+				mType = monorepoGo
+			}
+			ws = append(ws, gWs...)
+		}
+	}
+	// Python workspaces (uv / poetry).
+	if pWs, pType, ok := parsePyprojectWorkspaces(root); ok && len(pWs) > 0 {
+		if mType == monorepoNone {
+			mType = pType
+		}
+		ws = append(ws, pWs...)
+	}
+
+	if len(ws) == 0 {
+		return nil, monorepoNone
+	}
+	ws = dedupeWorkspaces(ws)
+	return ws, mType
+}
+
+// dedupeWorkspaces removes duplicate entries (same path) while keeping the
+// first occurrence (which is also the highest-precedence detection source).
+func dedupeWorkspaces(ws []workspaceInfo) []workspaceInfo {
+	seen := map[string]bool{}
+	out := make([]workspaceInfo, 0, len(ws))
+	for _, w := range ws {
+		if seen[w.Path] {
+			continue
+		}
+		seen[w.Path] = true
+		out = append(out, w)
+	}
+	return out
+}
+
+// parsePnpmWorkspaces parses pnpm-workspace.yaml's `packages:` glob list.
+// Stdlib-only; tolerant to unknown fields and malformed YAML.
+func parsePnpmWorkspaces(root string) ([]workspaceInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "pnpm-workspace.yaml"))
+	if err != nil {
+		return nil, false
+	}
+	var globs []string
+	inPackages := false
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := raw
+		if i := strings.Index(line, "#"); i >= 0 {
+			line = line[:i]
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			if !inPackages {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "- ") {
+				v := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+				v = strings.Trim(v, `"'`)
+				if v != "" {
+					globs = append(globs, v)
+				}
+			}
+			continue
+		}
+		inPackages = false
+		if strings.HasPrefix(trimmed, "packages:") {
+			inPackages = true
+		}
+	}
+	return expandJSWorkspaceGlobs(root, globs), true
+}
+
+// parsePackageJSONWorkspaces parses the `workspaces` field from root
+// package.json. Supports both array form ["packages/*"] and the object form
+// {"packages":["..."],"nohoist":[...]}.
+func parsePackageJSONWorkspaces(root string) ([]workspaceInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "package.json"))
+	if err != nil {
+		return nil, false
+	}
+	var raw struct {
+		Workspaces json.RawMessage `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, false
+	}
+	if len(raw.Workspaces) == 0 {
+		return nil, false
+	}
+	var globs []string
+	if err := json.Unmarshal(raw.Workspaces, &globs); err != nil {
+		var obj struct {
+			Packages []string `json:"packages"`
+		}
+		if err := json.Unmarshal(raw.Workspaces, &obj); err != nil {
+			return nil, false
+		}
+		globs = obj.Packages
+	}
+	if len(globs) == 0 {
+		return nil, false
+	}
+	return expandJSWorkspaceGlobs(root, globs), true
+}
+
+// parseLernaWorkspaces reads lerna.json's `packages` field.
+func parseLernaWorkspaces(root string) ([]workspaceInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "lerna.json"))
+	if err != nil {
+		return nil, false
+	}
+	var cfg struct {
+		Packages []string `json:"packages"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, false
+	}
+	if len(cfg.Packages) == 0 {
+		return nil, false
+	}
+	return expandJSWorkspaceGlobs(root, cfg.Packages), true
+}
+
+// parseRushWorkspaces reads rush.json's projects[].projectFolder list.
+func parseRushWorkspaces(root string) ([]workspaceInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "rush.json"))
+	if err != nil {
+		return nil, false
+	}
+	var cfg struct {
+		Projects []struct {
+			PackageName   string `json:"packageName"`
+			ProjectFolder string `json:"projectFolder"`
+		} `json:"projects"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, false
+	}
+	out := make([]workspaceInfo, 0, len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		if p.ProjectFolder == "" {
+			continue
+		}
+		ws := workspaceInfo{
+			ID:   p.PackageName,
+			Path: filepath.Clean(p.ProjectFolder),
+		}
+		if ws.ID == "" {
+			ws.ID = filepath.Base(ws.Path)
+		}
+		ws.Manifest = filepath.Join(root, ws.Path, "package.json")
+		ws.Signals, ws.HasDev = jsManifestSignals(ws.Manifest)
+		out = append(out, ws)
+	}
+	return out, len(out) > 0
+}
+
+// expandJSWorkspaceGlobs walks the project root and matches each glob entry
+// against subdirectories that contain a package.json. Supports literal paths
+// and trailing /* / /** wildcards (the only forms widely used by JS workspace
+// configs). Negation patterns (!path) are honored.
+func expandJSWorkspaceGlobs(root string, globs []string) []workspaceInfo {
+	if len(globs) == 0 {
+		return nil
+	}
+	var includes, excludes []string
+	for _, g := range globs {
+		g = strings.TrimSpace(g)
+		if g == "" {
+			continue
+		}
+		if strings.HasPrefix(g, "!") {
+			excludes = append(excludes, strings.TrimPrefix(g, "!"))
+			continue
+		}
+		includes = append(includes, g)
+	}
+	var matched []string
+	for _, inc := range includes {
+		matched = append(matched, expandWorkspaceGlob(root, inc, "package.json")...)
+	}
+	if len(excludes) > 0 {
+		exSet := map[string]bool{}
+		for _, ex := range excludes {
+			for _, p := range expandWorkspaceGlob(root, ex, "package.json") {
+				exSet[p] = true
+			}
+		}
+		filtered := matched[:0]
+		for _, p := range matched {
+			if !exSet[p] {
+				filtered = append(filtered, p)
+			}
+		}
+		matched = filtered
+	}
+	out := make([]workspaceInfo, 0, len(matched))
+	for _, rel := range matched {
+		manifest := filepath.Join(root, rel, "package.json")
+		ws := workspaceInfo{
+			ID:       jsManifestName(manifest),
+			Path:     rel,
+			Manifest: manifest,
+		}
+		if ws.ID == "" {
+			ws.ID = filepath.Base(rel)
+		}
+		ws.Signals, ws.HasDev = jsManifestSignals(manifest)
+		out = append(out, ws)
+	}
+	return out
+}
+
+// expandWorkspaceGlob expands a single glob pattern (literal, /*, or /**)
+// against the project root and returns relative paths to directories
+// containing the requiredFile (e.g. "package.json" or "Cargo.toml").
+func expandWorkspaceGlob(root, glob, requiredFile string) []string {
+	glob = filepath.Clean(glob)
+	// Normalize Windows-style backslashes.
+	glob = strings.ReplaceAll(glob, "\\", "/")
+	// Strip trailing slash if any.
+	glob = strings.TrimSuffix(glob, "/")
+
+	doubleStar := strings.HasSuffix(glob, "/**")
+	singleStar := strings.HasSuffix(glob, "/*")
+	switch {
+	case doubleStar:
+		base := strings.TrimSuffix(glob, "/**")
+		return walkForManifests(root, base, requiredFile, -1)
+	case singleStar:
+		base := strings.TrimSuffix(glob, "/*")
+		return walkForManifests(root, base, requiredFile, 1)
+	default:
+		// Literal path.
+		if fileExists(filepath.Join(root, glob, requiredFile)) {
+			return []string{glob}
+		}
+		return nil
+	}
+}
+
+// walkForManifests scans subdirectories of root/base looking for the named
+// manifest file. depth=-1 means recurse without bound; depth=1 means only
+// immediate children. node_modules and .git directories are skipped.
+func walkForManifests(root, base, manifestName string, depth int) []string {
+	startDir := filepath.Join(root, base)
+	st, err := os.Stat(startDir)
+	if err != nil || !st.IsDir() {
+		return nil
+	}
+	var out []string
+	var walk func(rel string, remaining int)
+	walk = func(rel string, remaining int) {
+		entries, err := os.ReadDir(filepath.Join(root, rel))
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if name == "node_modules" || name == ".git" || strings.HasPrefix(name, ".") {
+				continue
+			}
+			child := filepath.Join(rel, name)
+			if fileExists(filepath.Join(root, child, manifestName)) {
+				out = append(out, child)
+				continue
+			}
+			if remaining == 0 {
+				continue
+			}
+			next := remaining
+			if remaining > 0 {
+				next = remaining - 1
+			}
+			walk(child, next)
+		}
+	}
+	walk(base, depth)
+	return out
+}
+
+// jsManifestName extracts the `name` field from a package.json file.
+// Returns "" if the manifest is missing, malformed, or has no name.
+func jsManifestName(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var pkg struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return ""
+	}
+	return pkg.Name
+}
+
+// jsManifestSignals reads a package.json and returns env-consumption signals
+// plus whether the manifest has a `dev` script (used for primary-workspace
+// selection).
+func jsManifestSignals(path string) (envSignals, bool) {
+	var sig envSignals
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return sig, false
+	}
+	var pkg struct {
+		Scripts          map[string]string `json:"scripts"`
+		Dependencies     map[string]string `json:"dependencies"`
+		DevDependencies  map[string]string `json:"devDependencies"`
+		PeerDependencies map[string]string `json:"peerDependencies"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return sig, false
+	}
+	hasDev := false
+	for k := range pkg.Scripts {
+		if k == "dev" {
+			hasDev = true
+		}
+		if k == "postinstall" || strings.HasPrefix(k, "postinstall:") {
+			sig.Postinstall = true
+		}
+	}
+	merged := map[string]struct{}{}
+	for k := range pkg.Dependencies {
+		merged[k] = struct{}{}
+	}
+	for k := range pkg.DevDependencies {
+		merged[k] = struct{}{}
+	}
+	for k := range pkg.PeerDependencies {
+		merged[k] = struct{}{}
+	}
+	for _, prismaDep := range []string{"prisma", "@prisma/client"} {
+		if _, ok := merged[prismaDep]; ok {
+			sig.PrismaDep = true
+		}
+	}
+	for _, dotenvDep := range []string{"dotenv", "dotenv-cli", "drizzle-kit", "tsx", "vite-node"} {
+		if _, ok := merged[dotenvDep]; ok {
+			sig.DotenvDep = true
+		}
+	}
+	return sig, hasDev
+}
+
+// parseCargoWorkspaces parses Cargo.toml's [workspace] members glob list.
+// Stdlib-only; recognises only the flat top-level [workspace] block plus a
+// `members = [...]` array (the common shape).
+func parseCargoWorkspaces(root string) ([]workspaceInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "Cargo.toml"))
+	if err != nil {
+		return nil, false
+	}
+	text := string(data)
+	wsIdx := strings.Index(text, "[workspace]")
+	if wsIdx < 0 {
+		return nil, false
+	}
+	// Find the `members = [...]` array within the [workspace] section.
+	// Conservative scan: stop at the next [section] header.
+	rest := text[wsIdx:]
+	end := len(rest)
+	for i := 1; i < len(rest); i++ {
+		if rest[i] == '[' && (i == 0 || rest[i-1] == '\n') && !strings.HasPrefix(rest[i:], "[workspace]") {
+			end = i
+			break
+		}
+	}
+	section := rest[:end]
+	mIdx := strings.Index(section, "members")
+	if mIdx < 0 {
+		return nil, false
+	}
+	// Find opening [ and closing ].
+	openB := strings.Index(section[mIdx:], "[")
+	if openB < 0 {
+		return nil, false
+	}
+	openB += mIdx
+	closeB := strings.Index(section[openB:], "]")
+	if closeB < 0 {
+		return nil, false
+	}
+	closeB += openB
+	listBody := section[openB+1 : closeB]
+	var globs []string
+	for _, item := range strings.Split(listBody, ",") {
+		item = strings.TrimSpace(item)
+		item = strings.Trim(item, `"'`)
+		if item != "" {
+			globs = append(globs, item)
+		}
+	}
+	if len(globs) == 0 {
+		return nil, false
+	}
+	var out []workspaceInfo
+	for _, g := range globs {
+		paths := expandWorkspaceGlob(root, g, "Cargo.toml")
+		for _, rel := range paths {
+			manifest := filepath.Join(root, rel, "Cargo.toml")
+			ws := workspaceInfo{
+				ID:       cargoCrateName(manifest),
+				Path:     rel,
+				Manifest: manifest,
+			}
+			if ws.ID == "" {
+				ws.ID = filepath.Base(rel)
+			}
+			if fileExists(filepath.Join(root, rel, "build.rs")) {
+				ws.Signals.BuildRs = true
+			}
+			out = append(out, ws)
+		}
+	}
+	return out, len(out) > 0
+}
+
+// cargoCrateName extracts `name` from a Cargo.toml [package] section.
+func cargoCrateName(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	text := string(data)
+	pkgIdx := strings.Index(text, "[package]")
+	if pkgIdx < 0 {
+		return ""
+	}
+	rest := text[pkgIdx:]
+	for _, line := range strings.Split(rest, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			v := strings.TrimSpace(parts[1])
+			v = strings.Trim(v, `"'`)
+			return v
+		}
+		if strings.HasPrefix(line, "[") && line != "[package]" {
+			break
+		}
+	}
+	return ""
+}
+
+// parseGoWorkspaces parses go.work's `use (...)` directives.
+func parseGoWorkspaces(root string) ([]workspaceInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "go.work"))
+	if err != nil {
+		return nil, false
+	}
+	var paths []string
+	inUse := false
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := raw
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "use (") || trimmed == "use (" {
+			inUse = true
+			continue
+		}
+		if inUse {
+			if trimmed == ")" {
+				inUse = false
+				continue
+			}
+			paths = append(paths, strings.Trim(trimmed, `"`))
+			continue
+		}
+		if strings.HasPrefix(trimmed, "use ") {
+			v := strings.TrimSpace(strings.TrimPrefix(trimmed, "use "))
+			v = strings.Trim(v, `"`)
+			if v != "" {
+				paths = append(paths, v)
+			}
+		}
+	}
+	var out []workspaceInfo
+	for _, p := range paths {
+		clean := filepath.Clean(p)
+		// "." represents the root module; skip it (single-package shape).
+		if clean == "." {
+			continue
+		}
+		manifest := filepath.Join(root, clean, "go.mod")
+		if !fileExists(manifest) {
+			continue
+		}
+		ws := workspaceInfo{
+			ID:       filepath.Base(clean),
+			Path:     clean,
+			Manifest: manifest,
+		}
+		out = append(out, ws)
+	}
+	return out, len(out) > 0
+}
+
+// parsePyprojectWorkspaces detects [tool.uv.workspace] or [tool.poetry.group]
+// members in a root pyproject.toml. Returns (workspaces, type, ok).
+func parsePyprojectWorkspaces(root string) ([]workspaceInfo, monorepoType, bool) {
+	data, err := os.ReadFile(filepath.Join(root, "pyproject.toml"))
+	if err != nil {
+		return nil, monorepoNone, false
+	}
+	text := string(data)
+	// uv: [tool.uv.workspace] members = [...]
+	if uvIdx := strings.Index(text, "[tool.uv.workspace]"); uvIdx >= 0 {
+		section := sliceUntilNextHeader(text[uvIdx:])
+		if globs := extractTomlArray(section, "members"); len(globs) > 0 {
+			var out []workspaceInfo
+			for _, g := range globs {
+				for _, rel := range expandWorkspaceGlob(root, g, "pyproject.toml") {
+					manifest := filepath.Join(root, rel, "pyproject.toml")
+					ws := workspaceInfo{
+						ID:       pythonProjectName(manifest),
+						Path:     rel,
+						Manifest: manifest,
+					}
+					if ws.ID == "" {
+						ws.ID = filepath.Base(rel)
+					}
+					ws.Signals = pythonManifestSignals(manifest)
+					out = append(out, ws)
+				}
+			}
+			if len(out) > 0 {
+				return out, monorepoUv, true
+			}
+		}
+	}
+	// poetry: [tool.poetry.group.<name>.dependencies] is package-deps grouping,
+	// not a monorepo. Use a heuristic: poetry has no native monorepo, but users
+	// often declare `[tool.poetry] packages = [{include = "x"}]`. Skip for now —
+	// uv is the modern path. A repo with pyproject.toml subdirs but no uv config
+	// will be detected as single-package.
+	return nil, monorepoNone, false
+}
+
+// sliceUntilNextHeader returns text up to the next "[section]" header (or
+// end of string). Used to scope TOML section parsing.
+func sliceUntilNextHeader(text string) string {
+	for i := 1; i < len(text); i++ {
+		if text[i] == '[' && text[i-1] == '\n' {
+			return text[:i]
+		}
+	}
+	return text
+}
+
+// extractTomlArray pulls a `key = ["a", "b"]` array out of a TOML section.
+func extractTomlArray(section, key string) []string {
+	idx := strings.Index(section, key)
+	if idx < 0 {
+		return nil
+	}
+	openB := strings.Index(section[idx:], "[")
+	if openB < 0 {
+		return nil
+	}
+	openB += idx
+	closeB := strings.Index(section[openB:], "]")
+	if closeB < 0 {
+		return nil
+	}
+	closeB += openB
+	body := section[openB+1 : closeB]
+	var out []string
+	for _, item := range strings.Split(body, ",") {
+		item = strings.TrimSpace(item)
+		item = strings.Trim(item, `"'`)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// pythonProjectName reads a pyproject.toml and extracts [project] name.
+func pythonProjectName(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	text := string(data)
+	pIdx := strings.Index(text, "[project]")
+	if pIdx < 0 {
+		return ""
+	}
+	section := sliceUntilNextHeader(text[pIdx:])
+	for _, line := range strings.Split(section, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "name") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			v := strings.TrimSpace(parts[1])
+			v = strings.Trim(v, `"'`)
+			return v
+		}
+	}
+	return ""
+}
+
+// pythonManifestSignals flags whether the workspace declares scripts (which
+// usually means it has a runnable entrypoint that may consume env).
+func pythonManifestSignals(path string) envSignals {
+	var sig envSignals
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return sig
+	}
+	text := string(data)
+	if strings.Contains(text, "[project.scripts]") || strings.Contains(text, "[tool.poetry.scripts]") {
+		sig.PythonScripts = true
+	}
+	return sig
+}
+
+// resolveWorkspaces decides the final set of workspaces for a worktree run.
+// Explicit overrides in worktree.json take precedence over auto-detection.
+// Returns workspaces, primary workspace ID, and the detected type. Any of
+// these may be zero values when the project is single-package.
+func resolveWorkspaces(root string, hooks *worktreeHooks) ([]workspaceInfo, string, monorepoType) {
+	if hooks != nil && len(hooks.Workspaces) > 0 {
+		ws := make([]workspaceInfo, 0, len(hooks.Workspaces))
+		for id, override := range hooks.Workspaces {
+			info := workspaceInfo{ID: id, Path: filepath.Clean(override.Path)}
+			info.Manifest = guessManifest(filepath.Join(root, info.Path))
+			if info.Manifest != "" {
+				switch filepath.Base(info.Manifest) {
+				case "package.json":
+					info.Signals, info.HasDev = jsManifestSignals(info.Manifest)
+				case "pyproject.toml":
+					info.Signals = pythonManifestSignals(info.Manifest)
+				case "Cargo.toml":
+					if fileExists(filepath.Join(root, info.Path, "build.rs")) {
+						info.Signals.BuildRs = true
+					}
+				}
+			}
+			ws = append(ws, info)
+		}
+		sort.Slice(ws, func(i, j int) bool { return ws[i].ID < ws[j].ID })
+		_, mType := detectWorkspaces(root)
+		return ws, pickPrimary(ws, hooks.PrimaryWorkspace), mType
+	}
+	ws, mType := detectWorkspaces(root)
+	if len(ws) == 0 {
+		return nil, "", monorepoNone
+	}
+	primary := ""
+	if hooks != nil {
+		primary = hooks.PrimaryWorkspace
+	}
+	return ws, pickPrimary(ws, primary), mType
+}
+
+// guessManifest returns the absolute path to the workspace's manifest file
+// (package.json / Cargo.toml / pyproject.toml / go.mod), or "" if none found.
+func guessManifest(absDir string) string {
+	for _, name := range []string{"package.json", "Cargo.toml", "pyproject.toml", "go.mod"} {
+		p := filepath.Join(absDir, name)
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// pickPrimary chooses the primary workspace ID. Order: explicit override
+// (if it matches a known workspace) → first workspace with HasDev → first
+// workspace overall.
+func pickPrimary(ws []workspaceInfo, override string) string {
+	if override != "" {
+		for _, w := range ws {
+			if w.ID == override {
+				return override
+			}
+		}
+	}
+	for _, w := range ws {
+		if w.HasDev {
+			return w.ID
+		}
+	}
+	if len(ws) > 0 {
+		return ws[0].ID
+	}
+	return ""
+}
+
+// monorepoEnvVars returns the BELMONT_MONOREPO* env vars to inject into a
+// subprocess. Returns nil for non-monorepo projects.
+func monorepoEnvVars(workspaces []workspaceInfo, primary string, mType monorepoType) []string {
+	if mType == monorepoNone || len(workspaces) == 0 {
+		return nil
+	}
+	type wsEntry struct {
+		ID   string `json:"id"`
+		Path string `json:"path"`
+	}
+	entries := make([]wsEntry, 0, len(workspaces))
+	primaryPath := ""
+	for _, w := range workspaces {
+		entries = append(entries, wsEntry{ID: w.ID, Path: w.Path})
+		if w.ID == primary {
+			primaryPath = w.Path
+		}
+	}
+	wsJSON, err := json.Marshal(entries)
+	if err != nil {
+		wsJSON = []byte("[]")
+	}
+	out := []string{
+		"BELMONT_MONOREPO=1",
+		fmt.Sprintf("BELMONT_MONOREPO_TYPE=%s", string(mType)),
+		fmt.Sprintf("BELMONT_WORKSPACES=%s", string(wsJSON)),
+	}
+	if primary != "" {
+		out = append(out, fmt.Sprintf("BELMONT_PRIMARY_WORKSPACE=%s", primary))
+	}
+	if primaryPath != "" {
+		out = append(out, fmt.Sprintf("BELMONT_PRIMARY_WORKSPACE_PATH=%s", primaryPath))
+	}
+	return out
 }
 
 type aiDecision struct {
@@ -761,6 +1743,20 @@ func buildStatus(root string, maxName int, feature string) (statusReport, error)
 		"verified":    0,
 		"blocked":     0,
 		"total":       0,
+	}
+
+	// Detect monorepo workspaces. Honor explicit overrides in worktree.json
+	// over auto-detection. Returns nil for single-package projects.
+	if ws, primary, mType := resolveWorkspaces(root, loadWorktreeHooks(root)); mType != monorepoNone && len(ws) > 0 {
+		entries := make([]monorepoWorkspace, 0, len(ws))
+		for _, w := range ws {
+			entries = append(entries, monorepoWorkspace{ID: w.ID, Path: w.Path})
+		}
+		report.Monorepo = &monorepoReport{
+			Type:       string(mType),
+			Primary:    primary,
+			Workspaces: entries,
+		}
 	}
 
 	// Check for PR_FAQ
@@ -1779,6 +2775,13 @@ func renderStatus(report statusReport, color bool, showArchived bool) string {
 	var sb strings.Builder
 	sb.WriteString(bold("Belmont Status") + "\n")
 	sb.WriteString("==============\n\n")
+	if report.Monorepo != nil {
+		primaryLabel := ""
+		if report.Monorepo.Primary != "" {
+			primaryLabel = fmt.Sprintf(", primary=%s", report.Monorepo.Primary)
+		}
+		sb.WriteString(fmt.Sprintf("Monorepo: %s (%d workspaces%s)\n\n", report.Monorepo.Type, len(report.Monorepo.Workspaces), primaryLabel))
+	}
 	sb.WriteString(fmt.Sprintf("Feature: %s\n\n", report.Feature))
 	sb.WriteString(fmt.Sprintf("Tech Plan: %s\n\n", techPlan))
 	sb.WriteString(fmt.Sprintf("Status: %s\n\n", colorStatus(report.OverallStatus, color)))
@@ -1965,6 +2968,13 @@ func renderFeatureListing(report statusReport, color bool, showArchived bool) st
 	var sb strings.Builder
 	sb.WriteString(bold("Belmont Status") + "\n")
 	sb.WriteString("==============\n\n")
+	if report.Monorepo != nil {
+		primaryLabel := ""
+		if report.Monorepo.Primary != "" {
+			primaryLabel = fmt.Sprintf(", primary=%s", report.Monorepo.Primary)
+		}
+		sb.WriteString(fmt.Sprintf("Monorepo: %s (%d workspaces%s)\n\n", report.Monorepo.Type, len(report.Monorepo.Workspaces), primaryLabel))
+	}
 	sb.WriteString(fmt.Sprintf("Product: %s\n\n", report.Feature))
 	sb.WriteString(fmt.Sprintf("PR/FAQ: %s\n", prfaq))
 	sb.WriteString(fmt.Sprintf("Master Tech Plan: %s\n\n", techPlan))
@@ -2235,7 +3245,7 @@ func runInstall(args []string) error {
 			switch tool {
 			case "claude":
 				fmt.Println("  Claude Code  .claude/agents/belmont -> ../../.agents/belmont")
-				fmt.Println("               .claude/skills/belmont -> ../../.agents/skills/belmont")
+				fmt.Println("               .claude/commands/belmont/<skill>.md -> ../../../.agents/skills/belmont/<skill>/SKILL.md (per-skill)")
 				fmt.Println("    Use: /belmont:working-backwards, /belmont:product-plan, /belmont:tech-plan, /belmont:implement, /belmont:next, /belmont:verify, /belmont:debug, /belmont:debug-auto, /belmont:debug-manual, /belmont:status")
 			case "codex":
 				fmt.Println("  Codex        .agents/skills/belmont/<name>/SKILL.md (auto-discovered)")
@@ -2988,14 +3998,21 @@ func setupTool(projectRoot, tool string) error {
 		if err := ensureSymlink(linkAgents, agentsTarget, true); err != nil {
 			return err
 		}
-		// Phase 2: `.claude/skills/belmont` is the canonical agentskills.io
-		// location for Claude Code's Skills system. Symlinked to the canonical
-		// `.agents/skills/belmont/` so SKILL.md folders are auto-discovered.
-		// Both `/belmont:<skill>` slash commands AND skill activation work
-		// through this single path — the legacy `.claude/commands/belmont/`
-		// copy is no longer needed and is removed by the legacy cleanup pass.
-		linkSkills := filepath.Join(projectRoot, ".claude", "skills", "belmont")
-		if err := ensureSymlink(linkSkills, skillsTarget, true); err != nil {
+		// Claude Code 2.1.x scans for slash commands at `.claude/commands/<name>.md`.
+		// A subfolder under `.claude/commands/` becomes a namespace prefix — i.e.
+		// `.claude/commands/belmont/implement.md` registers as `/belmont:implement`.
+		// (Skill discovery at `.claude/skills/` is single-level, and project-local
+		// plugins at `.claude/plugins/<name>/` are NOT auto-loaded by Claude Code
+		// — they require `--plugin-dir` or marketplace `/plugin install`. So the
+		// commands-directory pattern is the only zero-friction way to expose
+		// Belmont as `/belmont:<skill>` slash commands.)
+		//
+		// Per-skill symlinks point each command file at the canonical
+		// `.agents/skills/belmont/<skill>/SKILL.md`. The skill body's
+		// `references/<file>.md` paths still resolve correctly because Claude
+		// reads through the symlink and the references/ subdir lives next to
+		// the resolved SKILL.md.
+		if err := linkClaudeCommands(projectRoot, skillsTarget); err != nil {
 			return err
 		}
 	case "codex":
@@ -3018,6 +4035,70 @@ func setupTool(projectRoot, tool string) error {
 	return nil
 }
 
+// linkClaudeCommands creates per-skill symlinks at
+// `.claude/commands/belmont/<skill>.md` -> `.agents/skills/belmont/<skill>/SKILL.md`.
+// Claude Code 2.1.x registers each one as a `/belmont:<skill>` slash command
+// (subfolder under `.claude/commands/` becomes the namespace prefix). The
+// agentskills.io frontmatter (`name:`, `description:`) on SKILL.md is also
+// valid frontmatter for Claude Code slash commands, so no rewriting is needed.
+//
+// Stale .md entries inside `.claude/commands/belmont/` (left over from removed
+// or renamed skills) are pruned so the slash-command surface always matches
+// the current skill set.
+func linkClaudeCommands(projectRoot, skillsTarget string) error {
+	commandsDir := filepath.Join(projectRoot, ".claude", "commands", "belmont")
+	if err := os.MkdirAll(commandsDir, 0o755); err != nil {
+		return fmt.Errorf("create commands dir: %w", err)
+	}
+
+	entries, err := os.ReadDir(skillsTarget)
+	if err != nil {
+		return fmt.Errorf("read skills dir %s: %w", skillsTarget, err)
+	}
+
+	wanted := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Skip generation scaffolding dirs (shouldn't be at this level after
+		// install but defensive).
+		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		skillFile := filepath.Join(skillsTarget, name, "SKILL.md")
+		if _, err := os.Stat(skillFile); err != nil {
+			continue
+		}
+		linkPath := filepath.Join(commandsDir, name+".md")
+		if err := ensureSymlink(linkPath, skillFile, false); err != nil {
+			return err
+		}
+		wanted[name+".md"] = true
+	}
+
+	// Prune stale .md entries that no longer match a skill.
+	existing, err := os.ReadDir(commandsDir)
+	if err == nil {
+		for _, e := range existing {
+			if e.IsDir() {
+				continue
+			}
+			n := e.Name()
+			if !strings.HasSuffix(n, ".md") || wanted[n] {
+				continue
+			}
+			stale := filepath.Join(commandsDir, n)
+			if err := os.Remove(stale); err == nil {
+				fmt.Printf("  - %s (stale slash command, removed)\n", filepath.Join(".claude", "commands", "belmont", n))
+			}
+		}
+	}
+
+	return nil
+}
+
 // runLegacyCleanup removes install artifacts left by older Belmont versions
 // that are no longer needed in Phase 2. Idempotent and safe to run on every
 // install — paths that don't exist are skipped silently. Strips the
@@ -3027,8 +4108,15 @@ func runLegacyCleanup(projectRoot string) error {
 	// Directories Belmont used to write into but no longer does. Removing
 	// these is safe because they were always Belmont-managed (mirroring or
 	// symlinked content from `.agents/skills/belmont/` or `.agents/belmont/`).
+	// `.claude/commands/belmont` is intentionally NOT in this list — it's the
+	// active install path again (re-restored 2026-05-07 after the Phase-2
+	// `.claude/skills/belmont` and short-lived `.claude/plugins/belmont`
+	// experiments turned out to be invisible to Claude Code 2.1.x). The two
+	// failed attempts are still cleaned up below so upgrading users don't
+	// carry dead symlinks.
 	legacyDirs := []string{
-		".claude/commands/belmont", // pre-Phase-2 Claude slash-command path
+		".claude/skills/belmont",  // Phase-2 nested-namespace symlink — never discovered by Claude Code 2.1.x
+		".claude/plugins/belmont", // brief Phase-2.5 project-local-plugin attempt — also not auto-loaded by Claude Code 2.1.x (requires --plugin-dir or marketplace install)
 		".codex/belmont",
 		".cursor/rules/belmont",
 		".windsurf/rules/belmont",
@@ -3620,7 +4708,7 @@ func runUpdate(args []string) error {
 			fmt.Fprintf(os.Stderr, "Auto-install failed: %v\nRun 'belmont install' manually.\n", err)
 		} else if noCommit {
 			fmt.Println("\nSkipping auto-commit (--no-commit).")
-			fmt.Println("To commit manually: git add .agents .claude/commands/belmont .claude/agents/belmont .cursor/rules/belmont .windsurf/rules/belmont AGENTS.md GEMINI.md && git commit -m \"Update Belmont to " + release.TagName + "\"")
+			fmt.Println("To commit manually: git add .agents .claude/agents/belmont .claude/commands/belmont .cursor/rules/belmont .windsurf/rules/belmont AGENTS.md GEMINI.md && git commit -m \"Update Belmont to " + release.TagName + "\"")
 		} else {
 			if err := commitBelmontUpdate(".", release.TagName); err != nil {
 				fmt.Fprintln(os.Stderr, err.Error())
@@ -4703,8 +5791,17 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		commitWorktreeFeatureState(wtPath, slug)
 	}
 
-	// Copy .env files (gitignored, so not present in fresh worktrees)
-	copyEnvFiles(cfg.Root, wtPath)
+	// Resolve monorepo workspaces (auto-detect, or honor worktree.json overrides)
+	hooks := loadWorktreeHooks(cfg.Root)
+	workspaces, primary, mType := resolveWorkspaces(cfg.Root, hooks)
+	overrides := map[string]workspaceOverride{}
+	if hooks != nil {
+		overrides = hooks.Workspaces
+	}
+
+	// Copy .env files (gitignored, so not present in fresh worktrees).
+	// In monorepo mode, also seed env files into qualifying workspace dirs.
+	copyEnvFiles(cfg.Root, wtPath, workspaces, overrides)
 
 	// Run belmont install in the worktree
 	exePath, err := os.Executable()
@@ -4728,18 +5825,21 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 		tracker.setPort(slug, port)
 	}
 
+	if mType != monorepoNone {
+		fmt.Fprintf(os.Stderr, "  Detected %s monorepo (%d workspaces, primary=%s)\n", mType, len(workspaces), primary)
+	}
+
 	// Run worktree setup hooks
-	hooks := loadWorktreeHooks(cfg.Root)
 	if hooks != nil && len(hooks.Setup) > 0 {
 		fmt.Fprintf(os.Stderr, "  Running worktree setup hooks for %s...\n", slug)
-		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env); err != nil {
+		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env, workspaces, primary, mType); err != nil {
 			return fmt.Errorf("worktree setup for %s: %w", slug, err)
 		}
 	} else if hooks == nil {
 		// No worktree.json — auto-detect dependency install from lock files
 		if cmds := detectAutoInstallCommands(cfg.Root); len(cmds) > 0 {
 			fmt.Fprintf(os.Stderr, "  Auto-installing dependencies for %s (%s)...\n", slug, strings.Join(cmds, ", "))
-			if err := runWorktreeHookCommands(cmds, wtPath, port, nil); err != nil {
+			if err := runWorktreeHookCommands(cmds, wtPath, port, nil, workspaces, primary, mType); err != nil {
 				fmt.Fprintf(os.Stderr, "  \033[33m⚠ Auto-install failed for %s: %s (continuing)\033[0m\n", slug, err)
 			}
 		}
@@ -4750,6 +5850,9 @@ func runFeatureInWorktree(cfg loopConfig, slug, branch, wtPath string, tracker *
 	mCfg.Root = wtPath
 	mCfg.Feature = slug
 	mCfg.Port = port
+	mCfg.Workspaces = workspaces
+	mCfg.PrimaryWorkspace = primary
+	mCfg.MonorepoType = mType
 	if hooks != nil {
 		mCfg.WorktreeEnv = hooks.Env
 	}
@@ -5388,7 +6491,7 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 
 	// Worktree isolation: inject env vars and set process group
 	if cfg.Port != 0 {
-		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv)
+		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv, cfg.Workspaces, cfg.PrimaryWorkspace, cfg.MonorepoType)
 		setSysProcAttr(cmd)
 	}
 
@@ -5522,7 +6625,7 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 
 	// Worktree isolation: inject env vars and set process group
 	if cfg.Port != 0 {
-		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv)
+		cmd.Env = buildWorktreeEnv(cfg.Port, cfg.WorktreeEnv, cfg.Workspaces, cfg.PrimaryWorkspace, cfg.MonorepoType)
 		setSysProcAttr(cmd)
 	}
 
@@ -7087,7 +8190,10 @@ func (wt *worktreeTracker) teardownEntry(id string) {
 		signalProcessGroup(entry.Pgid)
 	}
 	if hooks != nil && len(hooks.Teardown) > 0 {
-		_ = runWorktreeHookCommands(hooks.Teardown, entry.Path, entry.Port, hooks.Env)
+		// Teardown runs without monorepo env vars; teardown commands are
+		// typically simple (kill servers, remove volumes) and don't need
+		// workspace context. Passing nil keeps the call site lean.
+		_ = runWorktreeHookCommands(hooks.Teardown, entry.Path, entry.Port, hooks.Env, nil, "", monorepoNone)
 	}
 }
 
@@ -7102,7 +8208,7 @@ func (wt *worktreeTracker) cleanupAll(root string) {
 		}
 		// Run teardown hooks
 		if wt.hooks != nil && len(wt.hooks.Teardown) > 0 {
-			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env)
+			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env, nil, "", monorepoNone)
 		}
 		removeWorktree(root, entry.Path, id)
 		// Also delete the branch to prevent stale branch on restart
@@ -7131,7 +8237,7 @@ func (wt *worktreeTracker) gracefulShutdown(root string) {
 		}
 		// Run teardown hooks (release ports, stop dev servers)
 		if wt.hooks != nil && len(wt.hooks.Teardown) > 0 {
-			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env)
+			_ = runWorktreeHookCommands(wt.hooks.Teardown, entry.Path, entry.Port, wt.hooks.Env, nil, "", monorepoNone)
 		}
 		// Preserve worktree and branch for resume
 		recoverSlug := filepath.Base(entry.Path)
@@ -7286,8 +8392,17 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 	// Commit the initial feature state so the AI agent starts from a clean git state
 	commitWorktreeFeatureState(wtPath, cfg.Feature)
 
-	// Copy .env files (gitignored, so not present in fresh worktrees)
-	copyEnvFiles(cfg.Root, wtPath)
+	// Resolve monorepo workspaces (auto-detect, or honor worktree.json overrides)
+	hooks := loadWorktreeHooks(cfg.Root)
+	workspaces, primary, mType := resolveWorkspaces(cfg.Root, hooks)
+	overrides := map[string]workspaceOverride{}
+	if hooks != nil {
+		overrides = hooks.Workspaces
+	}
+
+	// Copy .env files (gitignored, so not present in fresh worktrees).
+	// In monorepo mode, also seed env files into qualifying workspace dirs.
+	copyEnvFiles(cfg.Root, wtPath, workspaces, overrides)
 
 	// Run belmont install in the worktree (shell out to self)
 	exePath, err := os.Executable()
@@ -7311,18 +8426,21 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 		tracker.setPort(ms.ID, port)
 	}
 
+	if mType != monorepoNone {
+		fmt.Fprintf(os.Stderr, "    Detected %s monorepo (%d workspaces, primary=%s)\n", mType, len(workspaces), primary)
+	}
+
 	// Run worktree setup hooks
-	hooks := loadWorktreeHooks(cfg.Root)
 	if hooks != nil && len(hooks.Setup) > 0 {
 		fmt.Fprintf(os.Stderr, "    Running worktree setup hooks for %s...\n", ms.ID)
-		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env); err != nil {
+		if err := runWorktreeHookCommands(hooks.Setup, wtPath, port, hooks.Env, workspaces, primary, mType); err != nil {
 			return fmt.Errorf("worktree setup for %s: %w", ms.ID, err)
 		}
 	} else if hooks == nil {
 		// No worktree.json — auto-detect dependency install from lock files
 		if cmds := detectAutoInstallCommands(cfg.Root); len(cmds) > 0 {
 			fmt.Fprintf(os.Stderr, "    Auto-installing dependencies for %s (%s)...\n", ms.ID, strings.Join(cmds, ", "))
-			if err := runWorktreeHookCommands(cmds, wtPath, port, nil); err != nil {
+			if err := runWorktreeHookCommands(cmds, wtPath, port, nil, workspaces, primary, mType); err != nil {
 				fmt.Fprintf(os.Stderr, "    \033[33m⚠ Auto-install failed for %s: %s (continuing)\033[0m\n", ms.ID, err)
 			}
 		}
@@ -7336,6 +8454,9 @@ func runMilestoneInWorktree(cfg loopConfig, ms milestone, branch, wtPath string,
 	mCfg.Port = port
 	mCfg.Tracker = tracker
 	mCfg.TrackerID = ms.ID
+	mCfg.Workspaces = workspaces
+	mCfg.PrimaryWorkspace = primary
+	mCfg.MonorepoType = mType
 	if hooks != nil {
 		mCfg.WorktreeEnv = hooks.Env
 	}
@@ -7896,18 +9017,20 @@ func getCurrentBranch(root string) string {
 // the dirty-tree preflight (to give a Belmont-aware error) and by the update
 // auto-commit (to scope `git add` so unrelated user work isn't swept up).
 //
-// Phase 2 actively writes only: `.agents/belmont/`, `.agents/skills/belmont/`,
-// and `.claude/{agents,skills}/belmont`. Every other entry below is a legacy
-// path kept in the list so deletions of stale dirs/files also get staged for
-// the auto-commit when an older project upgrades through `belmont update` →
-// `belmont install` → runLegacyCleanup.
+// Phase 2 actively writes: `.agents/belmont/`, `.agents/skills/belmont/`,
+// `.claude/agents/belmont` (sub-agent symlink), and `.claude/commands/belmont/`
+// (per-skill slash-command symlinks → .agents/skills/belmont/<skill>/SKILL.md).
+// Every other entry below is a legacy path kept in the list so deletions of
+// stale dirs/files also get staged for the auto-commit when an older project
+// upgrades through `belmont update` → `belmont install` → runLegacyCleanup.
 var belmontManagedPaths = []string{
 	".agents/belmont",
 	".agents/skills/belmont",
 	".claude/agents/belmont",
-	".claude/skills/belmont",
-	// Legacy (may be staged for deletion):
 	".claude/commands/belmont",
+	// Legacy (may be staged for deletion):
+	".claude/skills/belmont",  // Phase-2 nested symlink — never worked
+	".claude/plugins/belmont", // Phase-2.5 project-local-plugin attempt — also never worked
 	".codex/belmont",
 	".cursor/rules/belmont",
 	".windsurf/rules/belmont",

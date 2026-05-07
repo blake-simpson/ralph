@@ -225,6 +225,13 @@ func TestRunLegacyCleanup_RemovesLegacyDirsAndAgentsSection(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".copilot/belmont/old.md"), "legacy\n")
 	mustWrite(t, filepath.Join(dir, ".agents/skills/belmont/implement.md"), "stale flat skill\n")
 	mustWrite(t, filepath.Join(dir, ".agents/skills/belmont/references/old-ref.md"), "stale ref\n")
+	// .claude/skills/belmont — installed by Belmont 0.10.x, never discovered
+	// by Claude Code 2.1.x because its skill discovery is single-level only.
+	// .claude/plugins/belmont — short-lived attempt that also failed
+	// (Claude Code does not auto-load project-local plugins). Both must be
+	// cleaned up so they don't sit dead in users' projects after upgrade.
+	mustWrite(t, filepath.Join(dir, ".claude/skills/belmont/implement/SKILL.md"), "stale nested skill\n")
+	mustWrite(t, filepath.Join(dir, ".claude/plugins/belmont/.claude-plugin/plugin.json"), `{"name":"belmont"}`)
 
 	agentsContent := "# AGENTS\n\nUser stuff here.\n\n" +
 		belmontAgentsSectionStart + "\n## Belmont section\nlegacy\n" + belmontAgentsSectionEnd + "\n\nMore user stuff.\n"
@@ -239,6 +246,8 @@ func TestRunLegacyCleanup_RemovesLegacyDirsAndAgentsSection(t *testing.T) {
 	for _, removed := range []string{
 		".codex/belmont", ".cursor/rules/belmont", ".windsurf/rules/belmont",
 		".gemini/rules/belmont", ".copilot/belmont",
+		".claude/skills/belmont",  // never discovered (single-level scan)
+		".claude/plugins/belmont", // never auto-loaded (requires --plugin-dir or marketplace)
 	} {
 		if _, err := os.Stat(filepath.Join(dir, removed)); err == nil {
 			t.Errorf("expected %s to be removed", removed)
@@ -268,6 +277,71 @@ func TestRunLegacyCleanup_RemovesLegacyDirsAndAgentsSection(t *testing.T) {
 	// GEMINI.md held only Belmont content, so the file should be deleted.
 	if _, err := os.Stat(filepath.Join(dir, "GEMINI.md")); err == nil {
 		t.Errorf("expected GEMINI.md (Belmont-only) to be deleted")
+	}
+}
+
+func TestLinkClaudeCommands_SymlinksPerSkill(t *testing.T) {
+	dir := t.TempDir()
+	skillsTarget := filepath.Join(dir, ".agents/skills/belmont")
+	mustWrite(t, filepath.Join(skillsTarget, "implement/SKILL.md"), "---\nname: implement\ndescription: x\n---\nbody\n")
+	mustWrite(t, filepath.Join(skillsTarget, "verify/SKILL.md"), "---\nname: verify\ndescription: y\n---\nbody\n")
+	// A directory without SKILL.md should be skipped (e.g. _src/ would be).
+	if err := os.MkdirAll(filepath.Join(skillsTarget, "_src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := linkClaudeCommands(dir, skillsTarget); err != nil {
+		t.Fatalf("linkClaudeCommands: %v", err)
+	}
+
+	// Per-skill symlinks at .claude/commands/belmont/<skill>.md must exist
+	// and resolve to the source SKILL.md (so /belmont:<skill> registers in
+	// Claude Code 2.1.x and the references/ subdir resolves through the
+	// symlink target).
+	for _, skill := range []string{"implement", "verify"} {
+		linkPath := filepath.Join(dir, ".claude/commands/belmont", skill+".md")
+		st, err := os.Lstat(linkPath)
+		if err != nil {
+			t.Fatalf("expected slash-command symlink for %s, got: %v", skill, err)
+		}
+		if st.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s should be a symlink, not a regular file", linkPath)
+		}
+		// Resolve and confirm target points at the SKILL.md.
+		resolved, err := filepath.EvalSymlinks(linkPath)
+		if err != nil {
+			t.Errorf("resolving %s: %v", linkPath, err)
+		}
+		expected := filepath.Join(skillsTarget, skill, "SKILL.md")
+		expectedAbs, _ := filepath.EvalSymlinks(expected)
+		if resolved != expectedAbs && resolved != expected {
+			t.Errorf("symlink resolves to %q, want %q", resolved, expected)
+		}
+	}
+
+	// Skipping skills without SKILL.md (e.g. _src/) — no _src.md should exist.
+	if _, err := os.Lstat(filepath.Join(dir, ".claude/commands/belmont/_src.md")); err == nil {
+		t.Errorf("_src/ has no SKILL.md but a slash command was created anyway")
+	}
+}
+
+func TestLinkClaudeCommands_PrunesStaleEntries(t *testing.T) {
+	dir := t.TempDir()
+	skillsTarget := filepath.Join(dir, ".agents/skills/belmont")
+	mustWrite(t, filepath.Join(skillsTarget, "implement/SKILL.md"), "body\n")
+
+	// Plant a stale .md from a previous install (e.g., a renamed/removed skill).
+	mustWrite(t, filepath.Join(dir, ".claude/commands/belmont/old-skill.md"), "stale\n")
+
+	if err := linkClaudeCommands(dir, skillsTarget); err != nil {
+		t.Fatalf("linkClaudeCommands: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(dir, ".claude/commands/belmont/old-skill.md")); err == nil {
+		t.Errorf("expected stale slash-command file to be pruned")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, ".claude/commands/belmont/implement.md")); err != nil {
+		t.Errorf("expected current slash-command symlink to exist: %v", err)
 	}
 }
 

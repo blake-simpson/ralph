@@ -57,3 +57,40 @@ npx @stoplight/prism mock api.yaml --port $FREE_PORT
 - **Dependencies**: worktree setup hooks have already run (e.g., `npm install`). Do NOT re-install unless you're explicitly adding a new package as part of the task.
 - **Build isolation**: `.next/`, `dist/`, `node_modules/`, and other gitignored directories are local to this worktree. Other worktrees are unaffected by your builds.
 - **Scope**: only modify files within this worktree. Changes will be merged back via git — the scope guard will revert edits outside your target milestone.
+
+### Monorepo workspaces
+
+If `BELMONT_MONOREPO=1`, the project is a monorepo (Turborepo, Nx, pnpm/npm/yarn/bun workspaces, Cargo, Go workspaces, uv, etc.). Belmont has auto-detected the workspaces and exports the following extra env vars:
+
+| Variable | Purpose |
+|---|---|
+| `BELMONT_MONOREPO` | Always `1` when in a monorepo. Use as a guard. |
+| `BELMONT_MONOREPO_TYPE` | One of `turborepo`, `nx`, `pnpm`, `npm`, `yarn`, `bun`, `cargo`, `go`, `uv`, `lerna`, `rush`. |
+| `BELMONT_PRIMARY_WORKSPACE` | ID of the workspace that should host the **primary dev server** (the one that gets `$BELMONT_PORT`). |
+| `BELMONT_PRIMARY_WORKSPACE_PATH` | Path of the primary workspace, relative to the worktree root (e.g. `packages/web`). |
+| `BELMONT_WORKSPACES` | JSON array of `[{"id":"web","path":"packages/web"}, ...]` — every workspace, primary and otherwise. |
+
+**Primary dev server in monorepo mode.** The dev server still uses `$BELMONT_PORT`, but you must invoke the bundler from inside the workspace dir:
+
+```bash
+cd "$BELMONT_PRIMARY_WORKSPACE_PATH" && next dev -p $BELMONT_PORT
+# or, if the workspace tool's wrapper forwards --port correctly:
+pnpm --filter "$BELMONT_PRIMARY_WORKSPACE" dev -- --port $BELMONT_PORT
+```
+
+**Workspace-scoped commands.** Build/test/typecheck/lint commands run via the workspace tool:
+
+| Tool | Run script in workspace |
+|---|---|
+| pnpm | `pnpm --filter <id> <script>` |
+| yarn | `yarn workspace <id> <script>` |
+| npm  | `npm -w <id> run <script>` |
+| bun  | `bun --filter <id> run <script>` |
+| cargo| `cargo run -p <id>` / `cargo test -p <id>` |
+| go   | `cd <workspace_path> && go test ./...` |
+
+For new dependencies: `pnpm add -F <id> <pkg>` / `yarn workspace <id> add <pkg>` / `npm -w <id> install <pkg>` / `cargo add -p <id> <pkg>`.
+
+**Multi-service verification.** A task that needs more than the primary dev server (e.g. web depends on a mock API) must enumerate `BELMONT_WORKSPACES` and start each additional server with the dynamic `FREE_PORT` pattern from the section above. Never reuse `$BELMONT_PORT` for a non-primary server — that's the primary's slot.
+
+**Non-monorepo projects.** When `BELMONT_MONOREPO` is unset, ignore this section entirely. The single-package rules above are the full picture.

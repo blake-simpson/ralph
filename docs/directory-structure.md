@@ -85,6 +85,7 @@ your-project/
 │   ├── PRD.md                   # Living spec (no status markers — purely requirements)
 │   ├── PROGRESS.md              # Single source of truth for all state (task checkboxes, milestones)
 │   ├── TECH_PLAN.md
+│   ├── worktree.json            # Optional: setup/teardown hooks, env, monorepo workspace overrides
 │   ├── features/                # Sub-feature directories (optional)
 │   │   └── <feature-slug>/
 │   │       ├── PRD.md
@@ -98,19 +99,14 @@ your-project/
 │   ├── agents/
 │   │   └── belmont -> ../../.agents/belmont   (symlink)
 │   └── commands/
-│       └── belmont/              (copied from .agents/skills/belmont)
-├── .codex/                      # Codex (if selected)
-│   └── belmont/                  (copied from .agents/skills/belmont)
-├── AGENTS.md                    # Includes Belmont Codex skill-routing section (if selected)
-├── .cursor/                     # Cursor (if selected)
-│   └── rules/
-│       └── belmont/
-│           ├── product-plan.mdc -> ../../../.agents/skills/belmont/product-plan.md
-│           ├── tech-plan.mdc    -> ../../../.agents/skills/belmont/tech-plan.md
-│           ├── next.mdc         -> ../../../.agents/skills/belmont/next.md
-│           └── ...              (per-file symlinks, .mdc -> .md)
+│       └── belmont/              # one .md symlink per skill — each registers as /belmont:<skill>
+│           ├── implement.md   -> ../../../.agents/skills/belmont/implement/SKILL.md
+│           ├── verify.md      -> ../../../.agents/skills/belmont/verify/SKILL.md
+│           └── ...               (per-skill symlinks)
 └── ...
 ```
+
+Codex, Cursor, Windsurf, Gemini, and GitHub Copilot all auto-discover `.agents/skills/belmont/<skill>/SKILL.md` natively — no per-tool wiring is created (see [supported-tools.md](supported-tools.md)).
 
 ## Key Separation
 

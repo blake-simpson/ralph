@@ -175,6 +175,14 @@ If your environment supports **agent teams** (e.g. Claude Code's multi-agent fea
 
 ---
 
+## Monorepo Support
+
+Belmont auto-detects monorepos and adjusts worktree setup so AI agents run commands in the right package, find env files where postinstall scripts actually need them, and discover sibling workspaces. Detection signals: `turbo.json`, `nx.json`, `pnpm-workspace.yaml`, `package.json` `workspaces`, `lerna.json`, `rush.json`, `Cargo.toml` `[workspace]`, `go.work`, `pyproject.toml` `[tool.uv.workspace]`. When detected, Belmont seeds `.env*` into qualifying workspace dirs (those whose manifest signals env consumption — Prisma deps, postinstall scripts, etc.), and exports `BELMONT_MONOREPO`, `BELMONT_PRIMARY_WORKSPACE`, `BELMONT_PRIMARY_WORKSPACE_PATH`, and `BELMONT_WORKSPACES` so agents can scope their `--filter`/`-w`/`-p` commands. Override auto-detection with optional `workspaces` and `primary_workspace` fields in `.belmont/worktree.json`. See [docs/monorepo-support.md](docs/monorepo-support.md).
+
+Single-package projects are unaffected — none of the monorepo env vars are exported when no workspace is detected.
+
+---
+
 ## Working Backwards (PR/FAQ)
 
 Belmont supports Amazon's **Working Backwards** methodology — a product definition process that starts with the customer and works backwards to the solution. The centerpiece is the **PR/FAQ**: a one-page press release describing the product as if it's already launched, followed by FAQs that force clarity on every aspect of the idea.
@@ -325,7 +333,7 @@ See [Skills Reference](docs/skills-reference.md) for detailed descriptions of ea
 
 | Tool               | How Skills Are Wired                                                  | How to Use                                          |
 |--------------------|-----------------------------------------------------------------------|-----------------------------------------------------|
-| **Claude Code**    | `.claude/agents/belmont` and `.claude/skills/belmont` symlinks        | `/belmont:product-plan`, `/belmont:implement`, etc. |
+| **Claude Code**    | `.claude/agents/belmont` symlink + per-skill symlinks `.claude/commands/belmont/<skill>.md` → `.agents/skills/belmont/<skill>/SKILL.md` | `/belmont:product-plan`, `/belmont:implement`, etc. |
 | **Codex**          | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
 | **Cursor**         | None — `.agents/skills/` auto-discovered (Cursor Skills)              | `belmont:implement` in prompt                       |
 | **Windsurf**       | None — `.agents/skills/` auto-discovered (Cascade Skills)             | `belmont:implement` in prompt                       |

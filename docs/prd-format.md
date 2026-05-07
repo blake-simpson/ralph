@@ -27,6 +27,14 @@ Then they see the dashboard
 ## Technical Approach
 High-level implementation strategy.
 
+## Target Workspace(s) — optional, monorepos only
+If `belmont status` shows a `Monorepo:` line, list the workspaces this feature touches by ID and path. Mark the primary (the one whose dev server uses `$BELMONT_PORT`):
+
+- `web` (`packages/studia-web`) — primary
+- `api` (`apps/api`)
+
+Tasks may additionally use `[WEB]` / `[API]` prefixes (e.g. `[WEB] Render the new shell`) so implementation agents know which workspace each task targets. Omit this section entirely for single-package projects.
+
 ## Tasks
 
 ### P0-1: Set up authentication

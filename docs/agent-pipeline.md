@@ -14,6 +14,7 @@ Reads the MILESTONE file, then scans the project:
 - Related code, utilities, and type definitions
 - CLAUDE.md rules (if present)
 - Import patterns, error handling patterns, test patterns
+- **Monorepo workspaces** — if `BELMONT_MONOREPO=1` is set, the agent enumerates the workspaces from `BELMONT_WORKSPACES` JSON and identifies the primary via `BELMONT_PRIMARY_WORKSPACE`, so downstream agents know to scope their `--filter`/`-w`/`-p` commands. Single-package projects skip this.
 
 **Writes to**: `## Codebase Analysis` section of MILESTONE.md
 

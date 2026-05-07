@@ -1,10 +1,10 @@
 # Supported Tools
 
-Belmont skills install as agentskills.io-format folders at `.agents/skills/belmont/<skill>/SKILL.md`. Five of six supported AI CLIs auto-discover this path natively — the install does **zero per-tool wiring** for them. Only Claude Code needs an explicit symlink (because it expects skills under `.claude/skills/`, not `.agents/skills/`).
+Belmont skills install as agentskills.io-format folders at `.agents/skills/belmont/<skill>/SKILL.md`. Five of six supported AI CLIs auto-discover this path natively — the install does **zero per-tool wiring** for them. Claude Code is the exception: it discovers slash commands at `.claude/commands/<name>.md` (with subfolders becoming namespace prefixes), so Belmont creates per-skill symlinks at `.claude/commands/belmont/<skill>.md` pointing at the canonical SKILL.md.
 
 | Tool               | Wiring                                                               | How to use                                              |
 |--------------------|----------------------------------------------------------------------|---------------------------------------------------------|
-| **Claude Code**    | `.claude/agents/belmont` and `.claude/skills/belmont` symlinks       | `/belmont:product-plan`, `/belmont:implement`, etc.     |
+| **Claude Code**    | `.claude/agents/belmont` symlink + `.claude/commands/belmont/<skill>.md` per-skill symlinks → `.agents/skills/belmont/<skill>/SKILL.md` | `/belmont:product-plan`, `/belmont:implement`, etc.     |
 | **Codex**          | none — `.agents/skills/` auto-discovered (Codex 0.126+)              | Prompt `belmont:<skill>` — surfaces via `/skills`       |
 | **Cursor**         | none — `.agents/skills/` auto-discovered (Cursor Skills system)      | Prompt `belmont:<skill>` — auto-loaded by description   |
 | **Windsurf**       | none — `.agents/skills/` auto-discovered (Cascade v1.13.6+)          | Prompt `belmont:<skill>` — auto-loaded by description   |
@@ -73,4 +73,4 @@ You can paste the skill content directly into a chat or configure your tool to l
 
 ## Migration from older Belmont versions
 
-If you've upgraded from a Belmont version that wrote into `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`, `.gemini/rules/belmont/`, `.copilot/belmont/`, `.claude/commands/belmont/`, or maintained a `belmont:skill-routing` section in `AGENTS.md` / `GEMINI.md`, the next `belmont install` (or `belmont update`) automatically removes those legacy paths. The cleanup is idempotent — safe to re-run.
+If you've upgraded from a Belmont version that wrote into `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`, `.gemini/rules/belmont/`, `.copilot/belmont/`, `.claude/skills/belmont` (the 0.10.x nested-namespace symlink that Claude Code 2.1.x silently ignored), `.claude/plugins/belmont` (a brief 0.10.4-dev attempt that also wasn't auto-discovered), or maintained a `belmont:skill-routing` section in `AGENTS.md` / `GEMINI.md`, the next `belmont install` (or `belmont update`) automatically removes those legacy paths. The cleanup is idempotent — safe to re-run.

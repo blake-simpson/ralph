@@ -69,9 +69,8 @@ Resolve via `git stash -u`, `git commit -am "..."`, or, as a last resort, bypass
 `belmont update` follows a successful self-update + skill reinstall by staging and committing only Belmont-managed paths:
 
 - `.agents/belmont/`, `.agents/skills/belmont/`
-- `.claude/agents/belmont/`, `.claude/commands/belmont/`, `.claude/skills/belmont/`
-- `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`
-- Legacy: `.gemini/rules/belmont/`, `.copilot/belmont/` (no longer created, but staged for deletion if leftover from older Belmont versions)
+- `.claude/agents/belmont/`, `.claude/commands/belmont/`
+- Legacy (no longer created, but staged for deletion if leftover from older Belmont versions): `.claude/skills/belmont/`, `.claude/plugins/belmont/`, `.codex/belmont/`, `.cursor/rules/belmont/`, `.windsurf/rules/belmont/`, `.gemini/rules/belmont/`, `.copilot/belmont/`
 - `AGENTS.md` (Codex + Copilot routing section), `GEMINI.md` (Gemini `@import` section)
 
 Unrelated user changes (staged or unstaged) are not swept up — the `git commit` carries an explicit pathspec. Repo pre-commit hooks run normally; if a hook fails, Belmont leaves the files staged and prints the manual `git commit` to retry.
@@ -120,8 +119,15 @@ When `belmont auto` runs features or milestones in parallel worktrees, the follo
 | `PORT` | Unique free port assigned to this worktree |
 | `BELMONT_PORT` | Same value as `PORT` |
 | `BELMONT_WORKTREE` | Set to `1` in worktree context |
+| `BELMONT_MONOREPO` | Set to `1` when a monorepo is detected (otherwise unset) |
+| `BELMONT_MONOREPO_TYPE` | Detected type (`turborepo`, `nx`, `pnpm`, `npm`, `yarn`, `bun`, `cargo`, `go`, `uv`, etc.) |
+| `BELMONT_PRIMARY_WORKSPACE` | Workspace ID hosting the primary dev server |
+| `BELMONT_PRIMARY_WORKSPACE_PATH` | Workspace path relative to the worktree root |
+| `BELMONT_WORKSPACES` | JSON array `[{"id","path"}, ...]` of all workspaces |
 
-Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Configure custom worktree lifecycle hooks via `.belmont/worktree.json`. See [Worktree Isolation](worktree-isolation.md) for full documentation.
+Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Configure custom worktree lifecycle hooks via `.belmont/worktree.json`. See [Worktree Isolation](worktree-isolation.md) for full documentation, and [Monorepo Support](monorepo-support.md) for monorepo-specific behavior (including how to override auto-detected workspaces).
+
+`belmont status` reports a `Monorepo: <type> (<N> workspaces, primary=<id>)` line when auto-detection fires; `belmont status --format json` includes a `monorepo` object alongside the existing fields.
 
 ## How Skills Use the CLI
 

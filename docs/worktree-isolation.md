@@ -63,8 +63,15 @@ These are automatically set for every worktree:
 | `PORT` | A unique free port assigned to this worktree for the **primary dev server**. Most frameworks (Next.js, Vite, Express, Rails, Django) respect this automatically. |
 | `BELMONT_PORT` | Same value as `PORT`. Use this in skills/agents for explicit port references. |
 | `BELMONT_WORKTREE` | Set to `1` when running in a worktree. Use to detect worktree context. |
+| `BELMONT_MONOREPO` | Set to `1` when Belmont detected a monorepo (Turborepo, Nx, pnpm/npm/yarn/bun workspaces, Cargo, Go workspaces, uv). Absent for single-package projects. |
+| `BELMONT_MONOREPO_TYPE` | Detected monorepo type (`turborepo`, `nx`, `pnpm`, `npm`, `yarn`, `bun`, `cargo`, `go`, `uv`, `lerna`, `rush`). Absent in single-package mode. |
+| `BELMONT_PRIMARY_WORKSPACE` | ID of the primary workspace in monorepo mode (the one that hosts the dev server with `$BELMONT_PORT`). |
+| `BELMONT_PRIMARY_WORKSPACE_PATH` | Path of the primary workspace, relative to the worktree root. |
+| `BELMONT_WORKSPACES` | JSON array of `[{"id":"web","path":"packages/web"}, ...]` listing every workspace. |
 
 **Additional servers** (Storybook, Prisma Studio, etc.) should NOT use `PORT`/`BELMONT_PORT`. Instead, AI agents are instructed to dynamically find a free port at runtime for any non-primary server. This avoids port conflicts between parallel worktrees without requiring additional configuration.
+
+**Monorepo workspaces.** When `BELMONT_MONOREPO=1`, Belmont also seeds `.env*` files into qualifying workspace dirs (those with `postinstall` scripts, Prisma deps, etc.) so subpackage tooling like `prisma generate` finds `DATABASE_URL`. See [Monorepo Support](monorepo-support.md) for the full picture.
 
 ## Worktree Hooks
 
@@ -186,6 +193,16 @@ Create `.belmont/worktree.json` in your project to configure lifecycle hooks:
   "setup": []
 }
 ```
+
+## Monorepo Workspaces
+
+If your project is a monorepo (Turborepo, Nx, pnpm/npm/yarn/bun workspaces, Cargo, Go workspaces, uv, etc.), Belmont auto-detects the workspaces and adjusts:
+
+- **Env seeding** copies `.env*` not just into the worktree root but into every workspace dir whose manifest signals env consumption (Prisma deps, `postinstall` scripts, `build.rs`, Python `[project.scripts]`, or an explicit `env_files` override).
+- **Workspace env vars** (`BELMONT_MONOREPO`, `BELMONT_MONOREPO_TYPE`, `BELMONT_PRIMARY_WORKSPACE`, `BELMONT_PRIMARY_WORKSPACE_PATH`, `BELMONT_WORKSPACES`) are exported so AI agents know which workspace to scope their commands to.
+- **Skills and agents** automatically use workspace filters (`pnpm --filter <id>`, `npm -w <id>`, `cargo -p <id>`) and `cd` into the primary workspace before invoking dev-server bundlers.
+
+You can override auto-detection with new optional fields in `worktree.json` — see [Monorepo Support](monorepo-support.md) for the full schema and examples.
 
 ## Common Concerns
 
