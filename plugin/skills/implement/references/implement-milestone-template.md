@@ -39,6 +39,9 @@ Fill in the `## Orchestrator Context` section using information from PROGRESS.md
 - **Out of Scope**: See the "Out of Scope" section of {base}/PRD.md — nothing outside the listed task IDs
 - **Milestone Boundary**: Do NOT implement tasks from other milestones
 
+### Workspace Context (monorepos only)
+[If `BELMONT_MONOREPO=1` is set, copy the workspace summary here: `BELMONT_MONOREPO_TYPE`, `BELMONT_PRIMARY_WORKSPACE` (id + path), and the full `BELMONT_WORKSPACES` JSON array. Sub-agents need this to scope their `--filter`/`-w`/`-p` commands. If `BELMONT_MONOREPO` is unset, omit this section.]
+
 ### Learnings from Previous Sessions
 [If `.belmont/NOTES.md` exists, copy its contents here under "#### Global Notes".]
 [If `{base}/NOTES.md` exists, copy its contents here under "#### Feature Notes".]

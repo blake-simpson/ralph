@@ -84,6 +84,7 @@ You need a running server to navigate to:
 - **Port selection — CRITICAL** (worktree parallel runs will collide if you ignore this):
   - Every URL you navigate to is `$BELMONT_BASE_URL/...`. Never `http://localhost:3000/...` or any other hardcoded port, even if `playwright.config.ts`, `cypress.config.*`, or the PRD/TECH_PLAN says otherwise. Belmont sets `PLAYWRIGHT_BASE_URL` and `CYPRESS_baseUrl` so those tools pick up the right port automatically — do NOT edit the checked-in configs.
   - For the **primary dev server**: invoke the bundler CLI directly with `$BELMONT_PORT`. `next dev -p $BELMONT_PORT`, `vite --port $BELMONT_PORT`, `astro dev --port $BELMONT_PORT`, etc. Do NOT use `npm run dev` / `pnpm dev` / `yarn dev` — the wrapper script may hardcode a port.
+  - **Monorepo mode (`BELMONT_MONOREPO=1`).** `cd "$BELMONT_PRIMARY_WORKSPACE_PATH"` before invoking the bundler, OR use the workspace tool's filter (e.g. `pnpm --filter "$BELMONT_PRIMARY_WORKSPACE" exec next dev -p $BELMONT_PORT`). The dev server still binds to `$BELMONT_PORT`. For multi-service verification (web + API mock, etc.), enumerate `BELMONT_WORKSPACES` JSON for the other workspace paths and start each additional server with the dynamic `FREE_PORT` pattern below — never reuse `$BELMONT_PORT` for a non-primary server.
   - For **any other server** (Storybook, Prisma Studio, mock APIs): find a free port dynamically:
     ```bash
     FREE_PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()")

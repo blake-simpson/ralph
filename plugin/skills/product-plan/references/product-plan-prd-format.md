@@ -37,6 +37,12 @@ And [additional assertions]
 ## Technical Context (for implementation agents)
 [Add all context needed for follow up agents (Figma URLs, technical decisions from interview, edge cases, conflicts, etc.)]
 
+## Target Workspace(s) [optional, monorepos only]
+[If `belmont status` reports a `Monorepo:` line, list the workspace(s) this feature operates in by ID and path — e.g.
+- `web` (`packages/studia-web`) — primary
+- `api` (`apps/api`)
+Tasks can additionally use `[WEB]` / `[API]` prefixes (e.g. `[WEB] Render the new shell`) so implementation agents know which workspace each task targets. Omit this section entirely for single-package projects.]
+
 ## Tasks
 [List all sub-tasks required to complete the feature]
 [Provide all information needed for the implementation agents to understand their isolated task]

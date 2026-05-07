@@ -160,6 +160,19 @@ Use the detected package manager (referred to as `<pkg>` below) for ALL commands
 <pkg> run build
 ```
 
+**Monorepo mode (`BELMONT_MONOREPO=1`).** Commands MUST target the workspace named in `BELMONT_PRIMARY_WORKSPACE` (or whichever workspace the task touches — read `BELMONT_WORKSPACES` JSON for the full list). Use the workspace tool's filter flag instead of running scripts at the repo root:
+
+| Tool | Run script |
+|---|---|
+| pnpm | `pnpm --filter <id> run <script>` (or `-F <id>`) |
+| yarn | `yarn workspace <id> <script>` |
+| npm  | `npm -w <id> run <script>` |
+| bun  | `bun --filter <id> run <script>` |
+| cargo | `cargo run -p <id>` / `cargo test -p <id>` |
+| go   | `cd <workspace_path> && go test ./...` |
+
+The same applies to typecheck/lint/build/test — wrap each with the workspace filter. If a task spans multiple workspaces, run the command per-workspace rather than at the root.
+
 **IMPORTANT**: Fix all errors before proceeding. Do not leave broken code.
 
 #### Step 3b: Developer Review
@@ -378,7 +391,8 @@ If you cannot resolve build or type errors:
 
 ### Missing Dependencies
 If a required package is missing:
-1. Install it using the project's package manager: `<pkg> install [package]` (e.g. `pnpm add [package]`, `yarn add [package]`, `npm install [package]`, or `bun add [package]`)
+1. Install it using the project's package manager: `<pkg> install [package]` (e.g. `pnpm add [package]`, `yarn add [package]`, `npm install [package]`, or `bun add [package]`).
+   In monorepo mode (`BELMONT_MONOREPO=1`), scope the install to the target workspace: `pnpm add -F <id> [package]` / `yarn workspace <id> add [package]` / `npm -w <id> install [package]` / `bun add --filter <id> [package]` / `cargo add -p <id> [package]`. The default workspace is `BELMONT_PRIMARY_WORKSPACE` unless the task targets another.
 2. Document the addition in your report
 
 ### Design Ambiguity

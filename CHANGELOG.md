@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.4
+
+**Released:** 2026-05-07
+
+### Changes since v0.10.3
+
+- Add first-class monorepo support and fix Claude Code skill discovery
+
+
+
 ## v0.10.3
 
 **Released:** 2026-04-30
