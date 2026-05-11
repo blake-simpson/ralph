@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.5
+
+**Released:** 2026-05-11
+
+### Changes since v0.10.4
+
+- Add Pi (pi.dev) as a first-class supported tool
+
+
+
 ## v0.10.4
 
 **Released:** 2026-05-07
