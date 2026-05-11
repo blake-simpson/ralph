@@ -6,7 +6,9 @@
 
 ## Invariant
 
-Only `/belmont:tech-plan` may add, remove, rename, or re-parent a `## M<N>:` heading in PROGRESS.md. Every other skill (implement, verify, next, debug-auto, debug-manual, triage) may only edit tasks **inside** existing milestone headings.
+Only `/belmont:tech-plan` may add, remove, rename, or re-parent a `## M<N>:` heading in PROGRESS.md. Every other skill (implement, verify, next, debug-auto, triage) may only edit tasks **inside** existing milestone headings.
+
+**Exception**: interactive `/belmont:debug-manual` may edit spec prose (PRD/TECH_PLAN/NOTES/PROGRESS task text and follow-up `[x]` flips) in place under human-gated per-edit approval. The structural rules above (no new/renamed/removed milestones, no polish-pattern naming) still apply to `debug-manual`. See [cross-cutting/debug-spec-reconciliation.md](debug-spec-reconciliation.md) for the rationale and bounds.
 
 Routing for discovered work:
 
@@ -19,7 +21,7 @@ Routing for discovered work:
 
 Three layers, each sufficient on its own but deployed together for defense in depth:
 
-1. **Skill prose** — canonical text lives in `skills/belmont/_partials/milestone-immutability.md` and is `@include`d into `implement.md`, `verify.md`, `next.md`, `debug-auto.md`, `debug-manual.md`, `tech-plan.md`, and referenced by `prompts/belmont/post-verify-triage.md`. The partial is the single source of truth; skill bodies point to it rather than paraphrasing.
+1. **Skill prose** — canonical text lives in `skills/belmont/_partials/milestone-immutability.md` and is `@include`d into `implement.md`, `verify.md`, `next.md`, `debug-auto.md`, `tech-plan.md`, and referenced by `prompts/belmont/post-verify-triage.md`. The partial is the single source of truth for those skills; skill bodies point to it rather than paraphrasing. `debug-manual.md` is the sole exception — it `@include`s `debug-scope-rules.md` instead, which permits in-place spec edits while keeping the structural prohibitions (no new/renamed milestones, no polish-pattern naming) intact.
 2. **Runtime scope guard** — `runScopeGuard` in `cmd/belmont/main.go` reverts new milestone headings added during any non-`actionReplan` phase. See [auto-mode/scope-guard-runtime.md](../auto-mode/scope-guard-runtime.md).
 3. **CLI lint** — `belmont validate` detects residual violations in PROGRESS.md (polish-pattern milestone names; cross-milestone task IDs like `P3-FWLUP-M2-1` sitting under a non-M2 milestone). Runs at `belmont auto` startup; interactive runs get `[y/N]` prompt, non-interactive abort.
 
@@ -35,6 +37,7 @@ With broken enforcement (one layer regressed but others intact): the regressed l
 - **Allowing `triage`'s `defer_and_proceed` to create polish milestones.** The post-verify-triage prompt explicitly forbids this now. Deferral means NOTES.md or same-milestone `[!]`, never a new milestone.
 - **Per-milestone PROGRESS fragment files** (`M1.md`, `M2.md`, …). Architecturally cleaner (scope violation becomes structurally impossible for checkbox flips). Rejected as a bigger refactor than skill-prose + runtime guard combined. Revisit only if the runtime guard proves fiddly; the two approaches are redundant-but-harmless if both adopted.
 - **Pre-plan-time regex that blocks milestones with "Polish" / "Follow-ups" in the name.** Would false-positive on legitimate cross-cutting milestones like "M6: Accessibility audit across public routes." `belmont validate` uses targeted patterns (`polish`, `follow-ups`, `cleanup`, `verification fixes`, `deviations from M<N>`, `from M<N> implementation`, `fwlup(s)`) that match the anti-pattern without false-flagging real work.
+- **Extending the spec-edit prohibition to interactive `/belmont:debug-manual`.** Considered. Rejected because debug-manual is interactive-only (auto invokes `/belmont:debug-auto`, never `debug-manual`), every spec edit is gated on explicit user approval, edits commit atomically with the code fix, and the auto-mode parallel-orchestration risk this entry guards against simply does not exist for synchronous human-in-the-loop sessions. The structural prohibitions (no new/renamed milestones, no polish-pattern naming) still apply to debug-manual. See [debug-spec-reconciliation.md](debug-spec-reconciliation.md).
 
 ## Evidence
 
@@ -51,3 +54,4 @@ Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestDetectViolations_Polis
 
 - 2026-04-21 — initial: canonical partial, `implement.md` loophole closed, tech-plan / verify / triage tightened, `belmont validate` lint added.
 - 2026-04-22 — migrated from LEARNINGS.md to knowledge/ tree.
+- 2026-05-11 — `debug-manual` switched from `milestone-immutability.md` to `debug-scope-rules.md`; spec-text edits permitted in interactive sessions under per-edit user approval; structural prohibitions unchanged. See [debug-spec-reconciliation.md](debug-spec-reconciliation.md).

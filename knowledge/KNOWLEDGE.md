@@ -32,6 +32,7 @@ Curated operational knowledge for working on Belmont itself. Scan the table belo
 | [cross-cutting/skill-format.md](cross-cutting/skill-format.md) | cli, skills, agents | touch `generate-skills.sh`, the SKILL.md frontmatter shape, per-tool install wiring, `syncSkillsFolderDir`, `runLegacyCleanup`, or add support for a new AI CLI |
 | [cross-cutting/dual-invocation-paths.md](cross-cutting/dual-invocation-paths.md) | cli, skills, agents, auto-mode | plan or change anything that touches tool integration, skill content, sub-agent dispatch, model-tier handling, or the on-disk surface — both auto mode and interactive mode must be addressed |
 | [cross-cutting/monorepo-workspaces.md](cross-cutting/monorepo-workspaces.md) | cli, skills, agents | touch `detectWorkspaces` / `resolveWorkspaces` / `seedWorkspaceEnv` / `monorepoEnvVars`, modify `worktreeHooks.Workspaces`, or change how skills/agents read the BELMONT_MONOREPO* env vars |
+| [cross-cutting/debug-spec-reconciliation.md](cross-cutting/debug-spec-reconciliation.md) | skills, state | change `debug-manual.md`, `debug-scope-rules.md`, `feature-detection-multi.md`, or `references/debug-manual-spec-reconcile.md`; weaken or extend the spec-edit relaxation; or wire `debug-manual` into a non-interactive code path |
 
 ### Meta
 

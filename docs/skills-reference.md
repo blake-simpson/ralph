@@ -110,16 +110,21 @@ Auto debug loop — dispatches a verification agent to check each fix attempt.
 
 ## `debug-manual`
 
-Manual debug loop — the user verifies each fix instead of dispatching a verification agent. Faster iteration.
+Manual debug loop with deep Belmont context and in-place spec reconciliation. The user verifies each fix, and after the fix is confirmed the skill walks the loaded specs to correct any drift the bug exposed — all in one atomic commit.
 
-- Same agent-dispatch model as auto, but **no verification agent** — user checks each fix
+- **Interactive only** — never invoked from `belmont auto` (which uses `debug-auto`)
+- **Step 0 deep context load**: master `.belmont/PR_FAQ.md`, `.belmont/PRD.md`, `.belmont/TECH_PLAN.md`, `.belmont/NOTES.md` + each selected feature's `PRD.md`, `TECH_PLAN.md`, `PROGRESS.md`, `NOTES.md`, and latest `MILESTONE-M*.done.md`. Optional reads skip silently when absent. Files > 500 lines get a `[y/N]` gate; total context > 50 KB on local-LLM CLIs prompts narrowing
+- **Multi-feature mode** — supports debugging bugs that span two or more features in one session
 - Implementation agent adds strategic `[BELMONT-DEBUG]` logging (5-15 log points per iteration)
 - After each fix, presents summary and asks user to verify with debug log output
 - All `[BELMONT-DEBUG]` log lines are automatically cleaned up before committing
-- Same max 3 iterations, regression handling, and user checkpoint as auto mode
+- Max 3 iterations, regression handling, and user checkpoint match auto mode
+- **Spec Reconciliation phase** runs only on FIXED: walks the loaded specs, identifies drift (acceptance criteria mismatch, outdated Solution/Verification fields, contradicted TECH_PLAN decisions, completed follow-ups, root-cause patterns), presents unified diffs for `y/N/edit/skip` per-edit approval, edits in place, appends Five-Whys-style entry to NOTES.md
+- **Atomic commit** — code edits + spec edits land in a single `debug: <fix> + spec sync` commit; commit body includes task IDs whose state was flipped so `runEvidenceCheck` finds attribution on a future verify pass
+- **Structural prohibitions still apply**: never adds/renames/removes milestones; never uses polish/follow-up/cleanup naming; never flips a task to `[v]` (verify's job); never edits a feature's specs that wasn't selected; never adds `[ ]` follow-up tasks for unfixed drift (fix it or skip it)
 
-**Best for**: UI bugs, visual issues, known reproduction steps, anything the user can quickly verify.
-**Use `debug-auto` instead for**: Complex logic bugs, race conditions, issues requiring automated testing.
+**Best for**: UI bugs, visual issues, known reproduction steps, multi-feature debugging, **bugs that exist because the spec drifted from reality**.
+**Use `debug-auto` instead for**: Complex logic bugs, race conditions, narrow code-only fixes where you don't want spec edits.
 **Use `/belmont:next` or `/belmont:implement` instead for**: New features, large multi-file changes.
 
 ## `review-plans`

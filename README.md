@@ -319,7 +319,7 @@ go run ./cmd/belmont install --source . --project /tmp/test-project --no-prompt
 | `verify`            | Verification and code review                      |
 | `debug`             | Debug router (auto or manual)                     |
 | `debug-auto`        | Auto debug loop with agent verification           |
-| `debug-manual`      | Manual debug loop with user verification          |
+| `debug-manual`      | User-verified debug loop with deep Belmont context + in-place spec reconciliation |
 | `review-plans`      | Document alignment and drift detection            |
 | `cleanup`           | Archive completed features, reduce token bloat    |
 | `status`            | Read-only progress report                         |

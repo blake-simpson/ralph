@@ -159,6 +159,10 @@ After implementing a milestone:
 - Run `/belmont:status` to check progress
 - Continue until all milestones are complete
 
+### 9a. Fixing spec drift (the bug is in the docs)
+
+If a bug exists because the PRD, TECH_PLAN, or NOTES drifted from shipped reality — acceptance criteria don't match behaviour, a TECH_PLAN decision was abandoned mid-implementation, or the docs describe an old approach — use `/belmont:debug-manual` (or `/belmont:debug` and choose "manual"). It loads the full Belmont context (master PR_FAQ + master/feature PRD + TECH_PLAN + NOTES + latest shipped MILESTONE) up front, then after the fix is confirmed walks the specs and offers diffs to correct drift in place. Code edits and spec edits land in one atomic commit so `git log` tells the complete story. Supports multi-feature debugging (bugs that span two or more features). Interactive only; never invoked from `belmont auto`. See [skills-reference.md#debug-manual](skills-reference.md) for the full behaviour.
+
 ## 9b. Steering an auto run mid-flight
 
 When `belmont auto` is running and you want to hand the agent a new piece
