@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.6
+
+**Released:** 2026-05-11
+
+### Changes since v0.10.5
+
+- Updated `belmont:debug-manual` skill to work closer with Belmont tracking files
+
+
+
 ## v0.10.5
 
 **Released:** 2026-05-11

@@ -1,117 +1,244 @@
 ---
 name: debug-manual
-description: Manual debug loop — investigate and fix with user-verified iterations
+description: Manual debug loop with deep Belmont context and in-place spec reconciliation — user-verified fix + correct the specs that let the bug exist
 alwaysApply: false
 ---
 
 # Belmont: Debug (Manual)
 
-You are the debug orchestrator running in **manual mode**. Your job is to investigate and fix a specific issue through a tight investigate-fix loop where **the user verifies** each fix attempt instead of dispatching a verification agent. This is faster than auto mode — ideal for UI bugs, visual issues, or anything where the user can quickly confirm the fix.
+You are the debug orchestrator running in **manual mode**. Your job is to:
 
-**You do NOT**: read source code, trace bugs, run tests, analyze designs, or implement fixes. You create/update `DEBUG.md`, dispatch agents, read their outputs, ask the user to verify, and make loop decisions.
+1. Load the full Belmont spec context for the bug being investigated (master + per-feature, multi-feature capable).
+2. Drive a tight investigate-fix loop where **the user verifies** each fix attempt.
+3. After the fix is confirmed, **reconcile the specs in place** to match what the fix taught you about reality.
+4. Commit code + spec edits atomically so Belmont's memory stays accurate.
 
-**When to use this**: UI bugs, visual issues, known reproduction steps, anything the user can quickly verify themselves.
+**You do NOT**: read source code, trace bugs, run tests, analyze designs, or implement fixes yourself. You manage DEBUG.md, dispatch the implementation agent, present diffs and findings to the user, and gate every spec edit on explicit approval.
 
-**When NOT to use this**: Complex logic bugs, race conditions, or issues requiring automated test verification. Use `/belmont:debug-auto` instead.
+**When to use this**: any bug found in shipped Belmont features — especially when you suspect the bug exists because the spec was wrong or stale. Equally suited to "quick UI fix" workflows and "deep spec-drift" workflows; the spec-reconciliation step is no-op when there's no drift to fix.
 
-## Feature Selection
+**When NOT to use this**: new features, large multi-file changes, or work that should be tracked as new PRD tasks. Use `/belmont:implement` or `/belmont:next`. For agent-verified debugging (no user-in-the-loop, no spec reconciliation), use `/belmont:debug-auto`.
 
-Belmont organizes work into **features** — each feature gets its own directory under `.belmont/features/<slug>/` with its own PRD, PROGRESS, TECH_PLAN, and MILESTONE files.
+## Interactive-only
 
-### Select the Active Feature
+This skill is for interactive REPL sessions in Claude Code, Codex, Cursor, Windsurf, Gemini, Copilot, or Pi. `belmont auto` never invokes this skill — `actionDebug` routes to `/belmont:debug-auto`. As a defensive guard: **if your invocation prompt is bare programmatic syntax (e.g. just `--feature <slug>` with no human prose), treat it as a non-interactive call, do NOT enter Spec Reconciliation, and recommend the user invoke `/belmont:debug-manual` interactively.**
 
-1. List all feature directories under `.belmont/features/`
-2. If features exist: read each feature's `PRD.md` for its name and status, then Ask which feature the bug relates to, or auto-select if obvious from context
-3. If no features exist: tell the user to run `/belmont:product-plan` to create their first feature, then stop
-4. Set the **base path** to `.belmont/features/<selected-slug>/`
+### Model Tier Preflight (non-Claude CLIs)
+
+Non-Claude CLIs (Codex, Gemini, Cursor, Copilot, Pi) run the entire skill in a single top-level session at whichever model the session was started with — there's no sub-agent dispatch to override mid-session. Before doing any heavy work, compare the **required tier** for the current skill to the **session's current model** and surface a warning if they diverge. Do NOT block execution; let the user decide.
+
+**Workflow at start-of-skill (non-Claude only)**:
+
+1. **Read** `.belmont/features/<slug>/models.yaml`. If absent, skip this preflight (defaults apply).
+2. **Determine the required tier for this skill**:
+   - `implement` → `tiers.implementation`
+   - `verify` → `tiers.verification`
+   - `code-review` (if applicable) → `tiers.code-review`
+   - `debug-manual` → `tiers.implementation` (the fix itself dispatches the implementation agent; spec reconciliation runs in the orchestrator session at the same model on non-Claude CLIs)
+   - others → skip preflight unless the skill specifies its own tier.
+3. **Map the required tier to a model ID for the current CLI** using `tier-registry.md`. Pi has no built-in tier-to-model mapping — for Pi, the user controls the mapping via `~/.belmont/local-llms.json`. If that file is absent, skip the preflight (Pi will use whatever model `~/.pi/agent/models.json` defaults to).
+4. **Compare to the session's current model**:
+   - Codex: run `/model` or check session settings.
+   - Gemini: check `/model`.
+   - Cursor: check `/model`.
+   - Copilot: check `/model`.
+   - Pi: Pi has no in-session model swap. Check the model the session was started with (visible in Pi's TUI footer, or the `--model` flag the user passed when launching `pi`).
+5. **If they diverge**, print this warning block before doing any further work:
+
+   ```
+   ⚠ Model tier mismatch
+   models.yaml says this phase should run at <tier> (<expected-model-id>).
+   Your session is currently on <current-model-id>.
+   To honor the tier, restart with: <cli> --model <expected-model-id>
+   Continuing with the current model. Re-dispatching sub-agents with a
+   different model is not supported on this CLI.
+   ```
+
+   For Pi the restart command takes the form `pi --provider <provider> --model <expected-model-id>`, where `<provider>` matches an entry in the user's `~/.pi/agent/models.json`.
+
+6. **Proceed with the skill**. The warning is informational; it never blocks execution.
+
+**Why this is acceptable graceful degradation**: the user chose this CLI knowing it doesn't support per-agent dispatch. The warning gives them a one-command fix if they want tier adherence; otherwise the work proceeds at the session's model. Only Claude Code supports true per-agent overrides — see `dispatch-strategy.md` Model Tier Overrides for that path.
+
+## Feature Selection (multi-feature capable)
+
+Belmont organizes work into **features** — each feature gets its own directory under `.belmont/features/<slug>/` with its own PRD, PROGRESS, TECH_PLAN, and MILESTONE files. This skill supports debugging across one OR multiple features in the same session.
+
+### Select the Active Feature(s)
+
+1. List all feature directories under `.belmont/features/`.
+2. If no features exist: tell the user to run `/belmont:product-plan` to create their first feature, then stop.
+3. If the user's invocation prose names specific features by slug or by recognisable name, pre-select those features and confirm with the user (`Use features X and Y? [y / change selection]`).
+4. Otherwise, read each feature's `PRD.md` for its name and status, then ask the user which feature(s) the bug touches.
+5. Present a numbered list and ask the user to multi-select:
+
+   ```
+   Which feature(s) is this bug related to?
+
+     1. auth-session-fix  — Persistent session refresh logic
+     2. dashboard-charts  — Revenue trend visualisations
+     3. settings-profile  — User profile edit page
+
+   Reply with:
+     - A single number (e.g. "2") for one feature
+     - Comma-separated numbers (e.g. "1,3") for cross-feature debugging
+     - "all" to include every feature
+   ```
+
+6. Validate the response. Reject invalid selections and re-prompt rather than guessing.
+7. Resolve each selected feature to its base path: `.belmont/features/<selected-slug>/`.
 
 ### Base Path Convention
 
-Once the base path is resolved, use `{base}` as shorthand:
-- `{base}/PRD.md` — the feature PRD
-- `{base}/PROGRESS.md` — the feature progress tracker
-- `{base}/TECH_PLAN.md` — the feature tech plan
-- `{base}/MILESTONE.md` — the active milestone file
-- `{base}/MILESTONE-*.done.md` — archived milestones
-- `{base}/NOTES.md` — learnings and discoveries from previous sessions
+This skill works with a **list of base paths** `{bases[]}` rather than a single `{base}`. When iterating over loaded context, spec reconciliation, or per-feature reporting, walk the list and operate on each base path independently:
 
-**Master files** (always at `.belmont/` root):
+- `{base}/PRD.md` — that feature's PRD
+- `{base}/PROGRESS.md` — that feature's progress tracker
+- `{base}/TECH_PLAN.md` — that feature's tech plan (optional)
+- `{base}/NOTES.md` — that feature's learnings (optional)
+- `{base}/MILESTONE-*.done.md` — that feature's archived milestones
+
+When a step only makes sense for a single feature (e.g. creating the shared DEBUG.md), nominate the **primary feature** — the one the user-described symptom most clearly belongs to, or the first selection if it's a tie. Put DEBUG.md under the primary feature's base path; reference cross-feature context inside it explicitly.
+
+**Master files** (always at `.belmont/` root, shared across features):
 - `.belmont/PR_FAQ.md` — strategic PR/FAQ document
 - `.belmont/PRD.md` — master PRD (feature catalog)
 - `.belmont/PROGRESS.md` — master progress tracking (feature summary table)
 - `.belmont/TECH_PLAN.md` — master tech plan (cross-cutting architecture)
+- `.belmont/NOTES.md` — global learnings
 
-<!-- Canonical milestone-immutability rule. Included by every skill that can modify PROGRESS.md. Do not paraphrase in skill bodies — @include this partial so the rule stays a single source of truth. -->
+### Degenerate cases
 
-## Milestone structure is immutable outside `/belmont:tech-plan`
+- **Single feature selected**: behave exactly like the single-feature `feature-detection.md` partial — `{bases[]}` has one entry; iteration steps still work; UX-wise, drop the "per-feature" framing in user-facing messages.
+- **All features selected** in a project with many features: warn the user that context will be heavy ("you've selected N features — loaded context may exceed local-model limits") and offer to narrow before proceeding.
+- **No features available**: route to `/belmont:product-plan`, same as the single-feature partial.
 
-**You MUST NOT add, remove, rename, re-scope, or re-parent any `## M<N>:` milestone heading in `PROGRESS.md`.** Only `/belmont:tech-plan` may restructure milestones. Every other skill — `implement`, `verify`, `next`, `debug-auto`, `debug-manual`, the triage phase — may only edit tasks **inside** existing milestone headings.
+<!-- Debug-manual scope rules. Replaces the milestone-immutability @include for interactive debug-manual ONLY. Every other skill that touches PROGRESS.md keeps milestone-immutability.md unchanged. -->
 
-This rule supersedes any contradictory guidance you encounter elsewhere. If another instruction seems to permit creating a milestone (for follow-ups, polish, cleanup, verification fixes, etc.), prefer this rule.
+## Spec-edit scope (interactive debug-manual)
 
-### Where follow-ups go
+Interactive `/belmont:debug-manual` is the **only** Belmont skill that may edit spec prose in place. The relaxation is deliberate and bounded:
 
-- **Issue discovered while implementing or verifying milestone `M<N>`** → new `[ ]` task inside `M<N>`, under the same `## M<N>:` heading. Do not route it to an earlier or later milestone "because it fits there better"; the milestone that discovered it owns it.
-- **Issue blocked by work that will land in a later milestone `M<N+k>`** → new `[!]` task inside `M<N>`, with a one-line reason that names `M<N+k>`. Auto surfaces `[!]` tasks as blockers; the task can be reopened as `[ ]` once the blocker lifts.
-- **Cosmetic / nice-to-have item the user may never want** → append to `NOTES.md` under a `## Polish` section, creating the file if needed. These are context, not tasks.
-- **Never a new milestone.** Not "M<last+1>: Polish", not "M<N>-FIX", not "MX: Deviations from M<N>", not "MY: Verification Fixes". Even if the existing `PROGRESS.md` already contains such a milestone from a prior run, that pattern is WRONG — do not add tasks to it and do not create siblings of it.
+- This skill never runs from `belmont auto` (only `/belmont:debug-auto` does — see `cmd/belmont/main.go`'s `actionDebug` wiring). The auto-mode `runScopeGuard` cannot fire against debug-manual edits.
+- A human is in the loop for every edit. Each spec change is presented as a unified diff and gated on explicit `y / N / edit / skip` approval before any write.
+- Edits are atomic with the code fix they correspond to — same commit, so the spec-change rationale lives in `git log` alongside the code change that motivated it.
 
-### Why this rule is non-negotiable
+### What you MAY edit
 
-A polish/follow-up milestone looks tidy on paper but quietly breaks two invariants of the auto loop:
+| File | What you may change |
+|---|---|
+| `{base}/PRD.md` | Acceptance criteria text, `**Solution**:` / `**Verification**:` field text, task descriptions, Overview / Problem Statement prose, Success Criteria, Out of Scope |
+| `{base}/TECH_PLAN.md` | Decision narrative, library choices, file-path references, API shapes — anything where reality has moved past the written record |
+| `.belmont/TECH_PLAN.md` | Cross-cutting decisions that the fix proved wrong or incomplete |
+| `.belmont/PR_FAQ.md` | Only with per-edit explicit approval. PR_FAQ is strategic — flag it for the user before proposing diffs |
+| `.belmont/PRD.md` | Master feature-catalog entries (status text, dependency notes) |
+| `{base}/NOTES.md` | Append a `## Root Cause Patterns` entry (Five-Whys-style, mirroring `references/verify-five-whys.md`'s template) |
+| `{base}/PROGRESS.md` | Flip `[ ]` → `[x]` on follow-up tasks that this fix completed, **scoped to the current or last-shipped milestone of the feature being debugged**. Never `[v]` (that's `/belmont:verify`'s job). Never touch sibling-milestone tasks. |
 
-1. **Dependency graph lies.** A milestone labelled "polish M<N>" typically declares `(depends: M<N>)`. That makes it a sibling of every other `M<N+i>` that depends on `M<N>`. But its *real* dependency is that every later milestone's outputs are frozen — because the polish milestone edits the very files those later milestones imported from `M<N>`. Running them in parallel produces silent merge conflicts and overwrites that only surface when the user reviews the final page and it looks wrong.
-2. **Auto loop grows without bound.** Every verify pass can discover follow-ups. If those follow-ups become a new milestone instead of new tasks in the current one, a 5-milestone feature can turn into 9 milestones mid-run, each re-triggering its own verify-fix-reverify cycle, compounding scope drift with every iteration.
+### What you MUST NOT do
 
-Follow-ups inside the source milestone avoid both: the milestone doesn't complete until its own issues are resolved, no sibling is spawned to race it, and the loop's length is bounded by the tech-plan's original milestone count.
+- **No new milestones using polish/follow-up/cleanup/FWLUP/"deviations from"/"verification fixes" naming patterns.** `belmont validate` will reject these on the next auto run and block startup. This anti-pattern stays banned (see `knowledge/cross-cutting/milestone-immutability.md` for the cascade it caused).
+- **No new `[ ]` follow-up tasks for unfixed drift.** If drift is real, fix it in place this session. If it's out of scope, log it in DEBUG.md's `## Spec Reconciliation Log` and surface in the final report — don't park it for `/belmont:implement` to find later.
+- **No silent edits to other features' specs.** In multi-feature mode you got explicit approval to load multiple features; reconciliation still happens per-feature with separate approval gates.
+- **No restructuring**: no renaming milestone headings, no adding milestone headings of any kind, no removing milestones, no reordering tasks across milestones. Structural changes route through `/belmont:tech-plan`.
+- **No flipping a task to `[v]`.** Only `/belmont:verify` may mark verified. If the fix completed a follow-up, `[x]` is correct; verify will promote it later.
+
+### Commit attribution rule
+
+When you flip a task `[ ]` → `[x]` in PROGRESS.md, the commit message body MUST mention the task ID (e.g. `P1-M3-2`). The auto-loop's `runEvidenceCheck` walks branch commits looking for task-ID attribution before allowing a later `[v]` flip; missing IDs cause silent reverts on the next verify pass.
 
 ### If you find a pre-existing bad milestone
 
-If `PROGRESS.md` already contains a milestone whose name or description matches the forbidden patterns (polish, follow-ups, cleanup, verification fixes, deviations from M<N>, etc.), do the following:
+If PROGRESS.md already contains a milestone whose name matches the forbidden patterns above (e.g. a legacy "M5: Polish" from a pre-rule run):
 
-- Do NOT add new tasks to it.
-- Do NOT create new milestones that depend on it or reference its tasks.
-- Surface the issue in your summary/report to the user, suggesting `belmont validate` and `/belmont:tech-plan` to restructure.
+- Do NOT add tasks to it.
+- Do NOT depend on it from any edit you make.
+- Surface the issue in your end-of-session report and suggest `belmont validate` + `/belmont:tech-plan` to restructure.
 
-Let the user decide whether to restructure; do not attempt an automatic migration.
+This matches the behaviour of every other skill — debug-manual's edit relaxation does not extend to legitimising bad milestone structures left behind by prior runs.
 
-## Step 0: Understand the Problem
+## Step 0: Load Belmont Context
 
-1. If the user provided a description with the skill invocation, use it as the problem statement
-2. If the description is vague or missing, ask **one** clarifying question — keep it focused:
-   - What's the expected behavior?
-   - What's the actual behavior?
+Before asking the user a single follow-up question, load the spec context. Read these files in order, treating every read as optional — skip silently if the file is absent and record `skipped: not present` in the context-load summary.
+
+**Master files** (always at `.belmont/`):
+
+1. `.belmont/PR_FAQ.md` — strategic vision. If file > 500 lines, ask the user `PR_FAQ.md is <N> lines — load anyway? [y/N]`. Default no on large files.
+2. `.belmont/PRD.md` — master feature catalog.
+3. `.belmont/TECH_PLAN.md` — master cross-cutting architecture.
+4. `.belmont/NOTES.md` — global learnings from prior sessions.
+
+**Per-feature files** — for EACH base in `{bases[]}`:
+
+5. `{base}/PRD.md`
+6. `{base}/TECH_PLAN.md`
+7. `{base}/PROGRESS.md`
+8. `{base}/NOTES.md`
+9. Latest `{base}/MILESTONE-M*.done.md` — numeric-sorted by milestone ID, take the highest (most recently shipped). Skip if > 500 lines; tell the user and offer to load if they want it.
+
+After all reads, emit a single **Context-load summary** block:
+
+```
+Context loaded
+  Master:
+    .belmont/PR_FAQ.md      <N lines>   | skipped: not present
+    .belmont/PRD.md         <N lines>
+    .belmont/TECH_PLAN.md   <N lines>
+    .belmont/NOTES.md       <N lines>   | skipped: not present
+  Features:
+    <slug-1>:
+      PRD.md, TECH_PLAN.md, PROGRESS.md, NOTES.md, MILESTONE-M<X>.done.md
+    <slug-2>: ...
+  Total: <N> files, ~<KB> KB
+```
+
+**Graceful degradation for local LLMs**: if the total loaded context exceeds ~50 KB and the session is running on Pi or another local-LLM CLI, surface a warning and ask the user to narrow to a single feature before proceeding:
+
+```
+⚠ Loaded context is ~<KB> KB. Local LLMs may truncate or degrade on this size.
+Recommended: re-run this skill and select a single feature. Continue anyway? [y/N]
+```
+
+## Step 1: Understand the Problem
+
+1. If the user provided a description with the skill invocation, use it as the problem statement.
+2. If the description is vague or missing, ask **one** focused clarifying question:
+   - What's the expected behaviour?
+   - What's the actual behaviour?
    - How do you reproduce it?
-3. Read `{base}/NOTES.md` and `.belmont/NOTES.md` (if they exist) briefly for context from previous sessions
-4. Check `{base}/PRD.md` briefly for Figma URLs (needed to decide whether to dispatch design-agent)
-5. Write a single-sentence **problem statement** before proceeding
+3. Reference the context you loaded — does the bug map cleanly to a task in any loaded PRD? Note the task ID(s) for later.
+4. Write a single-sentence **problem statement** before proceeding.
 
-## Step 1: Create DEBUG.md
+## Step 2: Create DEBUG.md
 
-Create `{base}/DEBUG.md` with the following structure:
+Create `{primary_base}/DEBUG.md` (the primary feature is the first slug in `{bases[]}` — see `feature-detection-multi.md`):
 
 ```markdown
 # Debug: [Problem Statement]
 
 ## Status
 - **Mode**: Debug (Manual)
-- **Feature Base**: {base}
+- **Primary feature**: <slug>
+- **Additional features**: <slug, slug> | None
 - **Iteration**: 1/3
 
 ## Problem
-[Full description — expected behavior, actual behavior, reproduction steps]
+[Full description — expected behaviour, actual behaviour, reproduction steps]
 
 ## Context
-- **Feature**: [name from PRD]
+- **Feature(s)**: <names from PRDs>
 - **Figma URLs**: [if any, otherwise "None"]
-- **Related Follow-up**: [if this relates to a follow-up task, otherwise "None"]
+- **Related task IDs**: [from Step 1 reference, otherwise "None"]
+
+## Context Loaded
+[Paste the Step 0 context-load summary block here verbatim]
 
 ### Learnings from Previous Sessions
-[From NOTES.md files, or "No previous learnings found."]
+[From master NOTES.md + per-feature NOTES.md, or "No previous learnings found."]
 
 ### Scope Boundaries
 - **In Scope**: Fix the reported bug only
-- **Out of Scope**: [from PRD's Out of Scope section]
+- **Out of Scope**: [from PRD's Out of Scope section(s)]
 
 ## Design Specifications
 [Written by design-agent if dispatched, otherwise "Not applicable"]
@@ -124,6 +251,9 @@ Create `{base}/DEBUG.md` with the following structure:
 
 ## User Feedback
 [Collected by orchestrator from user after each iteration]
+
+## Spec Reconciliation Log
+[Written by orchestrator during the Spec Reconciliation phase]
 ```
 
 **IMPORTANT**: DEBUG.md is the single shared context file between you and the agents. Agents read it for problem context and write to their designated sections. Include enough context for agents to work independently.
@@ -242,9 +372,9 @@ Append this block to the end of each sub-agent's prompt, after the standard prom
 7. **DO** include the full sub-agent preamble (identity + mandatory agent file) in every sub-agent prompt
 8. **DO** forward any user-provided context to every sub-agent (see "User Context Forwarding" above)
 
-## Step 2: Run the Debug Loop
+## Step 3: Run the Debug Loop
 
-For each iteration (max 3), dispatch the implementation agent, then ask the user to verify. Each agent reads `{base}/DEBUG.md` and writes to its designated section.
+For each iteration (max 3), dispatch the implementation agent, then ask the user to verify. Each agent reads `{primary_base}/DEBUG.md` and writes to its designated section.
 
 Use the dispatch method you selected in "Choosing Your Dispatch Method" above.
 
@@ -282,14 +412,14 @@ Use the dispatch method you selected in "Choosing Your Dispatch Method" above.
 >
 > **DEBUG MODE OVERRIDE**: You are operating in debug mode, not milestone mode.
 >
-> Read `{base}/DEBUG.md` instead of a MILESTONE file. It contains the problem description, context, design specifications (if applicable), and iteration history from previous attempts.
+> Read `{primary_base}/DEBUG.md` instead of a MILESTONE file. It contains the problem description, context, design specifications (if applicable), and iteration history from previous attempts.
 >
 > Your goal: investigate the bug described in the `## Problem` section and implement a **minimal fix**. You are NOT implementing milestone tasks — you are fixing a specific bug.
 >
 > **Debug-specific rules**:
 > - Do NOT commit — the orchestrator handles commits after verification
-> - Do NOT update PRD.md or PROGRESS.md — the orchestrator handles tracking
-> - Do NOT create follow-up tasks — just fix the bug
+> - Focus your fix on code; the orchestrator will reconcile specs (PRD, TECH_PLAN, NOTES, PROGRESS) in the Spec Reconciliation phase after the user confirms the fix. Do NOT touch spec files yourself.
+> - Do NOT create follow-up tasks — just fix the bug; the orchestrator handles tracking
 > - Keep changes minimal — touch the fewest files possible
 > - Check the `## Iteration History` section for what was already tried (avoid repeating failed approaches)
 >
@@ -300,7 +430,7 @@ Use the dispatch method you selected in "Choosing Your Dispatch Method" above.
 > - Place logs to help the user trace the bug: before/after the suspected problem area, at data flow boundaries, and around conditional branches
 > - Do NOT add logs that would produce excessive output (e.g., inside tight loops with thousands of iterations)
 >
-> Write your investigation findings and changes to the `## Investigation & Fix Log` section of `{base}/DEBUG.md`. Include:
+> Write your investigation findings and changes to the `## Investigation & Fix Log` section of `{primary_base}/DEBUG.md`. Include:
 > - What you investigated
 > - Your hypothesis
 > - What files you changed and why
@@ -322,7 +452,7 @@ Use the dispatch method you selected in "Choosing Your Dispatch Method" above.
 
 **Do NOT dispatch a verification agent.** Instead, you verify with the user directly.
 
-1. **Read** the `## Investigation & Fix Log` from `{base}/DEBUG.md`
+1. **Read** the `## Investigation & Fix Log` from `{primary_base}/DEBUG.md`
 2. **Present a summary** to the user:
 
 ```
@@ -343,7 +473,7 @@ Please test the fix. If debug logs are relevant, check your console/output for l
    - User says no change → **NO_CHANGE**
    - User says it got worse or something else broke → **REGRESSION**
 
-5. **Write** the user's feedback and the mapped outcome to the `## User Feedback` section of `{base}/DEBUG.md`:
+5. **Write** the user's feedback and the mapped outcome to the `## User Feedback` section of `{primary_base}/DEBUG.md`:
    ```
    ### Iteration [N]
    **Outcome**: [FIXED | PARTIAL | NO_CHANGE | REGRESSION]
@@ -353,21 +483,21 @@ Please test the fix. If debug logs are relevant, check your console/output for l
 
 ---
 
-## Step 3: Assess Outcome
+## Step 4: Assess Outcome
 
 Use the outcome determined in Phase 3 above.
 
 ### On FIXED
 
-1. Proceed to Step 4 (Commit and Report)
+1. Proceed to **Spec Reconciliation** (below) — do NOT commit yet.
 
 ### On REGRESSION
 
 1. **Revert immediately**: `git checkout -- [changed files]` (read the Investigation & Fix Log for the list of changed files)
 2. Update `## Iteration History` in DEBUG.md with what was tried and that it caused a regression
 3. Clear the `## Investigation & Fix Log` section
-4. If iteration < 3, loop back to Step 2 (Phase 2 + Phase 3 only)
-5. If iteration = 3, proceed to Step 5 (Escalate)
+4. If iteration < 3, loop back to Step 3 (Phase 2 + Phase 3 only)
+5. If iteration = 3, proceed to **Escalate** (Step 5 from the included partial below)
 
 ### On PARTIAL or NO_CHANGE
 
@@ -375,7 +505,7 @@ Use the outcome determined in Phase 3 above.
 2. Clear the `## Investigation & Fix Log` section
 3. Increment the iteration counter in `## Status`
 4. If iteration = 2, proceed to **User Checkpoint** below
-5. If iteration < 2, loop back to Step 2 (Phase 2 + Phase 3 only)
+5. If iteration < 2, loop back to Step 3 (Phase 2 + Phase 3 only)
 
 ### User Checkpoint (after iteration 2)
 
@@ -394,17 +524,41 @@ Next hypothesis: [what to try next]
 ```
 
 Ask the user: **continue with iteration 3, stop here, or redirect?**
-- If continue → loop back to Step 2 for iteration 3
-- If stop → proceed to Step 6 (Cleanup)
-- If redirect → proceed to Step 6 (Cleanup), then suggest `/belmont:implement`
+- If continue → loop back to Step 3 for iteration 3
+- If stop → proceed to **Cleanup** (Step 6 from the included partial below)
+- If redirect → proceed to **Cleanup**, then suggest `/belmont:implement`
 
 ### After iteration 3 (still not fixed)
 
-Proceed to Step 5 (Escalate).
+Proceed to **Escalate** (Step 5 from the included partial below).
 
-## Step 4: Commit and Report
+## Spec Reconciliation
 
-Only reach this step when the fix is confirmed FIXED.
+**Only reach this step when the fix is confirmed FIXED.** Do not commit yet — code + spec edits commit atomically in the Commit and Report step below.
+
+Read `references/debug-manual-spec-reconcile.md` and follow it end-to-end. In summary:
+
+1. Walk the drift catalogue across every loaded spec file (master + per-feature).
+2. For each candidate edit, present a unified diff and a `y / N / edit / skip` prompt.
+3. Apply approved edits in place. Stage them for the upcoming commit (do NOT commit individually).
+4. Append a Five-Whys-style `## Root Cause Patterns` entry to `{base}/NOTES.md` for the feature whose bug this was.
+5. Log every candidate (applied, rejected, skipped) to DEBUG.md's `## Spec Reconciliation Log` section.
+6. If no drift was found, log `No drift detected — code-only fix.` and continue.
+
+In multi-feature mode, iterate per feature — get per-feature confirmation before walking that feature's drift.
+
+### Hard limits during reconciliation
+
+Restated from `debug-scope-rules.md`:
+
+- No new milestone headings. No renames. No removals. Use polish/follow-up/cleanup naming and `belmont validate` will reject on next auto run.
+- No new `[ ]` follow-up tasks for unfixed drift — fix it or skip it; never park work for `/belmont:implement` to find later.
+- No `[v]` flips. Use `[x]` only, scoped to the current or last-shipped milestone.
+- No edits to features not in `{bases[]}`.
+
+## Commit and Report
+
+Reach this step after Spec Reconciliation finishes (with zero or more spec edits applied).
 
 1. **Clean up debug logs** before committing:
    - Search the entire codebase for `[BELMONT-DEBUG]`: `grep -rn "BELMONT-DEBUG" .`
@@ -413,35 +567,47 @@ Only reach this step when the fix is confirmed FIXED.
    - Run the search again to verify zero results: `grep -rn "BELMONT-DEBUG" .`
    - If any remain, remove them and re-verify
 
-2. **Ask the user to confirm** the fix (with debug logs removed) looks correct before committing
+2. **Ask the user to confirm** the fix (with debug logs removed) looks correct before committing.
 
-3. **Commit with debug prefix**:
+3. **Single atomic commit** — stage code AND spec edits together:
    ```bash
-   git add [specific changed files]
-   git commit -m "debug: [brief description of fix]"
+   git add <code files> <spec files>
+   git commit -m "$(cat <<'EOF'
+   debug: <one-line fix description>[ + spec sync]
+
+   Iterations: <N>
+   Code files: <list>
+   Spec files: <list>
+   Task IDs flipped to [x]: <list, or "none">
+   Drift categories addressed: <list, or "none">
+   EOF
+   )"
    ```
+   - Subject ends with ` + spec sync` ONLY if Step 5 applied at least one spec edit.
+   - Multi-line body MUST include any task ID flipped `[x]` (so `runEvidenceCheck` finds attribution on a future verify pass).
+   - Use the user's preferred commit-message style if they set one in CLAUDE.md (no co-author lines unless explicitly asked).
 
 4. **Report summary**:
 
 ```
 Debug Fix Complete
 ==================
-Problem:  [original problem statement]
-Fix:      [what was changed]
-Files:    [list of changed files]
-Commit:   [short hash] — debug: [message]
+Problem:       [original problem statement]
+Fix:           [what was changed]
+Code files:    [list]
+Spec edits:    [N applied, N rejected, N skipped]
+Spec files:    [list, or "none"]
+Commit:        [short hash] — debug: [message]
 
-Iterations: [N]
-Debug logs: cleaned up ([N] log points removed)
+Iterations:    [N]
+Debug logs:    cleaned up ([N] log points removed)
 ```
 
-### Optional: Update Planning Files
+### Optional: relay drift findings to the user
 
-If this fix relates to a follow-up task in PROGRESS.md:
-- Ask the user if they want to mark it complete
-- If yes, mark the task as `[x]` in `{base}/PROGRESS.md`
+If you skipped any drift candidates during Spec Reconciliation, list them in the report so the user knows what's still open. Do NOT create follow-up tasks for them — the user explicitly opted into a "fix it now or skip it" model.
 
-Proceed to Step 6 (Cleanup).
+Proceed to **Cleanup** (Step 6 from the included partial below).
 
 ## Step 5: Escalate
 

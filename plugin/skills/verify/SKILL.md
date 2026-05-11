@@ -209,6 +209,7 @@ Non-Claude CLIs (Codex, Gemini, Cursor, Copilot, Pi) run the entire skill in a s
    - `implement` → `tiers.implementation`
    - `verify` → `tiers.verification`
    - `code-review` (if applicable) → `tiers.code-review`
+   - `debug-manual` → `tiers.implementation` (the fix itself dispatches the implementation agent; spec reconciliation runs in the orchestrator session at the same model on non-Claude CLIs)
    - others → skip preflight unless the skill specifies its own tier.
 3. **Map the required tier to a model ID for the current CLI** using `tier-registry.md`. Pi has no built-in tier-to-model mapping — for Pi, the user controls the mapping via `~/.belmont/local-llms.json`. If that file is absent, skip the preflight (Pi will use whatever model `~/.pi/agent/models.json` defaults to).
 4. **Compare to the session's current model**:
