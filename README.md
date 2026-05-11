@@ -2,7 +2,7 @@
 
 A toolkit for running structured coding sessions with AI coding agents. Belmont manages a PRD (Product Requirements Document), orchestrates specialized sub-agent phases, and tracks progress across milestones.
 
-**Agent-agnostic** -- works with Claude Code, Codex, Cursor, Windsurf, Gemini, GitHub Copilot, and any tool that can read markdown files. No Docker required. No loops. Just skills and agents.
+**Agent-agnostic** -- works with Claude Code, Codex, Cursor, Windsurf, Gemini, GitHub Copilot, [Pi](https://pi.dev) (incl. local LLMs via LM Studio / Ollama), and any tool that can read markdown files. No Docker required. No loops. Just skills and agents.
 
 A flexible PRD system has been used to provide the best level of context from plan to implementation. Tech plans allow you to specify specifics for the agent to follow while building.
 
@@ -18,7 +18,7 @@ Strong guardrails are in place to keep the agent focused and on task.
 
 ### All AI Tools (CLI)
 
-The CLI installer supports Claude Code, Codex, Cursor, Windsurf, Gemini, and GitHub Copilot:
+The CLI installer supports Claude Code, Codex, Cursor, Windsurf, Gemini, GitHub Copilot, and Pi:
 
 ```bash
 # Install via Homebrew (macOS / Linux)
@@ -331,17 +331,18 @@ See [Skills Reference](docs/skills-reference.md) for detailed descriptions of ea
 
 ## Supported Tools
 
-| Tool               | How Skills Are Wired                                                  | How to Use                                          |
-|--------------------|-----------------------------------------------------------------------|-----------------------------------------------------|
-| **Claude Code**    | `.claude/agents/belmont` symlink + per-skill symlinks `.claude/commands/belmont/<skill>.md` → `.agents/skills/belmont/<skill>/SKILL.md` | `/belmont:product-plan`, `/belmont:implement`, etc. |
-| **Codex**          | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
-| **Cursor**         | None — `.agents/skills/` auto-discovered (Cursor Skills)              | `belmont:implement` in prompt                       |
-| **Windsurf**       | None — `.agents/skills/` auto-discovered (Cascade Skills)             | `belmont:implement` in prompt                       |
-| **Gemini**         | None — `.agents/skills/` is the documented `.gemini/skills/` alias    | `belmont:implement` in prompt                       |
-| **GitHub Copilot** | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
-| **Any other tool** | None — point your tool at `.agents/skills/belmont/<skill>/SKILL.md`   |                                                     |
+| Tool                  | How Skills Are Wired                                                  | How to Use                                          |
+|-----------------------|-----------------------------------------------------------------------|-----------------------------------------------------|
+| **Claude Code**       | `.claude/agents/belmont` symlink + per-skill symlinks `.claude/commands/belmont/<skill>.md` → `.agents/skills/belmont/<skill>/SKILL.md` | `/belmont:product-plan`, `/belmont:implement`, etc. |
+| **Codex**             | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
+| **Cursor**            | None — `.agents/skills/` auto-discovered (Cursor Skills)              | `belmont:implement` in prompt                       |
+| **Windsurf**          | None — `.agents/skills/` auto-discovered (Cascade Skills)             | `belmont:implement` in prompt                       |
+| **Gemini**            | None — `.agents/skills/` is the documented `.gemini/skills/` alias    | `belmont:implement` in prompt                       |
+| **GitHub Copilot**    | None — `.agents/skills/` auto-discovered                              | `belmont:implement` in prompt                       |
+| **Pi** (incl. local LLMs) | None — `.agents/skills/` auto-discovered (agentskills.io)         | `belmont:implement` in prompt; configure provider/model in `~/.belmont/local-llms.json` |
+| **Any other tool**    | None — point your tool at `.agents/skills/belmont/<skill>/SKILL.md`   |                                                     |
 
-Skills are installed as agentskills.io-format folders (`<skill>/SKILL.md`), the open standard supported by Codex, Cursor, Gemini, Windsurf, GitHub Copilot, Claude Code, and a growing number of other AI tools.
+Skills are installed as agentskills.io-format folders (`<skill>/SKILL.md`), the open standard supported by Codex, Cursor, Gemini, Windsurf, GitHub Copilot, Claude Code, Pi, and a growing number of other AI tools.
 
 See [Supported Tools](docs/supported-tools.md) for detailed per-tool setup instructions.
 

@@ -39,7 +39,7 @@ And [additional assertions]
 
 ## Target Workspace(s) [optional, monorepos only]
 [If `belmont status` reports a `Monorepo:` line, list the workspace(s) this feature operates in by ID and path — e.g.
-- `web` (`packages/studia-web`) — primary
+- `web` (`packages/web`) — primary
 - `api` (`apps/api`)
 Tasks can additionally use `[WEB]` / `[API]` prefixes (e.g. `[WEB] Render the new shell`) so implementation agents know which workspace each task targets. Omit this section entirely for single-package projects.]
 

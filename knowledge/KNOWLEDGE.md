@@ -30,6 +30,7 @@ Curated operational knowledge for working on Belmont itself. Scan the table belo
 | [cross-cutting/port-isolation.md](cross-cutting/port-isolation.md) | cli, skills, agents | touch `buildWorktreeEnv`, `worktree-awareness.md`, or any agent logic that starts a server or probes a URL |
 | [cross-cutting/steering.md](cross-cutting/steering.md) | cli, skills, auto-mode | change `belmont steer`, `consumePendingSteering`, STEERING.md lifecycle, or have another guard inject its own correction |
 | [cross-cutting/skill-format.md](cross-cutting/skill-format.md) | cli, skills, agents | touch `generate-skills.sh`, the SKILL.md frontmatter shape, per-tool install wiring, `syncSkillsFolderDir`, `runLegacyCleanup`, or add support for a new AI CLI |
+| [cross-cutting/dual-invocation-paths.md](cross-cutting/dual-invocation-paths.md) | cli, skills, agents, auto-mode | plan or change anything that touches tool integration, skill content, sub-agent dispatch, model-tier handling, or the on-disk surface — both auto mode and interactive mode must be addressed |
 | [cross-cutting/monorepo-workspaces.md](cross-cutting/monorepo-workspaces.md) | cli, skills, agents | touch `detectWorkspaces` / `resolveWorkspaces` / `seedWorkspaceEnv` / `monorepoEnvVars`, modify `worktreeHooks.Workspaces`, or change how skills/agents read the BELMONT_MONOREPO* env vars |
 
 ### Meta

@@ -68,12 +68,20 @@ var modelTiers = map[string]map[string]string{
 }
 
 // toolSupportsModel indicates whether the tool's CLI accepts --model at all.
+//
+// Pi is `true` so the model-flag dispatch fires, but Pi is deliberately absent
+// from `modelTiers` — Pi runs against user-provided local models whose IDs
+// Belmont cannot know in advance. resolveModelFlags special-cases Pi to read
+// from `~/.belmont/local-llms.json` (with project + env-var overrides). When
+// nothing in that chain produces a value Belmont passes no flags and Pi falls
+// back to the default model in its own `~/.pi/agent/models.json`.
 var toolSupportsModel = map[string]bool{
 	"claude":  true,
 	"codex":   true,
 	"gemini":  true,
 	"cursor":  true,
 	"copilot": true,
+	"pi":      true,
 }
 
 // planningTier is always used for product-plan and tech-plan invocations.
@@ -85,13 +93,22 @@ const planningTier = "high"
 // reconciliationDefaultTier is used when no models.yaml is present.
 const reconciliationDefaultTier = "high"
 
-// resolveModelFlags returns the --model <id> flag pair for the given
-// tool+tier, or nil if the tool doesn't support model selection or the
-// tier is unknown/empty. For copilot with no tier, returns --model auto
-// (copilot's explicit "pick a sensible model" token).
-func resolveModelFlags(tool, tier string) []string {
+// resolveModelFlags returns the --model <id> flag pair (and for Pi, the
+// preceding --provider <name>) for the given tool+tier, or nil if the tool
+// doesn't support model selection or the tier is unknown/empty. For copilot
+// with no tier, returns --model auto (copilot's explicit "pick a sensible
+// model" token).
+//
+// projectRoot is consulted only for Pi — see resolvePiModelFlags for the
+// resolution chain (env vars > .belmont/local-llms.json > ~/.belmont/local-llms.json
+// > nil). Pass "" if no project context is available; Pi will still honour
+// env vars and the user-level config file.
+func resolveModelFlags(tool, tier, projectRoot string) []string {
 	if !toolSupportsModel[tool] {
 		return nil
+	}
+	if tool == "pi" {
+		return resolvePiModelFlags(projectRoot, tier)
 	}
 	if tier == "" {
 		if tool == "copilot" {
@@ -1645,11 +1662,11 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  belmont install [--source PATH] [--project PATH] [--tools all|none|claude,codex,...]")
 	fmt.Fprintln(w, "  belmont update [--check] [--force] [--no-commit]")
 	fmt.Fprintln(w, "  belmont status [--root PATH] [--feature SLUG] [--format text|json] [--color auto|always|never]")
-	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--allow-dirty] [--root PATH]")
+	fmt.Fprintln(w, "  belmont auto --feature SLUG [--from M1] [--to M5] [--tool claude|codex|gemini|copilot|cursor|pi] [--policy autonomous|milestone|every_action] [--max-iterations N] [--max-parallel N] [--allow-dirty] [--root PATH]")
 	fmt.Fprintln(w, "    (alias: belmont loop)")
 	fmt.Fprintln(w, "  belmont reverify [--feature SLUG] [--from M1] [--to M5] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont sync [--root PATH]")
-	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--tool claude|codex|gemini|copilot|cursor] [--root PATH] [--format text|json]")
+	fmt.Fprintln(w, "  belmont recover [--list] [--merge SLUG] [--clean SLUG] [--clean-all] [--tool claude|codex|gemini|copilot|cursor|pi] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont steer [--feature SLUG] [--milestone M5] [--message \"text\" | --file PATH | -] [--root PATH]")
 	fmt.Fprintln(w, "  belmont validate [--feature SLUG] [--root PATH] [--format text|json]")
 	fmt.Fprintln(w, "  belmont version")
@@ -3114,6 +3131,7 @@ var toolConfigs = []toolConfig{
 	{Name: "windsurf", Label: "Windsurf (.windsurf/)"},
 	{Name: "gemini", Label: "Gemini (.gemini/)"},
 	{Name: "copilot", Label: "GitHub Copilot (.copilot/)"},
+	{Name: "pi", Label: "Pi (.pi/)"},
 }
 
 func runInstall(args []string) error {
@@ -3586,7 +3604,7 @@ func resolveTools(projectRoot, toolsFlag string, noPrompt bool) ([]string, error
 //     installed for that tool here — needed because Phase 1+ installs no
 //     longer create `.codex/`, `.gemini/`, or `.copilot/` marker dirs.
 func detectTools(projectRoot string) []string {
-	tools := []string{"claude", "codex", "cursor", "windsurf", "gemini", "copilot"}
+	tools := []string{"claude", "codex", "cursor", "windsurf", "gemini", "copilot", "pi"}
 	dirMarker := map[string]string{
 		"claude":   ".claude",
 		"codex":    ".codex",
@@ -3594,6 +3612,7 @@ func detectTools(projectRoot string) []string {
 		"windsurf": ".windsurf",
 		"gemini":   ".gemini",
 		"copilot":  ".copilot",
+		"pi":       ".pi",
 	}
 	hasAgentsBelmontSection := fileContainsMarker(filepath.Join(projectRoot, "AGENTS.md"), belmontAgentsSectionStart)
 	hasGeminiBelmontSection := fileContainsMarker(filepath.Join(projectRoot, "GEMINI.md"), belmontGeminiSectionStart)
@@ -4030,6 +4049,9 @@ func setupTool(projectRoot, tool string) error {
 		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
 	case "cursor":
 		fmt.Println("Linking Cursor...")
+		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
+	case "pi":
+		fmt.Println("Linking Pi...")
 		fmt.Println("  = .agents/skills/belmont auto-discovered (no symlink needed)")
 	}
 	return nil
@@ -4939,7 +4961,7 @@ func runAutoCmd(args []string) error {
 	fs.BoolVar(&allFlag, "all", false, "run all pending features in parallel")
 	fs.StringVar(&cfg.From, "from", "", "start milestone (e.g. M1)")
 	fs.StringVar(&cfg.To, "to", "", "end milestone (e.g. M5)")
-	fs.StringVar(&cfg.Tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor)")
+	fs.StringVar(&cfg.Tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor|pi)")
 	fs.StringVar(&policyStr, "policy", "autonomous", "checkpoint policy (autonomous|milestone|every_action)")
 	fs.IntVar(&cfg.MaxIterations, "max-iterations", 50, "maximum loop iterations")
 	fs.IntVar(&cfg.MaxFailures, "max-failures", 3, "consecutive failures before stopping")
@@ -4984,16 +5006,16 @@ func runAutoCmd(args []string) error {
 	if cfg.Tool == "" {
 		detected := detectTool()
 		if detected == "" {
-			return fmt.Errorf("auto: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+			return fmt.Errorf("auto: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor, pi\nInstall one or use --tool to specify")
 		}
 		cfg.Tool = detected
 	} else {
 		// Validate tool name
 		switch cfg.Tool {
-		case "claude", "codex", "gemini", "copilot", "cursor":
+		case "claude", "codex", "gemini", "copilot", "cursor", "pi":
 			// ok
 		default:
-			return fmt.Errorf("auto: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", cfg.Tool)
+			return fmt.Errorf("auto: unsupported tool %q (use claude, codex, gemini, copilot, cursor, or pi)", cfg.Tool)
 		}
 	}
 
@@ -5907,7 +5929,7 @@ func mergeFeatureBranch(cfg loopConfig, slug, branch, wtPath string, tracker *wo
 }
 
 func detectTool() string {
-	for _, tool := range []string{"claude", "codex", "gemini", "copilot", "cursor"} {
+	for _, tool := range []string{"claude", "codex", "gemini", "copilot", "cursor", "windsurf", "pi"} {
 		if _, err := exec.LookPath(toolBinary(tool)); err == nil {
 			return tool
 		}
@@ -6453,7 +6475,7 @@ func describeMilestone(action *loopAction, report statusReport) string {
 }
 
 func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
-	prompt := buildLoopPrompt(action, cfg.Feature)
+	prompt := adaptPromptForTool(buildLoopPrompt(action, cfg.Feature), cfg.Tool)
 
 	// Snapshot PROGRESS.md before the agent runs — the post-phase scope guard
 	// uses this baseline to revert out-of-scope milestone structure changes.
@@ -6480,7 +6502,7 @@ func executeLoopAction(action loopAction, cfg loopConfig) executionResult {
 		prompt = steeringBlock + prompt
 	}
 
-	modelFlags := resolveModelFlags(cfg.Tool, tierForAction(action.Type, cfg.ModelTiers))
+	modelFlags := resolveModelFlags(cfg.Tool, tierForAction(action.Type, cfg.ModelTiers), cfg.Root)
 
 	args := toolHeadlessArgs(cfg.Tool, prompt, cfg.Root, modelFlags, true)
 	if args == nil {
@@ -6620,7 +6642,7 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 		prompt = steeringPrefix + prompt
 	}
 
-	triageFlags := resolveModelFlags(cfg.Tool, tierForAction(actionTriage, cfg.ModelTiers))
+	triageFlags := resolveModelFlags(cfg.Tool, tierForAction(actionTriage, cfg.ModelTiers), cfg.Root)
 	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, triageFlags...)
 
 	// Worktree isolation: inject env vars and set process group
@@ -6706,6 +6728,46 @@ Output JSON: {"decision":"defer_and_proceed|fix_and_proceed|fix_and_reverify","b
 		Output:     tw.String(),
 		DurationMs: durationMs,
 	}
+}
+
+// adaptPromptForTool rewrites Belmont's slash-command-style auto-mode
+// prompts ("/belmont:<skill> --feature X") into a tool-native form when the
+// target tool doesn't activate skills via slash syntax.
+//
+// Claude Code accepts "/belmont:<skill>" verbatim because Belmont installs
+// per-skill slash commands at .claude/commands/belmont/<skill>.md.
+//
+// Pi uses "/" for its own command palette — "/belmont:X" lands as literal
+// text. Pi activates skills via natural-language description match (the
+// agentskills.io standard). We rewrite to an explicit "run the X skill;
+// read its SKILL.md and follow it" form so a local Qwen-class model has
+// concrete instructions even if its description-matching pass is weaker
+// than a frontier model's.
+//
+// Codex / Gemini / Cursor / Copilot are left unchanged — they recognise
+// "/belmont:<skill>" as a skill reference today. Revisit per-tool if any
+// of them changes behaviour.
+func adaptPromptForTool(prompt, tool string) string {
+	if tool != "pi" {
+		return prompt
+	}
+	re := regexp.MustCompile(`^/belmont:([\w-]+)(?:\s+--feature\s+(\S+))?`)
+	return re.ReplaceAllStringFunc(prompt, func(match string) string {
+		groups := re.FindStringSubmatch(match)
+		skill := groups[1]
+		feature := ""
+		if len(groups) > 2 {
+			feature = groups[2]
+		}
+		if feature == "" {
+			return fmt.Sprintf(
+				"Run the belmont:%s skill. Read .agents/skills/belmont/%s/SKILL.md fully and follow the instructions in its body to completion.",
+				skill, skill)
+		}
+		return fmt.Sprintf(
+			"Run the belmont:%s skill against feature %q. Read .agents/skills/belmont/%s/SKILL.md fully and follow the instructions in its body to completion. Project state for this feature lives at .belmont/features/%s/ (PRD.md, TECH_PLAN.md, PROGRESS.md).",
+			skill, feature, skill, feature)
+	})
 }
 
 func buildLoopPrompt(action loopAction, feature string) string {
@@ -7409,7 +7471,7 @@ Respond with ONLY valid JSON: {"action":"...","reason":"...","milestone_id":"...
 	}
 
 	// AI decision calls are short classification tasks — use the low tier.
-	decisionFlags := resolveModelFlags(cfg.Tool, "low")
+	decisionFlags := resolveModelFlags(cfg.Tool, "low", cfg.Root)
 	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, decisionFlags...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -7496,6 +7558,16 @@ func toolHeadlessArgs(tool, prompt, root string, modelFlags []string, streaming 
 		args := []string{"-p", "--force", "--output-format", "json"}
 		args = append(args, modelFlags...)
 		return append(args, prompt)
+	case "pi":
+		// Pi's print mode runs the full agent loop with YOLO defaults — no
+		// auto-approve flag exists or is needed. modelFlags is `--provider X
+		// --model Y` produced by resolvePiModelFlags; may be empty when the
+		// user has no local-llms.json + no env override, in which case Pi
+		// falls back to its own default model. Pi's `-p` does not emit
+		// structured JSON — extractDecisionJSON handles plain-text shapes.
+		args := []string{"-p"}
+		args = append(args, modelFlags...)
+		return append(args, prompt)
 	}
 	return nil
 }
@@ -7514,13 +7586,20 @@ func buildToolCommand(tool, prompt, root string, extraFlags ...string) *exec.Cmd
 }
 
 // extractDecisionJSON finds the JSON object in tool output.
-// Tools may wrap output in their own JSON structure.
+//
+// Most tools wrap their output in a JSON envelope (`{"result": "..."}`), so
+// the first step strips that. Pi's `-p` mode emits plain text with no
+// envelope and no `--output-format json` flag — its decision JSON is either
+// the entire output, embedded in a fenced code block (```json ... ```), or
+// inline in surrounding prose. We try the cheap regex first (matches every
+// tool's typical "{ ... action: ... }" object), then fall back to fenced
+// extraction, then a brace-depth scan for the first balanced top-level
+// object containing the action field. The fallbacks also benefit non-Pi
+// tools when they happen to wrap JSON in markdown.
 func extractDecisionJSON(output, tool string) (string, error) {
-	// For tools that return JSON wrapper (claude, codex, gemini, cursor),
-	// try to extract the text content first
 	text := output
 
-	// Try to extract result text from claude's JSON wrapper
+	// Strip the JSON envelope used by every tool except Pi.
 	if tool == "claude" || tool == "codex" || tool == "gemini" || tool == "cursor" {
 		var wrapper struct {
 			Result string `json:"result"`
@@ -7530,13 +7609,127 @@ func extractDecisionJSON(output, tool string) (string, error) {
 		}
 	}
 
-	// Find the JSON object with action field
-	re := regexp.MustCompile(`\{[^{}]*"action"\s*:\s*"[^"]+?"[^{}]*\}`)
-	match := re.FindString(text)
-	if match == "" {
-		return "", fmt.Errorf("no decision JSON found in output: %s", truncateTail(text, 200))
+	// Cheap path: the action object on a single level (no nested braces).
+	// This covers the historical Claude / Codex / Gemini / Cursor shape.
+	flatRe := regexp.MustCompile(`\{[^{}]*"action"\s*:\s*"[^"]+?"[^{}]*\}`)
+	if match := flatRe.FindString(text); match != "" {
+		return match, nil
 	}
-	return match, nil
+
+	// Fenced markdown block. Pi often wraps JSON in ```json ... ``` or
+	// just ``` ... ```. Pull out each fenced span and try parsing.
+	for _, body := range fencedJSONBodies(text) {
+		if match := flatRe.FindString(body); match != "" {
+			return match, nil
+		}
+		if match := firstBalancedJSONObjectWithAction(body); match != "" {
+			return match, nil
+		}
+	}
+
+	// Brace-depth scan over the whole text — handles inline JSON with
+	// nested objects, which the flat regex misses.
+	if match := firstBalancedJSONObjectWithAction(text); match != "" {
+		return match, nil
+	}
+
+	return "", fmt.Errorf("no decision JSON found in output: %s", truncateTail(text, 200))
+}
+
+// fencedJSONBodies returns the contents of every fenced code block in s,
+// in document order. Recognises ```json ... ```, ```JSON ... ``` and
+// language-less ``` ... ``` fences. Anything else (e.g. ```bash) is skipped.
+func fencedJSONBodies(s string) []string {
+	var out []string
+	rest := s
+	for {
+		open := strings.Index(rest, "```")
+		if open == -1 {
+			return out
+		}
+		after := rest[open+3:]
+		// Optional language tag through to the next newline.
+		nl := strings.IndexByte(after, '\n')
+		if nl == -1 {
+			return out
+		}
+		lang := strings.TrimSpace(after[:nl])
+		body := after[nl+1:]
+		close := strings.Index(body, "```")
+		if close == -1 {
+			return out
+		}
+		if lang == "" || strings.EqualFold(lang, "json") {
+			out = append(out, body[:close])
+		}
+		rest = body[close+3:]
+	}
+}
+
+// firstBalancedJSONObjectWithAction scans s for the first `{ ... }` whose
+// braces balance and which contains an "action" key. Strings (including
+// escapes) are tracked so braces inside string literals don't throw the
+// depth count off.
+func firstBalancedJSONObjectWithAction(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		end := matchBalancedBrace(s, i)
+		if end == -1 {
+			continue
+		}
+		candidate := s[i : end+1]
+		if !strings.Contains(candidate, `"action"`) {
+			continue
+		}
+		var probe map[string]any
+		if err := json.Unmarshal([]byte(candidate), &probe); err != nil {
+			continue
+		}
+		if _, ok := probe["action"]; ok {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// matchBalancedBrace returns the index of the `}` that closes the `{` at
+// start, or -1 if there is no balanced match. Tracks string state so braces
+// inside JSON string literals don't affect depth.
+func matchBalancedBrace(s string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 type triageDecision struct {
@@ -8629,7 +8822,7 @@ RULES:
 10. When in doubt, mark "unresolvable" — blocking is safer than losing work`, conflictedFiles, milestoneID, branch, reportPath)
 
 	// Reconciliation needs strong reasoning — use configured tier (defaults to high).
-	flags := resolveModelFlags(cfg.Tool, reconciliationTier(cfg.ModelTiers))
+	flags := resolveModelFlags(cfg.Tool, reconciliationTier(cfg.ModelTiers), cfg.Root)
 	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, flags...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -8956,7 +9149,7 @@ Rules:
 Read each conflicted file, resolve the conflict markers by combining both sides, write the resolved version, and git add it.`, conflictedFiles, milestoneID, branch)
 
 	// Reconciliation needs strong reasoning — use configured tier (defaults to high).
-	flags := resolveModelFlags(cfg.Tool, reconciliationTier(cfg.ModelTiers))
+	flags := resolveModelFlags(cfg.Tool, reconciliationTier(cfg.ModelTiers), cfg.Root)
 	cmd := buildToolCommand(cfg.Tool, prompt, cfg.Root, flags...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -10003,7 +10196,7 @@ func runReverifyCmd(args []string) error {
 	fs.StringVar(&from, "from", "", "start milestone (e.g. M3)")
 	fs.StringVar(&to, "to", "", "end milestone (e.g. M10)")
 	fs.StringVar(&format, "format", "text", "output format (text|json)")
-	fs.StringVar(&tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor)")
+	fs.StringVar(&tool, "tool", "", "CLI tool (claude|codex|gemini|copilot|cursor|pi)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("reverify: %w", err)
 	}
@@ -10013,7 +10206,7 @@ func runReverifyCmd(args []string) error {
 	if tool == "" {
 		tool = detectTool()
 		if tool == "" {
-			return fmt.Errorf("reverify: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+			return fmt.Errorf("reverify: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor, pi\nInstall one or use --tool to specify")
 		}
 	}
 
@@ -10142,7 +10335,7 @@ func runReverifyCmd(args []string) error {
 
 	// Load per-feature model tiers once; reverify maps to the verification agent tier.
 	tiers, _ := parseModelTiers(filepath.Join(featuresDir, feature, "models.yaml"))
-	verifyModelFlags := resolveModelFlags(tool, tiers.Tiers["verification"])
+	verifyModelFlags := resolveModelFlags(tool, tiers.Tiers["verification"], root)
 
 	for i, m := range targets {
 		fmt.Fprintf(os.Stderr, "━━ [%d/%d] VERIFY ━━ %s › %s: %s ━━\n", i+1, len(targets), feature, m.ID, m.Name)
@@ -10150,6 +10343,7 @@ func runReverifyCmd(args []string) error {
 		// Build milestone-scoped verify prompt
 		prompt := fmt.Sprintf("/belmont:verify --feature %s", feature)
 		prompt += fmt.Sprintf("\n\nMILESTONE-SCOPED VERIFICATION: Only verify tasks marked [x] (done) in milestone %s. Do NOT verify tasks from other milestones. Focus on: (1) the tasks in %s meet their acceptance criteria, (2) build passes, (3) tests pass.\n\nOn success: mark verified tasks as [v] in PROGRESS.md.\nOn failure: add new [ ] follow-up tasks to milestone %s and leave originals as [x].\n\nCRITICAL: Do NOT modify tasks in any other milestone.", m.ID, m.ID, m.ID)
+		prompt = adaptPromptForTool(prompt, tool)
 
 		// Build and run the tool command
 		args := toolHeadlessArgs(tool, prompt, root, verifyModelFlags, true)
@@ -10328,7 +10522,7 @@ func runRecover(args []string) error {
 	fs.StringVar(&merge, "merge", "", "retry merge for slug")
 	fs.StringVar(&clean, "clean", "", "delete worktree and branch for slug")
 	fs.BoolVar(&cleanAll, "clean-all", false, "clean all preserved worktrees")
-	fs.StringVar(&tool, "tool", "", "CLI tool for reconciliation (claude|codex|gemini|copilot|cursor) — auto-detected if omitted")
+	fs.StringVar(&tool, "tool", "", "CLI tool for reconciliation (claude|codex|gemini|copilot|cursor|pi) — auto-detected if omitted")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("recover: %w", err)
 	}
@@ -10414,14 +10608,14 @@ func recoverMerge(root, slug, tool string, worktrees []worktreeEntry) error {
 	if tool == "" {
 		tool = detectTool()
 		if tool == "" {
-			return fmt.Errorf("recover: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor\nInstall one or use --tool to specify")
+			return fmt.Errorf("recover: no supported AI tool CLI found on PATH\n\nSupported tools: claude, codex, gemini, copilot, cursor, pi\nInstall one or use --tool to specify")
 		}
 	} else {
 		switch tool {
-		case "claude", "codex", "gemini", "copilot", "cursor":
+		case "claude", "codex", "gemini", "copilot", "cursor", "pi":
 			// ok
 		default:
-			return fmt.Errorf("recover: unsupported tool %q (use claude, codex, gemini, copilot, or cursor)", tool)
+			return fmt.Errorf("recover: unsupported tool %q (use claude, codex, gemini, copilot, cursor, or pi)", tool)
 		}
 	}
 

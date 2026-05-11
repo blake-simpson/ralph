@@ -38,7 +38,7 @@ With broken enforcement (one layer regressed but others intact): the regressed l
 
 ## Evidence
 
-`belmont-test/about-2-dynamic-mode` (the M5 spawn + cascade) vs `belmont-test/about-4-fresh` (clean M1–M4 run, zero milestones created mid-flight) in the studia-web repo. See [meta/validated-runs.md](../meta/validated-runs.md).
+`belmont-test/about-2-dynamic-mode` (the M5 spawn + cascade) vs `belmont-test/about-4-fresh` (clean M1–M4 run, zero milestones created mid-flight) in the canonical test repo. See [meta/validated-runs.md](../meta/validated-runs.md).
 
 Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestDetectViolations_PolishMilestoneNames`, `TestDetectViolations_CrossMilestoneTaskID`, `TestDiffScopeViolations_DetectsNewMilestone`.
 

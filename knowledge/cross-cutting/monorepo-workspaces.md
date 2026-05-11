@@ -2,7 +2,7 @@
 
 **Domains**: cli, skills, agents
 
-**Why this matters.** Belmont was originally built assuming the project root *is* the package root. In a monorepo (Turborepo, Nx, pnpm/npm/yarn/bun workspaces, Cargo, Go workspaces, uv), that assumption breaks in three places at once: env files end up at the worktree root but get consumed inside `packages/<name>/` (Prisma's TS config loader doesn't walk up); install/build/test commands run at the wrong scope (`pnpm run build` at root vs. `pnpm --filter <id> run build` per workspace); and the dev-server bundler invocation expects a `package.json` at cwd. The studia-web Prisma failure on 2026-05-07 was the canonical surfacing — `npm install` recursed into `packages/studia-web/` for `prisma generate` postinstall, which then errored on missing `DATABASE_URL` because the env file Belmont copied was at the worktree root (`~/.belmont/worktrees/studia-web/<slug>/.env`), not inside the workspace where Prisma actually runs.
+**Why this matters.** Belmont was originally built assuming the project root *is* the package root. In a monorepo (Turborepo, Nx, pnpm/npm/yarn/bun workspaces, Cargo, Go workspaces, uv), that assumption breaks in three places at once: env files end up at the worktree root but get consumed inside `packages/<name>/` (Prisma's TS config loader doesn't walk up); install/build/test commands run at the wrong scope (`pnpm run build` at root vs. `pnpm --filter <id> run build` per workspace); and the dev-server bundler invocation expects a `package.json` at cwd. The Prisma failure on 2026-05-07 was the canonical surfacing — `npm install` recursed into `packages/<workspace>/` for `prisma generate` postinstall, which then errored on missing `DATABASE_URL` because the env file Belmont copied was at the worktree root (`~/.belmont/worktrees/<project>/<slug>/.env`), not inside the workspace where Prisma actually runs.
 
 ## Invariant
 
@@ -49,7 +49,7 @@ State copy: `copyBelmontStateToWorktree` carries `worktree.json` from master int
 
 ## Evidence
 
-- studia-web `belmont auto --feature=book-1-2-1-flow` failure on 2026-05-07: `PrismaConfigEnvError: Cannot resolve environment variable: DATABASE_URL` during `npm install` postinstall. `.env` was at worktree root, Prisma's TS config loader (post-`prisma.config.ts` migration) requires explicit dotenv loading, and the workspace was at `packages/studia-web/`. This is the canonical motivator.
+- A `belmont auto` run on 2026-05-07 against a Turborepo monorepo: `PrismaConfigEnvError: Cannot resolve environment variable: DATABASE_URL` during `npm install` postinstall. `.env` was at the worktree root; Prisma's TS config loader (post-`prisma.config.ts` migration) requires explicit dotenv loading; the workspace was nested at `packages/<workspace>/`. This is the canonical motivator.
 - Cross-language detection survey: pnpm (`pnpm-workspace.yaml`), turbo (`turbo.json` + `package.json#workspaces`), nx (`nx.json` + `package.json#workspaces`), Cargo (`[workspace]` `members`), Go (`go.work` `use`), uv (`pyproject.toml#[tool.uv.workspace]`). Each has a stable signal file Belmont can probe in <1ms.
 
 ## Known rough edges

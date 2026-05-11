@@ -19,6 +19,15 @@ Belmont's architectural memory lives in the `knowledge/` tree at the repo root. 
 
 **Why this exists.** Belmont evolves through real failures on real features. Parallel mode has hit the same class of bug (scope leak, state merging, over-eager skills, port collisions) multiple times from different angles. Without a curated, retrieval-optimized memory, each session re-discovers the same constraints. The `knowledge/` tree is the mechanism that keeps us spiraling in, not in circles — domain separation plus per-topic self-containment lets agents pull in only what's relevant to their task without burning context on unrelated history.
 
+## Both invocation paths or it's not done
+
+Belmont skills run in two completely different invocation paths:
+
+- **Auto mode** — the Go CLI shells out to the AI tool's headless print mode (`claude -p`, `codex exec`, `pi -p`, …) and parses its stdout. Belmont assembles the prompt; the tool's own skill discovery is bypassed.
+- **Interactive mode** — the user types a skill name (e.g. `/belmont:implement`, or natural language matching a `description:`) into the AI tool's live REPL, and the tool's own skill discovery loads `SKILL.md` from `.agents/skills/belmont/<skill>/`.
+
+Any change that touches tool integration, skill behaviour, sub-agent dispatch, model-tier handling, or the on-disk surface (`.agents/skills/`, `.agents/belmont/`, `.belmont/`, `AGENTS.md`) **must explicitly address both paths in the plan and in tests**. Forgetting interactive mode is a recurring failure: the skill runs from `belmont auto` but breaks the moment a user invokes it directly (or vice versa). See [`knowledge/cross-cutting/dual-invocation-paths.md`](knowledge/cross-cutting/dual-invocation-paths.md).
+
 ## Parallel mode invariants — enforced by multiple layers
 
 Belmont's parallel auto mode is the area most prone to subtle bugs. Several structural rules are now enforced **mechanically** by the Go CLI (not by prompts alone). Before touching any of these, open the referenced `knowledge/` entry — each one ends with a `Don't re-do` section listing rejected alternatives.
@@ -41,8 +50,13 @@ The canonical anti-pattern these invariants protect against is the "polish miles
 - When changing the Go code, always run the compiler after to test + rebuild the file
 
 ## Verify
-- Try to verify your work after changes are made.
-- If required, create a test directory and install to it to test your changes, symlinks, etc.
+- After every change, build (`go build ./cmd/belmont`) and run unit tests (`go test ./cmd/belmont`). These cover regressions in isolation, but they don't prove the change works end-to-end on a real install.
+- **Author smoke test before release** (non-negotiable for any non-trivial change — new tools, skills, CLI behaviour, install paths, auto-loop logic): the plan MUST end with a copy-paste-ready "Author smoke test" section for Blake to run locally before tagging a release. The section must:
+  1. Exercise **both invocation paths** for each affected tool (auto mode + interactive mode — see "Both invocation paths or it's not done").
+  2. **Sanity-check the unchanged tools** — at minimum Claude Code, the daily driver — in both modes, to prove the change didn't regress the main workflow.
+  3. Run against a **real project on a disposable branch**, not just `/tmp/<scratch>`, so the test exercises a realistic install + agent flow with state Blake actually recognises.
+  4. List the **exact expected output** at each step so success/failure is unambiguous, and include diagnostic next-steps when a step might fail for reasons outside Belmont (LM Studio not running, API budget, etc.).
+- "All unit tests pass" is necessary but not sufficient. The "this actually works on my machine end-to-end" guarantee comes only from a manual run.
 
 ## Build & Run
 
@@ -107,6 +121,7 @@ git push origin main --tags
 - **Ports: primary vs additional servers**: `PORT`/`BELMONT_PORT` is allocated by the Go CLI for the primary dev server (frameworks auto-detect it). All other servers (Storybook, Prisma Studio, etc.) must dynamically allocate their own free port at runtime — this is handled by agent instructions, not Go code. See `_partials/worktree-awareness.md`.
 - **Unified state tracking**: PROGRESS.md is the single source of truth for all task/milestone state. PRD.md is a pure spec with no status markers. See "State Tracking" section below.
 - **Per-feature model tiers**: each feature may carry a `.belmont/features/<slug>/models.yaml` that maps agents (codebase / design / implementation / verification / code-review / reconciliation) to `low` / `medium` / `high` tiers. The `cmd/belmont/main.go` registry (`modelTiers`) translates tiers to CLI-specific model IDs; planning phases always force `high` via the `planningTier` constant. Absent file → agent frontmatter defaults apply. Skill-side dispatch honors tiers via the Task tool's `model:` parameter on Claude; other CLIs get a preflight warning (see `skills/belmont/_partials/tier-preflight.md`). `cmd/belmont/main.go` must remain stdlib-only — the YAML parser is hand-rolled for this flat schema.
+- **Pi tier resolution is deliberately user-driven**: Pi runs against user-provided local (or remote) models whose IDs Belmont cannot know in advance, so Pi has *no* entry in `modelTiers`. Instead, `resolvePiModelFlags` (in `cmd/belmont/local_llms.go`) consults a 5-level chain: `BELMONT_PI_PROVIDER_<TIER>` / `BELMONT_PI_MODEL_<TIER>` env vars > `BELMONT_PI_PROVIDER` / `BELMONT_PI_MODEL` env vars > `<project>/.belmont/local-llms.json` > `~/.belmont/local-llms.json` > nothing (Pi falls back to its own default model). When extending the Pi integration, prefer adding to this chain rather than hardcoding model IDs in Go. See `docs/local-llms.example.json` and `docs/supported-tools.md`.
 
 ## State Tracking
 

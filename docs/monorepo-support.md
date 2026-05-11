@@ -71,8 +71,8 @@ Drop a `.belmont/worktree.json` with the new fields to override or augment what 
   "primary_workspace": "web",
   "workspaces": {
     "web": {
-      "path": "packages/studia-web",
-      "env_files": [".env", "packages/studia-web/.env.local"]
+      "path": "packages/web",
+      "env_files": [".env", "packages/web/.env.local"]
     },
     "api": {
       "path": "apps/api"

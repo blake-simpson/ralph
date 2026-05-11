@@ -1,6 +1,6 @@
 # Multi-Feature Scheduling — Dep Gating & Wave Order
 
-**Why this matters.** `belmont auto --features=A,B,C` (and `--all`) groups features into waves via Kahn's topological sort over the master `Dependencies` column. Two scheduling rules are load-bearing for not-wasting-an-agent-run: (1) when a feature pauses on `[!]` blockers, its dependents must skip — they cannot make progress without the dep's code merged — and (2) sibling tie-breaks within a wave must respect the user's CLI `--features=` order, not alphabetical. Both were broken in the wild on a 3-feature studia-web run (April 2026): `foundation` paused on one `[!]`, `parent` and `student` still launched in wave 2 from base HEAD, both cascade-paused on missing primitives. The execution-plan banner also reordered `student, parent` → `parent, student` alphabetically, a separate surprise.
+**Why this matters.** `belmont auto --features=A,B,C` (and `--all`) groups features into waves via Kahn's topological sort over the master `Dependencies` column. Two scheduling rules are load-bearing for not-wasting-an-agent-run: (1) when a feature pauses on `[!]` blockers, its dependents must skip — they cannot make progress without the dep's code merged — and (2) sibling tie-breaks within a wave must respect the user's CLI `--features=` order, not alphabetical. Both were broken in the wild on a 3-feature run (April 2026): the dep feature paused on one `[!]`, both dependent features still launched in wave 2 from base HEAD, both cascade-paused on missing primitives. The execution-plan banner also reordered the two dependents alphabetically, a separate surprise.
 
 ## Invariant
 
@@ -34,7 +34,7 @@ Test coverage in `cmd/belmont/scope_guard_test.go`:
 
 ## Failure mode if you break it
 
-- **Drop pause-gating** (revert to "don't add to failedSlugs (downstream deps may still be satisfiable)"): the studia-web cascade returns. Foundation pauses, parent+student each launch a worktree off base HEAD with no foundation primitives, agent realises all M1 tasks are unimplementable, marks them `[!]`, pauses. Three orphaned worktrees, ~3 wasted agent-minutes, user has to clean up and figure out the dep order manually. Worse: if any sibling actually merges, the user gets a partial merge that looks "successful" until they read the diff.
+- **Drop pause-gating** (revert to "don't add to failedSlugs (downstream deps may still be satisfiable)"): the cascade returns. Dep feature pauses, dependents each launch a worktree off base HEAD with no dep primitives, agent realises all M1 tasks are unimplementable, marks them `[!]`, pauses. Three orphaned worktrees, ~3 wasted agent-minutes, user has to clean up and figure out the dep order manually. Worse: if any sibling actually merges, the user gets a partial merge that looks "successful" until they read the diff.
 - **Drop CLI-order preservation** in `computeFeatureWaves`: alphabetical sibling order ignores user intent. Cosmetic-looking but it shapes the run — with `--max-parallel=1`, the alphabetical winner runs first and may leave the user-preferred starting feature for last.
 - **Drop the pre-flight readiness warning**: silent foot-gun. Cascade still fires, but the operator only learns about the dep state by waiting for wave 2's first `⊘ skipped` line, by which point a worktree has been created and torn down. The warning lets them Ctrl-C in seconds.
 - **Make pre-flight abort instead of warn**: kills legitimate workflows where the user wants to start dep-and-dependent in the same invocation (which is exactly what `--features=A,B,C` is for — A is wave 1, B/C are wave 2). The warning is correct; the abort would be over-eager.
@@ -50,7 +50,7 @@ Test coverage in `cmd/belmont/scope_guard_test.go`:
 
 ## Evidence
 
-- Original studia-web bug report (Sophos, April 2026): `--features=tutor-subscriptions-foundation,tutor-subscriptions-student,tutor-subscriptions-parent --max-parallel=1`. Foundation paused on `P0-M1-FIX-2`; parent+student both launched off base HEAD and re-paused with all M1 tasks `[!]`'d. Execution plan also showed `parent, student` instead of CLI's `student, parent`.
+- Original bug report (April 2026): `--features=<dep-feature>,<dependent-A>,<dependent-B> --max-parallel=1`. The dep paused on `P0-M1-FIX-2`; the two dependents both launched off base HEAD and re-paused with all M1 tasks `[!]`'d. Execution plan also showed dependents in alphabetical order instead of the CLI-supplied order.
 - Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestComputeFeatureWaves_*`, `TestFilterWaveByBlocked_*`, `TestScanReadiness_*`, `TestResolveFeatureSlugs_AllFlagAlphabetical`.
 
 ## Revisions

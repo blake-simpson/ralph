@@ -37,7 +37,7 @@ With a broken guard (e.g., scope comparison wrong): either noise (guard reverts 
 
 ## Evidence
 
-The `ea672675` commit in `belmont-test/about-2-dynamic-mode` (studia-web repo) is the canonical replay case — an M5 FWLUP commit bulk-marking M3 tasks `[v]`. The `belmont-test/about-4-fresh` branch shows the same shape of work completing cleanly with the guard active. See [meta/validated-runs.md](../meta/validated-runs.md) for diff commands.
+The `ea672675` commit in `belmont-test/about-2-dynamic-mode` (canonical test repo) is the canonical replay case — an M5 FWLUP commit bulk-marking M3 tasks `[v]`. The `belmont-test/about-4-fresh` branch shows the same shape of work completing cleanly with the guard active. See [meta/validated-runs.md](../meta/validated-runs.md) for diff commands.
 
 Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestDiffScopeViolations_*`, `TestRebuildAfterScopeGuard_*`, `TestScopeGuard_EA672675ReplayScenario`.
 

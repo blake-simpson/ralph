@@ -16,6 +16,7 @@ belmont status --color always           # Force ANSI-coloured markers (auto|alwa
 belmont status --show-archived          # Include archived features in the listing (default: collapsed to a footer count)
 belmont auto --feature auth              # Run feature auto (auto-detect tool)
 belmont auto --feature auth --tool codex # Use specific tool
+belmont auto --feature auth --tool pi    # Run with Pi (local LLM via ~/.belmont/local-llms.json)
 belmont auto --feature auth --from M2 --to M4  # Milestone range
 belmont auto --features auth,payments    # Run multiple features in parallel
 belmont auto --all                       # Run all pending features in parallel
@@ -128,6 +129,20 @@ When `belmont auto` runs features or milestones in parallel worktrees, the follo
 Dependencies are auto-installed by detecting your lock file (e.g., `package-lock.json` → `npm install`). Configure custom worktree lifecycle hooks via `.belmont/worktree.json`. See [Worktree Isolation](worktree-isolation.md) for full documentation, and [Monorepo Support](monorepo-support.md) for monorepo-specific behavior (including how to override auto-detected workspaces).
 
 `belmont status` reports a `Monorepo: <type> (<N> workspaces, primary=<id>)` line when auto-detection fires; `belmont status --format json` includes a `monorepo` object alongside the existing fields.
+
+## Local-LLM configuration (Pi)
+
+When `--tool pi` is used, Belmont resolves Pi's `--provider <p> --model <m>` flags from a chain that supports both global and per-project setups. From highest priority to lowest:
+
+| Source | Notes |
+|--------|-------|
+| `BELMONT_PI_PROVIDER_<TIER>` / `BELMONT_PI_MODEL_<TIER>` env vars | Per-shot overrides (e.g. `BELMONT_PI_MODEL_HIGH=deepseek-coder-v3`). Tier is uppercased. |
+| `BELMONT_PI_PROVIDER` / `BELMONT_PI_MODEL` env vars | Single value applied to every tier. |
+| `<project>/.belmont/local-llms.json` | Per-project mapping; per-tier-per-field. |
+| `~/.belmont/local-llms.json` | User-level mapping. |
+| _(none)_ | Belmont passes no flags; Pi uses the default model from `~/.pi/agent/models.json`. |
+
+Each layer is consulted independently for `provider` and `model`, so you can override one field without touching the other. See [Supported Tools → Pi](supported-tools.md#pi-local-llm-workflow) for the full schema and an LM Studio + Ollama example, and [docs/local-llms.example.json](local-llms.example.json) for a copy-paste starter.
 
 ## How Skills Use the CLI
 

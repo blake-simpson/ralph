@@ -1,6 +1,6 @@
 # Supported Tools
 
-Belmont skills install as agentskills.io-format folders at `.agents/skills/belmont/<skill>/SKILL.md`. Five of six supported AI CLIs auto-discover this path natively — the install does **zero per-tool wiring** for them. Claude Code is the exception: it discovers slash commands at `.claude/commands/<name>.md` (with subfolders becoming namespace prefixes), so Belmont creates per-skill symlinks at `.claude/commands/belmont/<skill>.md` pointing at the canonical SKILL.md.
+Belmont skills install as agentskills.io-format folders at `.agents/skills/belmont/<skill>/SKILL.md`. Six of seven supported AI CLIs auto-discover this path natively — the install does **zero per-tool wiring** for them. Claude Code is the exception: it discovers slash commands at `.claude/commands/<name>.md` (with subfolders becoming namespace prefixes), so Belmont creates per-skill symlinks at `.claude/commands/belmont/<skill>.md` pointing at the canonical SKILL.md.
 
 | Tool               | Wiring                                                               | How to use                                              |
 |--------------------|----------------------------------------------------------------------|---------------------------------------------------------|
@@ -10,13 +10,14 @@ Belmont skills install as agentskills.io-format folders at `.agents/skills/belmo
 | **Windsurf**       | none — `.agents/skills/` auto-discovered (Cascade v1.13.6+)          | Prompt `belmont:<skill>` — auto-loaded by description   |
 | **Gemini**         | none — `.agents/skills/` is the documented alias for `.gemini/skills/` | Prompt `belmont:<skill>` — surfaces via `/skills`       |
 | **GitHub Copilot** | none — `.agents/skills/` auto-discovered                              | Prompt `belmont:<skill>` — surfaces via Copilot CLI     |
+| **Pi** ([pi.dev](https://pi.dev)) | none — `.agents/skills/` auto-discovered (agentskills.io)             | Prompt `belmont:<skill>` — Pi loads SKILL.md by description |
 | **Any other tool** | none                                                                  | Point your tool at `.agents/skills/belmont/<skill>/SKILL.md` |
 
 Each `<skill>/SKILL.md` carries `name:` + `description:` YAML frontmatter (required by agentskills.io) plus a `references/` subdir with the progressive-disclosure files that skill body references.
 
 Belmont detects which tools to install for via three signals:
-- conventional project dirs (`.claude/`, `.codex/`, `.cursor/`, …) already present;
-- tool binaries on PATH (`claude`, `codex`, `cursor-agent`, `gemini`, `copilot`);
+- conventional project dirs (`.claude/`, `.codex/`, `.cursor/`, `.pi/`, …) already present;
+- tool binaries on PATH (`claude`, `codex`, `cursor-agent`, `gemini`, `copilot`, `pi`);
 - a Belmont skill-routing section in `AGENTS.md` / `GEMINI.md` (signals a previous install).
 
 ## Headless invocation
@@ -30,6 +31,7 @@ Belmont's `auto` loop shells out to each tool's CLI in headless mode. The flag c
 | Cursor        | `cursor-agent`   | `cursor-agent -p --force --output-format json "<prompt>"` (prompt is the trailing positional)                           |
 | Gemini        | `gemini`         | `gemini -p "<prompt>" --approval-mode yolo --output-format json` (`--yolo` is deprecated)                               |
 | GitHub Copilot| `copilot`        | `copilot -p "<prompt>" --yolo`                                                                                          |
+| Pi            | `pi`             | `pi -p [--provider <p> --model <m>] "<prompt>"` — provider/model resolved from `~/.belmont/local-llms.json`; YOLO is Pi's default so no auto-approve flag is needed |
 
 Cursor's CLI is installed as both `cursor-agent` (legacy) and `agent` (current canonical name) — Belmont targets `cursor-agent` for stability, since the unambiguous name is less likely to collide with other tools that might expose a generic `agent` binary.
 
@@ -55,11 +57,55 @@ Skills become native slash commands:
 /belmont:reset              Reset state and start fresh
 ```
 
-### Codex / Cursor / Windsurf / Gemini / GitHub Copilot
+### Codex / Cursor / Windsurf / Gemini / GitHub Copilot / Pi
 
-All five auto-discover `.agents/skills/belmont/<skill>/SKILL.md`. Open the tool in your project directory and prompt with a skill reference like `belmont:implement` — the CLI's Skills system surfaces and activates the skill via its `description:` frontmatter.
+All six auto-discover `.agents/skills/belmont/<skill>/SKILL.md`. Open the tool in your project directory and prompt with a skill reference like `belmont:implement` — the CLI's Skills system surfaces and activates the skill via its `description:` frontmatter.
 
 For Codex specifically, the `/skills` slash command lists discovered skills. For Gemini, the same. For Cursor, you can also browse them via the Skills panel in the IDE.
+
+### Pi (local-LLM workflow)
+
+Pi ([pi.dev](https://pi.dev)) is uniquely well-suited to driving Belmont with locally-hosted models — its YOLO-by-default tool execution and OpenAI-compatible provider configuration mean it can run Belmont's auto loop offline against LM Studio, Ollama, vLLM, llama.cpp's server, etc.
+
+**Pi-side configuration** (`~/.pi/agent/models.json`) — declare each runtime as a provider:
+
+```json
+{
+  "providers": {
+    "lm-studio": {
+      "baseUrl": "http://localhost:1234/v1",
+      "api": "openai-completions",
+      "apiKey": "lm-studio",
+      "compat": { "supportsDeveloperRole": false },
+      "models": [
+        { "id": "qwen/qwen3.6-35b-a3b" }
+      ]
+    }
+  }
+}
+```
+
+For Ollama swap `baseUrl` to `http://localhost:11434/v1`. The `apiKey` is required by Pi but ignored by local servers. `supportsDeveloperRole: false` is required for any backend that doesn't expose OpenAI's `developer` role (most local servers don't).
+
+**Belmont-side tier mapping** (`~/.belmont/local-llms.json`) — map Belmont's `low`/`medium`/`high` tiers to Pi's providers + models:
+
+```json
+{
+  "pi": {
+    "tiers": {
+      "low":    { "provider": "lm-studio", "model": "qwen/qwen3.6-35b-a3b" },
+      "medium": { "provider": "lm-studio", "model": "qwen/qwen3.6-35b-a3b" },
+      "high":   { "provider": "lm-studio", "model": "qwen/qwen3.6-35b-a3b" }
+    }
+  }
+}
+```
+
+Mix and match — point `high` at a stronger model (e.g. DeepSeek-Coder via Ollama) and keep `low`/`medium` on a fast Qwen for code edits. Per-project overrides go in `<project>/.belmont/local-llms.json`. Per-shot env-var overrides: `BELMONT_PI_PROVIDER_<TIER>` / `BELMONT_PI_MODEL_<TIER>` (or single-value `BELMONT_PI_PROVIDER` / `BELMONT_PI_MODEL` applied to every tier).
+
+If neither file nor env var is present, Belmont passes no `--model` flag and Pi falls back to whatever default `~/.pi/agent/models.json` defines — Belmont stays out of Pi's way.
+
+**Tool-calling caveat for local Qwen:** Qwen2.5-Coder on LM Studio has [broken tool calling](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/825) — the model emits a non-hermes `<tools>` tag format that LM Studio's OpenAI-compat layer doesn't parse, and `tool_calls` arrives empty. Belmont's auto loop is 100% tool-call-driven, so file edits and bash silently fail. **Use Qwen3-Coder (or newer)** which uses the standard hermes format. Different runtimes (Ollama, vLLM) parse Qwen2.5-Coder correctly; the issue is specifically the LM Studio + Qwen2.5 combination.
 
 ### Generic / Other Tools
 

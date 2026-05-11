@@ -32,7 +32,7 @@ In `cmd/belmont/main.go`, called after `runScopeGuard`:
 
 ## Evidence
 
-`belmont-test/about-4-fresh` in studia-web: the full 4-milestone run completed with `[v]` flips only for tasks whose commits named them. No repeat of the P1-5..P1-8 rubber-stamp pattern. See [meta/validated-runs.md](../meta/validated-runs.md).
+`belmont-test/about-4-fresh` in the canonical test repo: the full 4-milestone run completed with `[v]` flips only for tasks whose commits named them. No repeat of the P1-5..P1-8 rubber-stamp pattern. See [meta/validated-runs.md](../meta/validated-runs.md).
 
 Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestFindEvidenceMissingFlips_NoGitRepo`, `TestRevertEvidenceMissing_FlipsTaskLineBack`. The no-repo test verifies fail-open behavior.
 

@@ -2,9 +2,9 @@
 
 **Why this matters.** The parallel auto mode has behaved correctly on a real feature end-to-end. If it breaks in the future, the first question is "what changed since it last worked?" — and the answer is best served by preserved branches showing known-good behavior side-by-side with known-bad. These branches are **reference material**, not work artifacts; don't garbage-collect them without a deliberate replacement.
 
-## Preserved branches (studia-web, feature: `about`)
+## Preserved branches (the canonical test repo, feature: `about`)
 
-Three branches in `/Users/blake/code/clients/Sophos/studia-web`, all rooted at tech-plan commit `c465dd77`:
+Three branches in the maintainer's canonical test repo (a real-world Turborepo monorepo, kept local), all rooted at tech-plan commit `c465dd77`:
 
 | Branch | State of the guards | What it proves |
 |---|---|---|
@@ -14,7 +14,7 @@ Three branches in `/Users/blake/code/clients/Sophos/studia-web`, all rooted at t
 
 ## Three-way diff commands
 
-From the studia-web repo. These are the commands a future agent would run to triage a regression.
+From the canonical test repo. These are the commands a future agent would run to triage a regression.
 
 ```bash
 # Source-file shape: did the final merged about page actually implement everything?
@@ -46,8 +46,8 @@ Before assuming the design is wrong, reproduce against one of these branches:
 
 ## Preservation policy
 
-- Keep the three `belmont-test/about-*-fresh` branches indefinitely in the studia-web repo.
-- If the repo is archived or the remote is decommissioned, export the three branches' commit logs and final diffs into a separate snapshot file and keep the pointer here.
+- Keep the three `belmont-test/about-*-fresh` branches indefinitely in the canonical test repo.
+- If that repo is archived or otherwise decommissioned, export the three branches' commit logs and final diffs into a separate snapshot file and keep the pointer here.
 - Do not casually rebase, squash, or force-push these branches. They are documentation frozen in git.
 
 ## Revisions

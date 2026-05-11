@@ -43,7 +43,7 @@ In `cmd/belmont/main.go`:
 
 ## Evidence
 
-`belmont-test/about-4-fresh` in studia-web: clean parallel wave (M2/M3/M4) with merge-overlap report firing on `about/page.tsx`, reconciliation-agent resolving the import-union at high confidence, live status overlay showing `(live from worktree)` tags during the run. See [meta/validated-runs.md](../meta/validated-runs.md).
+`belmont-test/about-4-fresh` in the canonical test repo: clean parallel wave (M2/M3/M4) with merge-overlap report firing on `about/page.tsx`, reconciliation-agent resolving the import-union at high confidence, live status overlay showing `(live from worktree)` tags during the run. See [meta/validated-runs.md](../meta/validated-runs.md).
 
 Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestOverlayLiveMilestones_*`, `TestCopyBelmontStateToWorktreePreservesSteering`.
 

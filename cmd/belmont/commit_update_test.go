@@ -345,6 +345,26 @@ func TestLinkClaudeCommands_PrunesStaleEntries(t *testing.T) {
 	}
 }
 
+func TestDetectTools_PiMarkerDir(t *testing.T) {
+	dir := t.TempDir()
+	// Plant the .pi/ marker dir to simulate a project that's used Pi before.
+	if err := os.MkdirAll(filepath.Join(dir, ".pi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := detectTools(dir)
+	found := false
+	for _, tool := range got {
+		if tool == "pi" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected detectTools(%s) to include 'pi' due to .pi/ marker, got: %v", dir, got)
+	}
+}
+
 func TestRunLegacyCleanup_Idempotent(t *testing.T) {
 	dir := setupRepo(t)
 

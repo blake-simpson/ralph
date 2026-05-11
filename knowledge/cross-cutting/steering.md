@@ -38,7 +38,7 @@ In `cmd/belmont/main.go`:
 
 ## Evidence
 
-- `belmont-test/about-3-fresh` and `belmont-test/about-4-fresh` in studia-web: both runs show `[STEERING] injected N instruction(s) — …` stream lines, confirming consume fires and delete-when-empty behaves.
+- `belmont-test/about-3-fresh` and `belmont-test/about-4-fresh` in the canonical test repo: both runs show `[STEERING] injected N instruction(s) — …` stream lines, confirming consume fires and delete-when-empty behaves.
 - Unit coverage: `cmd/belmont/steer_test.go` → `TestConsumePendingSteering`, `TestConsumePendingSteeringDropsLegacyConsumedOnly`, `TestConsumePendingSteeringMissingFile`, `TestCopyBelmontStateToWorktreePreservesSteering`, `TestStripSteerComments`.
 
 ## Known rough edges

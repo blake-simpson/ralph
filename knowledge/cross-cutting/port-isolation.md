@@ -2,7 +2,7 @@
 
 **Domains**: cli, skills, agents
 
-**Why this matters.** When three sibling worktrees run in parallel, each wants a dev server, each wants Playwright, each wants Lighthouse. If any of them default to `localhost:3000`, they collide — silently. Symptom: some agents successfully use `$BELMONT_PORT`, others default to :3000 and hit a sibling's server, builds fail at OG image prerender, verifies misattribute the failures, implement phases re-thrash to "fix" the broken build, and the whole wave cascades into incoherence. This actually happened — see `belmont-test/about-3-fresh` in studia-web.
+**Why this matters.** When three sibling worktrees run in parallel, each wants a dev server, each wants Playwright, each wants Lighthouse. If any of them default to `localhost:3000`, they collide — silently. Symptom: some agents successfully use `$BELMONT_PORT`, others default to :3000 and hit a sibling's server, builds fail at OG image prerender, verifies misattribute the failures, implement phases re-thrash to "fix" the broken build, and the whole wave cascades into incoherence. This actually happened — see `belmont-test/about-3-fresh` in the canonical test repo.
 
 ## Invariant
 
@@ -52,8 +52,8 @@ Two mechanisms in combination:
 
 ## Evidence
 
-- `belmont-test/about-3-fresh` in studia-web: port cascade (user screenshot with two tabs on `localhost:3000`). This is the `without env vars` failure mode captured.
-- `belmont-test/about-4-fresh` in studia-web: clean three-worktree wave; no port conflicts; Playwright screenshots of worktree-specific URLs. See [meta/validated-runs.md](../meta/validated-runs.md).
+- `belmont-test/about-3-fresh` in the canonical test repo: port cascade (user screenshot with two tabs on `localhost:3000`). This is the `without env vars` failure mode captured.
+- `belmont-test/about-4-fresh` in the canonical test repo: clean three-worktree wave; no port conflicts; Playwright screenshots of worktree-specific URLs. See [meta/validated-runs.md](../meta/validated-runs.md).
 
 ## Known rough edges
 
