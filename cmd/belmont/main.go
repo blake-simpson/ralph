@@ -390,6 +390,10 @@ const (
 
 var errFeaturePaused = fmt.Errorf("feature paused")
 
+// errWorktreeDirty signals that a rebase-on-resume was skipped because the
+// worktree has uncommitted user/agent changes. Callers should warn but proceed.
+var errWorktreeDirty = fmt.Errorf("worktree has uncommitted changes")
+
 type loopAction struct {
 	Type            loopActionType
 	Reason          string
@@ -5539,6 +5543,62 @@ func runAutoMultiFeature(cfg loopConfig, slugs []string) error {
 			fmt.Fprintf(os.Stderr, "\n\033[1m── Wave %d ──\033[0m\n", w.Index+1)
 		}
 
+		// Serial path: when MaxParallel == 1, run each feature and merge it
+		// inline before moving on. The next feature's worktree forks from a
+		// main that includes the prior feature's merge, so implicit cross-
+		// feature task deps (e.g. F2 calling into F1's new route) resolve at
+		// the fork point instead of producing `[!]` blockers. Stale-worktree
+		// resolution is deferred to just-in-time so each feature's rebase-on-
+		// resume targets the post-prior-merge main rather than the pre-wave
+		// main. See knowledge/auto-mode/multi-feature-scheduling.md.
+		if cfg.MaxParallel <= 1 {
+			for _, f := range waveFeatures {
+				slug := f.Slug
+				branch := fmt.Sprintf("belmont/auto/%s", slug)
+				wtPath := filepath.Join(worktreeBasePath(cfg.Root), slug)
+
+				resumed, err := handleStaleWorktree(cfg.Root, slug, branch, wtPath)
+				if err != nil {
+					return err
+				}
+
+				activeWorktrees.add(slug, wtPath, branch)
+				fmt.Fprintf(os.Stderr, "\033[36m▶ %s\033[0m — starting in worktree\n", slug)
+
+				runErr := runFeatureInWorktree(cfg, slug, branch, wtPath, activeWorktrees, resumed)
+				if runErr != nil {
+					if errors.Is(runErr, errFeaturePaused) {
+						fmt.Fprintf(os.Stderr, "\033[33m⏸ %s paused\033[0m — has unresolved blockers\n", slug)
+						pausedSlugs[slug] = true
+						allFailures = append(allFailures, featureResult{Slug: slug, Branch: branch, WorktreePath: wtPath, Err: runErr})
+					} else {
+						fmt.Fprintf(os.Stderr, "\033[31m✗ %s failed: %s\033[0m\n", slug, runErr)
+						failedSlugs[slug] = true
+						allFailures = append(allFailures, featureResult{Slug: slug, Branch: branch, WorktreePath: wtPath, Err: runErr})
+					}
+					continue
+				}
+
+				fmt.Fprintf(os.Stderr, "\033[32m✓ %s complete\033[0m — merging...\n", slug)
+				if err := ensureCleanMergeState(cfg.Root); err != nil {
+					fmt.Fprintf(os.Stderr, "\033[33m⚠ %s — skipping merge\033[0m\n", err)
+					allFailures = append(allFailures, featureResult{Slug: slug, Branch: branch, WorktreePath: wtPath, Err: fmt.Errorf("skipped: unclean merge state")})
+					failedSlugs[slug] = true
+					continue
+				}
+				if err := mergeFeatureBranch(cfg, slug, branch, wtPath, activeWorktrees); err != nil {
+					fmt.Fprintf(os.Stderr, "\033[31m✗ merge failed for %s: %s\033[0m\n", slug, err)
+					fmt.Fprintf(os.Stderr, "  Worktree preserved at: %s\n", wtPath)
+					fmt.Fprintf(os.Stderr, "  Branch: %s\n", branch)
+					allFailures = append(allFailures, featureResult{Slug: slug, Branch: branch, WorktreePath: wtPath, Err: err})
+					failedSlugs[slug] = true
+					continue
+				}
+				totalMerged++
+			}
+			continue
+		}
+
 		// Resolve stale worktrees sequentially (before parallel launch) to avoid stdin races
 		preResolved := make(map[string]bool) // slug -> resumed
 		for _, f := range waveFeatures {
@@ -5745,6 +5805,12 @@ func handleStaleWorktree(root, id, branch, wtPath string) (resumed bool, err err
 					return false, fmt.Errorf("git worktree add (resume): %w (%s)", err, strings.TrimSpace(string(out)))
 				}
 			}
+			// Rebase the worktree onto current main so sibling features that
+			// merged while this one was paused are picked up. Conflicts abort
+			// and warn — never auto-resolve. See
+			// knowledge/auto-mode/resume-rebase.md for the design.
+			n, rebaseErr := rebaseWorktreeOnMain(root, wtPath)
+			announceWorktreeRebase(id, n, rebaseErr)
 			// Leave .belmont/ as-is in the worktree — it has committed state from the
 			// previous run. Don't overwrite with stale copy from main repo.
 			// If it's an old symlink from a previous version, replace with a fresh copy.
@@ -8446,15 +8512,70 @@ func (wt *worktreeTracker) gracefulShutdown(root string) {
 // see knowledge/auto-mode/parallel-wave-orchestration.md on the removed
 // master-tree shortcut.
 func runWaveParallel(cfg loopConfig, w wave, tracker *worktreeTracker) error {
-	semaphore := make(chan struct{}, cfg.MaxParallel)
-	var wg sync.WaitGroup
-
 	type result struct {
 		MilestoneID  string
 		Branch       string
 		WorktreePath string
 		Err          error
 	}
+
+	// Serial path: when MaxParallel == 1, run each milestone and merge it
+	// inline before moving on. The next milestone's worktree forks from a
+	// feature branch that already includes the prior milestone's merge.
+	// Stale-worktree resolution is deferred to just-in-time so each
+	// milestone's rebase-on-resume targets the post-prior-merge tip.
+	// See knowledge/auto-mode/multi-feature-scheduling.md (semantic is
+	// shared across multi-feature and single-feature-parallel modes).
+	if cfg.MaxParallel <= 1 {
+		mergedFiles := map[string][]string{}
+		var failures []result
+		for _, m := range w.Milestones {
+			branch := fmt.Sprintf("belmont/auto/%s/%s", cfg.Feature, strings.ToLower(m.ID))
+			wtPath := filepath.Join(worktreeBasePath(cfg.Root), fmt.Sprintf("%s-%s", cfg.Feature, strings.ToLower(m.ID)))
+
+			resumed, err := handleStaleWorktree(cfg.Root, m.ID, branch, wtPath)
+			if err != nil {
+				return err
+			}
+
+			tracker.add(m.ID, wtPath, branch)
+			fmt.Fprintf(os.Stderr, "  \033[36m▶ %s: %s\033[0m (worktree)\n", m.ID, m.Name)
+
+			if err := runMilestoneInWorktree(cfg, m, branch, wtPath, tracker, resumed); err != nil {
+				fmt.Fprintf(os.Stderr, "  \033[31m✗ %s failed: %s\033[0m\n", m.ID, err)
+				failures = append(failures, result{MilestoneID: m.ID, Branch: branch, WorktreePath: wtPath, Err: err})
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "  \033[32m✓ %s complete\033[0m\n", m.ID)
+
+			if err := ensureCleanMergeState(cfg.Root); err != nil {
+				fmt.Fprintf(os.Stderr, "  \033[33m⚠ %s — skipping merge for %s\033[0m\n", err, m.ID)
+				failures = append(failures, result{MilestoneID: m.ID, Branch: branch, WorktreePath: wtPath, Err: fmt.Errorf("skipped: unclean merge state")})
+				continue
+			}
+			reportMergeOverlap(cfg.Root, branch, m.ID, mergedFiles)
+			if err := mergeWorktreeBranch(cfg, m.ID, branch, wtPath, tracker); err != nil {
+				return fmt.Errorf("auto: merge failed for %s: %w", m.ID, err)
+			}
+			for _, f := range branchTouchedFiles(cfg.Root, branch) {
+				mergedFiles[f] = append(mergedFiles[f], m.ID)
+			}
+		}
+
+		if len(failures) > 0 {
+			fmt.Fprintf(os.Stderr, "\n\033[33m⚠ %d milestone(s) failed in wave %d:\033[0m\n", len(failures), w.Index+1)
+			for _, f := range failures {
+				fmt.Fprintf(os.Stderr, "  %s: worktree preserved at %s\n", f.MilestoneID, f.WorktreePath)
+				fmt.Fprintf(os.Stderr, "    Resume: cd %s && belmont auto --feature %s --from %s --to %s\n", f.WorktreePath, cfg.Feature, f.MilestoneID, f.MilestoneID)
+			}
+			return fmt.Errorf("auto: wave %d had %d failure(s)", w.Index+1, len(failures))
+		}
+		return nil
+	}
+
+	semaphore := make(chan struct{}, cfg.MaxParallel)
+	var wg sync.WaitGroup
+
 	results := make(chan result, len(w.Milestones))
 
 	// Resolve stale worktrees sequentially (before parallel launch) to avoid stdin races
@@ -9155,6 +9276,99 @@ Read each conflicted file, resolve the conflict markers by combining both sides,
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// rebaseWorktreeOnMain rebases a worktree's branch onto the main repo's
+// current HEAD. The worktree shares .git/objects with mainRoot, so the target
+// SHA is reachable without a network fetch.
+//
+// Returns the number of new main commits picked up by the rebase. Returns
+// errWorktreeDirty (with newCommits==0) when the worktree has uncommitted
+// changes — the rebase is skipped, leaving the worktree as-is. On rebase
+// conflict the rebase is aborted and a wrapped error is returned, leaving
+// the worktree HEAD unchanged.
+//
+// `.belmont/` files are marked assume-unchanged in worktrees, so the dirty
+// check ignores them and only catches genuine in-flight agent/user work.
+func rebaseWorktreeOnMain(mainRoot, wtPath string) (newCommits int, err error) {
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = wtPath
+	statusOut, statusErr := statusCmd.Output()
+	if statusErr != nil {
+		return 0, fmt.Errorf("git status: %w", statusErr)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		return 0, errWorktreeDirty
+	}
+
+	mainHeadCmd := exec.Command("git", "rev-parse", "HEAD")
+	mainHeadCmd.Dir = mainRoot
+	mainHeadOut, mainHeadErr := mainHeadCmd.Output()
+	if mainHeadErr != nil {
+		return 0, fmt.Errorf("rev-parse main HEAD: %w", mainHeadErr)
+	}
+	mainSHA := strings.TrimSpace(string(mainHeadOut))
+
+	wtHeadCmd := exec.Command("git", "rev-parse", "HEAD")
+	wtHeadCmd.Dir = wtPath
+	wtHeadOut, wtHeadErr := wtHeadCmd.Output()
+	if wtHeadErr != nil {
+		return 0, fmt.Errorf("rev-parse worktree HEAD: %w", wtHeadErr)
+	}
+	wtSHA := strings.TrimSpace(string(wtHeadOut))
+	if wtSHA == mainSHA {
+		return 0, nil
+	}
+
+	mbCmd := exec.Command("git", "merge-base", wtSHA, mainSHA)
+	mbCmd.Dir = wtPath
+	mbOut, mbErr := mbCmd.Output()
+	if mbErr != nil {
+		return 0, fmt.Errorf("merge-base: %w", mbErr)
+	}
+	mergeBase := strings.TrimSpace(string(mbOut))
+	if mergeBase == mainSHA {
+		return 0, nil
+	}
+
+	cntCmd := exec.Command("git", "rev-list", "--count", mergeBase+".."+mainSHA)
+	cntCmd.Dir = wtPath
+	if cntOut, err := cntCmd.Output(); err == nil {
+		n, _ := strconv.Atoi(strings.TrimSpace(string(cntOut)))
+		newCommits = n
+	}
+
+	rbCmd := exec.Command("git", "rebase", mainSHA)
+	rbCmd.Dir = wtPath
+	rbOut, rbErr := rbCmd.CombinedOutput()
+	if rbErr != nil {
+		abort := exec.Command("git", "rebase", "--abort")
+		abort.Dir = wtPath
+		abort.Run()
+		return newCommits, fmt.Errorf("rebase conflict: %s", strings.TrimSpace(string(rbOut)))
+	}
+
+	return newCommits, nil
+}
+
+// announceWorktreeRebase prints the rebase outcome in the same shape used by
+// auto-mode wave output. Centralised so both resume call sites stay in sync.
+func announceWorktreeRebase(id string, newCommits int, err error) {
+	if err != nil {
+		if errors.Is(err, errWorktreeDirty) {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ Skipped rebase of %s — worktree has uncommitted changes\033[0m\n", id)
+		} else {
+			fmt.Fprintf(os.Stderr, "  \033[33m⚠ Rebase of %s aborted: %s — worktree left on its previous base\033[0m\n", id, err)
+		}
+		return
+	}
+	if newCommits > 0 {
+		plural := ""
+		if newCommits != 1 {
+			plural = "s"
+		}
+		fmt.Fprintf(os.Stderr, "  \033[36m↻ Rebased %s worktree onto main (%d new commit%s)\033[0m\n", id, newCommits, plural)
+	}
 }
 
 // removeWorktree removes a git worktree and its directory.

@@ -8,6 +8,7 @@
 - Each worktree has isolated `.belmont/` state (a copy, not a symlink). The agent commits state changes to `belmont/auto/<feature>/<milestone>` as part of its work.
 - Worktree-local files that master never holds (`STEERING.md`, and potentially others added later) are preserved across the resume-time wipe-and-recopy.
 - Merges happen in milestone-ID order, sequentially, with pre-merge overlap reporting.
+- **`MaxParallel <= 1` interleaves merges with execution.** When the user passes `--max-parallel=1`, both `runWaveParallel` (single-feature) and `runAutoMultiFeature` (multi-feature) take a serial branch: run unit N → merge unit N → run unit N+1. The merge happens inline before the next worktree is created so subsequent units fork from the post-merge tip. Stale-worktree resolution and rebase-on-resume are deferred to just-in-time in this branch. With `MaxParallel > 1` the parallel-then-post-wave-merge sequence above remains the only path. This is **not** the previously rejected master-tree shortcut — every unit still runs in its own worktree, only the merge timing changes.
 - Live state is observable from outside the run via `belmont status --feature <slug>`, which per-milestone overlays each worktree's view of its own milestone on top of master's baseline.
 
 ## How it's enforced
@@ -37,6 +38,7 @@ In `cmd/belmont/main.go`:
 ## Don't re-do
 
 - **Master-tree shortcut for single-milestone waves.** Was in place as an optimization to save ~5–10s of worktree setup. Cost: asymmetric behavior per wave, scope-guard amends on the wrong branch, confused `belmont steer` targeting. Rejected in the same session it was diagnosed; do not bring it back even under a flag. If worktree setup ever becomes a real bottleneck, make setup faster.
+- **Distinguish from `MaxParallel <= 1` serial inline-merge.** That path is allowed and intentional: every unit still runs in its own worktree, only the merge happens before the next unit starts so cross-unit implicit deps resolve at the fork point. No master-tree elision, no scope-guard rewrite, no steering-target confusion.
 - **Symlinked `.belmont/` state across worktrees.** Was the pre-2025 default. Resulted in state races: worktree A's agent could read PROGRESS.md mid-flip while worktree B was writing. The copy-based isolation solved it; the merge-time reconciliation via `mergeWorktreeBranch` + reconciliation-agent handles the inevitable conflicts semantically.
 - **Auto-serialize-on-directory-overlap** (detect that two milestones touch the same files at plan time and force serial execution). Heuristic is unreliable before either milestone runs. Over-serializes conservatively, kills the point of parallel mode. Scope guard + merge overlap report between them give the same coverage at run time without the heuristic.
 - **Caching or daemonizing `belmont status`** so it doesn't re-read every worktree's PROGRESS.md per call. Current cost is ~N file reads per invocation; N is usually <10; infrastructure cost of a daemon is far too high for a CLI that runs on demand.
@@ -59,3 +61,4 @@ Unit coverage: `cmd/belmont/scope_guard_test.go` → `TestOverlayLiveMilestones_
 - 2026-04-22 — added live-status overlay via `overlayLiveMilestones`, `worktreeTracker.feature`/`mode` fields, `loadAutoWorktreeStateByMilestone`.
 - 2026-04-22 — added `reportMergeOverlap` pre-merge visibility.
 - 2026-04-22 — migrated from LEARNINGS.md to knowledge/ tree.
+- 2026-05-12 — added `MaxParallel <= 1` inline-merge semantic (every unit still goes through a worktree; only the merge interleaves). Paired with `resume-rebase.md`. See [`auto-mode/multi-feature-scheduling.md`](multi-feature-scheduling.md) for the multi-feature-mode equivalent.

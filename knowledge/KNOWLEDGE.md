@@ -20,7 +20,8 @@ Curated operational knowledge for working on Belmont itself. Scan the table belo
 | [auto-mode/parallel-wave-orchestration.md](auto-mode/parallel-wave-orchestration.md) | change `runWaveParallel`, `runMilestoneInWorktree`, `copyBelmontStateToWorktree`, `gracefulShutdown`, merge sequencing, or the live-status overlay |
 | [auto-mode/verify-evidence.md](auto-mode/verify-evidence.md) | change `runEvidenceCheck`, `taskHasCommit`, how verify marks `[v]`, or design a new evidence contract |
 | [auto-mode/clean-tree-preflight.md](auto-mode/clean-tree-preflight.md) | touch `requireCleanWorkingTree`, `commitBelmontUpdate`, `belmontManagedPaths`, the `--allow-dirty` / `--no-commit` flags, or weaken auto's startup contract that the working tree must be clean |
-| [auto-mode/multi-feature-scheduling.md](auto-mode/multi-feature-scheduling.md) | change `computeFeatureWaves`, `filterWaveByBlocked`, `runAutoMultiFeature`'s wave/skip plumbing, the pause→dependents cascade, `scanReadiness`, or `resolveFeatureSlugs` ordering |
+| [auto-mode/multi-feature-scheduling.md](auto-mode/multi-feature-scheduling.md) | change `computeFeatureWaves`, `filterWaveByBlocked`, `runAutoMultiFeature`'s wave/skip plumbing, the pause→dependents cascade, `scanReadiness`, `resolveFeatureSlugs` ordering, or the `MaxParallel <= 1` serial-merge branch |
+| [auto-mode/resume-rebase.md](auto-mode/resume-rebase.md) | touch `rebaseWorktreeOnMain`, `announceWorktreeRebase`, `handleStaleWorktree`'s `[r]`-resume path, or the dirty-tree / conflict policy for picking up sibling merges on resume |
 
 ### Cross-cutting (multiple domains)
 

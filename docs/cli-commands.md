@@ -20,7 +20,8 @@ belmont auto --feature auth --tool pi    # Run with Pi (local LLM via ~/.belmont
 belmont auto --feature auth --from M2 --to M4  # Milestone range
 belmont auto --features auth,payments    # Run multiple features in parallel
 belmont auto --all                       # Run all pending features in parallel
-belmont auto --all --max-parallel 2      # Cap concurrent features
+belmont auto --all --max-parallel 2      # Cap concurrent features (parallel within wave, merges batched post-wave)
+belmont auto --all --max-parallel 1      # Strict serial: each feature merges before the next starts
 belmont auto --feature auth --allow-dirty # Skip clean-working-tree preflight (not recommended)
 belmont reverify --feature my-feature     # Re-verify all completed milestones
 belmont reverify --feature my-feature --from M3 --to M10  # Re-verify specific range
@@ -56,6 +57,15 @@ belmont validate --format json              # Machine-readable output
 ```
 
 Exit code `1` on violations. `belmont auto` runs this lint at startup; interactive runs get a `[y/N]` override prompt, non-interactive runs abort. Restructure via `/belmont:tech-plan` before rerunning.
+
+## `--max-parallel` semantics
+
+`belmont auto`'s `--max-parallel` flag controls how many units (features in multi-feature mode, milestones in single-feature parallel-milestones mode) run concurrently within a wave.
+
+- `--max-parallel=1` (strict serial): each unit runs to completion and **merges to main inline** before the next unit's worktree is created. Subsequent units fork from a main that already includes prior merges, so implicit cross-unit task deps — e.g. one feature's home screen calling another feature's new route — resolve at the fork point rather than producing `[!]` blockers. Each unit still runs in its own worktree (no master-tree shortcut).
+- `--max-parallel >= 2` (default 5): wave units run in parallel up to the cap; merges are collected and applied **post-wave** in dependency / milestone-ID order with overlap reporting. Use when units in the same wave are truly independent.
+
+If a paused worktree is resumed in a later invocation, Belmont automatically `git rebase`s it onto current main so any sibling merges since the pause are picked up. Conflicts abort the rebase and warn — they are never auto-resolved. See [`knowledge/auto-mode/resume-rebase.md`](../knowledge/auto-mode/resume-rebase.md).
 
 ## Clean-working-tree preflight
 
