@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.10.7
+
+**Released:** 2026-05-12
+
+### Changes since v0.10.6
+
+- Inline-merge serial wave + rebase paused worktrees on resume
+
+
+
 ## v0.10.6
 
 **Released:** 2026-05-11
