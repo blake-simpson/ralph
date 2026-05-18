@@ -69,7 +69,7 @@ Review each changed file for:
 - **Type Safety** - Is TypeScript used effectively?
 
 #### Pattern Adherence
-- **Project Conventions** - Does it follow CLAUDE.md rules?
+- **Project Conventions** - Does it follow rules in `CLAUDE.md`, `GEMINI.md`, or `AGENTS.md`?
 - **Component Patterns** - Uses correct component structure?
 - **State Management** - Follows established patterns?
 - **API Patterns** - Uses correct data access patterns?
@@ -161,7 +161,7 @@ Provide a detailed review report:
 ## Pattern Adherence
 | Convention          | Status   | Notes     |
 |---------------------|----------|-----------|
-| CLAUDE.md rules     | [status] | [details] |
+| Convention Rules    | [status] | [details] |
 | Naming conventions  | [status] | [details] |
 | Import style        | [status] | [details] |
 | Component structure | [status] | [details] |
